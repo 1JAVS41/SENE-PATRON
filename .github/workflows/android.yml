@@ -22,10 +22,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Build debug APK
-        run: gradle assembleDebug
-      - name: Upload APK
+      - name: Build APK
+        run: |
+          gradle assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/SENE-PATRON.apk
+      - name: Upload SENE PATRÓN APK
         uses: actions/upload-artifact@v4
         with:
-          name: SENE-PATRON-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: SENE-PATRON
+          path: app/build/outputs/apk/debug/SENE-PATRON.apk
