@@ -98,7 +98,7 @@ class MainActivity : Activity() {
 
         val status = card()
         status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
-        status.addView(text("La interfaz está lista para revisión. La conexión con Firebase aún está pendiente; por ahora no se autorizan equipos ni se modifican datos reales.", 12, muted))
+        status.addView(text("La operación administrativa de SENE VENTAS permanece en el teléfono. Firebase se utilizará únicamente para solicitudes de corrección y su autorización individual por el patrón.", 12, muted))
         root.addView(status)
         gap(root, 14)
 
@@ -193,7 +193,7 @@ class MainActivity : Activity() {
         gap(root, 12)
         val sections = listOf(
             Triple("Horarios y asistencias", "Turnos, entradas, salidas y registros de asistencia", "schedule"),
-            Triple("Solicitudes operativas", "Correcciones de ventas y solicitudes que requieren tu autorización", "requests"),
+            Triple("Autorizaciones de corrección", "Revisa solicitudes puntuales de corrección de ventas", "requests"),
             Triple("Seguridad del dispositivo", "Estado de seguridad, bloqueo y sustitución del teléfono", "security"),
             Triple("Vinculación del equipo", "Identidad, estado de vínculo y datos del dispositivo", "link")
         )
@@ -225,7 +225,7 @@ class MainActivity : Activity() {
         addView(horizontal("NOTIFICACIONES · EQUIPO $number", "●", ink, red))
         gap(this, 4)
         addView(text("Aquí aparecerán exclusivamente los avisos, solicitudes y cambios de este equipo.", 12, muted))
-        addView(text("Pendientes: se mostrarán al conectar Firebase", 11, red, true))
+        addView(text("Las alertas reales aparecerán al conectar Firebase; sin consultas periódicas", 11, red, true))
     }
 
     private fun detailScreen(root: LinearLayout, page: String) {
@@ -234,7 +234,7 @@ class MainActivity : Activity() {
         val teamHome = if (teamNumber == "1") "team1" else "team2"
         val title = when (section) {
             "schedule" -> "Horarios y asistencias"
-            "requests" -> "Solicitudes operativas"
+            "requests" -> "Autorizaciones de corrección"
             "security" -> "Seguridad del dispositivo"
             else -> "Vinculación del equipo"
         }
@@ -244,7 +244,7 @@ class MainActivity : Activity() {
         intro.addView(text(title, 21, ink, true))
         intro.addView(text(when (section) {
             "schedule" -> "Consulta los horarios, entradas, salidas y asistencias registrados por el Equipo $teamNumber."
-            "requests" -> "Revisa y autoriza únicamente las solicitudes enviadas desde el Equipo $teamNumber."
+            "requests" -> "Revisa solicitudes de corrección de ventas del Equipo $teamNumber. Aceptar autoriza una sola corrección; rechazar la cierra."
             "security" -> "Consulta la seguridad y los eventos del dispositivo asignado al Equipo $teamNumber."
             else -> "Consulta el vínculo y la identidad del dispositivo correspondiente al Equipo $teamNumber."
         }, 14, muted))
@@ -255,8 +255,8 @@ class MainActivity : Activity() {
         when (section) {
             "schedule" -> root.addView(info("REGISTROS · EQUIPO $teamNumber",
                 "Los horarios y asistencias de este equipo aparecerán aquí, separados por trabajador y fecha."))
-            "requests" -> root.addView(info("BANDEJA · EQUIPO $teamNumber",
-                "Aquí se mostrarán las solicitudes pendientes y su historial. Las autorizaciones deberán ser individuales y de un solo uso cuando corresponda."))
+            "requests" -> root.addView(info("BANDEJA DE CORRECCIONES · EQUIPO $teamNumber",
+                "Solo aparecerán solicitudes explícitas del trabajador. Cada solicitud identifica una venta concreta. El patrón puede aceptar o rechazar; una aceptación genera permiso de un solo uso para esa venta."))
             "security" -> {
                 root.addView(info("ESTADO DEL DISPOSITIVO · EQUIPO $teamNumber",
                     "Los avisos de seguridad, bloqueos e incidencias se mostrarán solo para este equipo."))
@@ -268,8 +268,8 @@ class MainActivity : Activity() {
                 "Aquí se mostrará la identidad local, el estado de vinculación y la fecha de registro de este dispositivo."))
         }
         gap(root, 11)
-        root.addView(info("ESTADO DE CONEXIÓN",
-            "La pantalla ya separa la información por equipo. Las notificaciones y los datos reales se activarán al conectar Firebase; esta versión no inventa avisos ni modifica registros."))
+        root.addView(info("FUNCIONAMIENTO LOCAL Y FIREBASE",
+            "SENE VENTAS conserva localmente ventas, inventario, caja, gastos y administración; los reportes se envían por WhatsApp. Firebase se reserva para solicitudes de corrección y la respuesta del patrón. No se sincronizan ventas ni inventarios."))
         gap(root, 12)
         root.addView(primaryButton("VOLVER A EQUIPO $teamNumber") { currentPage = teamHome; render() })
     }
@@ -437,8 +437,8 @@ private class FastMarqueeTextView(context: android.content.Context) : View(conte
         if (width <= 0 || textWidth <= 0f || !isAttachedToWindow) return
         val distance = textWidth + gap
         animator = ValueAnimator.ofFloat(0f, distance).apply {
-            duration = ((distance / (155f * resources.displayMetrics.density)) * 1000f)
-                .toLong().coerceAtLeast(2200L)
+            duration = ((distance / (260f * resources.displayMetrics.density)) * 1000f)
+                .toLong().coerceAtLeast(1400L)
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener { offset = it.animatedValue as Float; invalidate() }
