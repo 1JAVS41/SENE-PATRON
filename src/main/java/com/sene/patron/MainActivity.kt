@@ -51,11 +51,12 @@ class MainActivity : Activity() {
             isFillViewport = true
             isSmoothScrollingEnabled = true
             isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_ALWAYS
             clipToPadding = false
         }
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(32))
+            setPadding(dp(18), dp(12), dp(18), dp(88))
         }
         scroll.addView(page)
         when (currentPage) {
@@ -64,6 +65,9 @@ class MainActivity : Activity() {
             else -> detailScreen(page, currentPage)
         }
         setContentView(scroll)
+        // Cada navegación comienza arriba y deja margen inferior suficiente
+        // para poder deslizar el contenido hacia arriba en pantallas pequeñas.
+        scroll.post { scroll.scrollTo(0, 0) }
     }
 
     private fun homeScreen(root: LinearLayout) {

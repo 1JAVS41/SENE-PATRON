@@ -2,20 +2,17 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#080808"/>
+            <solid android:color="#09090B"/>
         </shape>
     </item>
     <item android:gravity="center">
         <shape android:shape="oval">
-            <size android:width="78dp" android:height="78dp"/>
-            <gradient android:startColor="#FF3548" android:centerColor="#D7192D" android:endColor="#850D1B" android:angle="0"/>
+            <size android:width="88dp" android:height="72dp"/>
+            <gradient android:startColor="#FF5262" android:centerColor="#D7192D" android:endColor="#780D20" android:angle="0"/>
+            <stroke android:width="1dp" android:color="#FFFFAAB2"/>
         </shape>
     </item>
     <item android:gravity="center">
-        <shape android:shape="rectangle">
-            <size android:width="28dp" android:height="36dp"/>
-            <corners android:radius="5dp"/>
-            <solid android:color="#FFFFFF"/>
-        </shape>
+        <drawable>@drawable/ic_patron_chip</drawable>
     </item>
 </layer-list>
