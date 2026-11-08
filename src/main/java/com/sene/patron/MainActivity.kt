@@ -111,8 +111,8 @@ class MainActivity : Activity() {
         ).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(3), dp(8), dp(3)) })
         gap(root, 14)
 
-        // Aviso luminoso: texto animado más rápido y un destello blanco que recorre
-        // continuamente los cuatro lados del contorno.
+        // Aviso luminoso: desplazamiento moderado y destello blanco visible
+        // recorriendo continuamente los cuatro lados del contorno.
         val warningFrame = FrameLayout(this).apply {
             setPadding(dp(2), dp(2), dp(2), dp(2))
         }
@@ -137,8 +137,30 @@ class MainActivity : Activity() {
         warningFrame.addView(BorderRunnerView(this), FrameLayout.LayoutParams(-1, -1))
         root.addView(warningFrame, LinearLayout.LayoutParams(-1, -2))
         gap(root, 16)
-        root.addView(text("Toca el logotipo para abrir el menú de administración.", 12, muted)
-            .apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(8), dp(8), dp(8)) })
+        val instruction = FrameLayout(this).apply {
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        val instructionShadow = text(
+            "TOCA EL LOGOTIPO PARA ABRIR EL MENÚ DE ADMINISTRACIÓN",
+            12, Color.rgb(5, 35, 105), true
+        ).apply {
+            gravity = Gravity.CENTER
+            letterSpacing = .035f
+            translationX = dp(1).toFloat()
+            translationY = dp(2).toFloat()
+            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), Color.rgb(0, 28, 85))
+        }
+        val instructionFace = text(
+            "TOCA EL LOGOTIPO PARA ABRIR EL MENÚ DE ADMINISTRACIÓN",
+            12, Color.rgb(35, 139, 255), true
+        ).apply {
+            gravity = Gravity.CENTER
+            letterSpacing = .035f
+            setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.rgb(125, 195, 255))
+        }
+        instruction.addView(instructionShadow, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
+        instruction.addView(instructionFace, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
+        root.addView(instruction, LinearLayout.LayoutParams(-1, -2))
         gap(root, 10)
         root.addView(text("SENE PATRÓN  ·  Versión 0.5.0", 11, muted)
             .apply { gravity = Gravity.CENTER })
@@ -437,8 +459,8 @@ private class FastMarqueeTextView(context: android.content.Context) : View(conte
         if (width <= 0 || textWidth <= 0f || !isAttachedToWindow) return
         val distance = textWidth + gap
         animator = ValueAnimator.ofFloat(0f, distance).apply {
-            duration = ((distance / (260f * resources.displayMetrics.density)) * 1000f)
-                .toLong().coerceAtLeast(1400L)
+            duration = ((distance / (190f * resources.displayMetrics.density)) * 1000f)
+                .toLong().coerceAtLeast(1800L)
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener { offset = it.animatedValue as Float; invalidate() }
@@ -463,12 +485,18 @@ private class FastMarqueeTextView(context: android.content.Context) : View(conte
 /** Destello blanco que recorre el perímetro redondeado del rectángulo. */
 private class BorderRunnerView(context: android.content.Context) : View(context) {
     private val density = resources.displayMetrics.density
+    private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.4f * density
+        color = Color.argb(150, 255, 255, 255)
+    }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2.2f * density
+        strokeWidth = 3.6f * density
         color = Color.WHITE
         strokeCap = Paint.Cap.ROUND
-        setShadowLayer(5f * density, 0f, 0f, Color.WHITE)
+        strokeJoin = Paint.Join.ROUND
+        setShadowLayer(8f * density, 0f, 0f, Color.WHITE)
     }
     private val border = Path()
     private val measure = PathMeasure()
@@ -486,10 +514,13 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // Una línea tenue mantiene visible el recorrido completo; el segmento
+        // blanco brillante es el destello móvil.
+        canvas.drawPath(border, basePaint)
         val length = measure.length
         if (length <= 0f) return
         val start = progress * length
-        val segment = length * .22f
+        val segment = length * .16f
         val end = start + segment
         val highlight = Path()
         if (end <= length) {
@@ -503,6 +534,7 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         animator?.cancel()
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 2600L
