@@ -16,6 +16,25 @@ jobs:
       - name: Descargar código
         uses: actions/checkout@v4
 
+      - name: Generar icono desde el logotipo rojo del encabezado
+        run: |
+          python3 - <<'PY'
+          from PIL import Image
+          src = Image.open('src/main/res/drawable-nodpi/logo_sene_pv.png').convert('RGBA')
+          px = src.load()
+          for y in range(src.height):
+              for x in range(src.width):
+                  r, g, b, a = px[x, y]
+                  if a and max(r, g, b) - min(r, g, b) > 28:
+                      lum = int(0.299*r + 0.587*g + 0.114*b)
+                      rv = max(0, min(255, int(82 + lum*0.66)))
+                      px[x, y] = (rv, 8, 22, a)
+          pxout = Image.new('RGBA', (512, 512), (8, 8, 8, 255))
+          src.thumbnail((470, 470), Image.Resampling.LANCZOS)
+          pxout.alpha_composite(src, ((512-src.width)//2, (512-src.height)//2))
+          pxout.save('src/main/res/drawable-nodpi/ic_launcher_patron.png')
+          PY
+
       - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
