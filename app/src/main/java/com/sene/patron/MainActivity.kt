@@ -7,252 +7,237 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
 class MainActivity : Activity() {
-    private val navy = Color.rgb(13, 27, 48)
-    private val panel = Color.rgb(24, 43, 68)
-    private val muted = Color.rgb(166, 183, 203)
+    private val bg = Color.rgb(244, 245, 250)
+    private val ink = Color.rgb(23, 33, 61)
+    private val muted = Color.rgb(111, 121, 145)
+    private val blue = Color.rgb(38, 59, 112)
+    private val green = Color.rgb(22, 139, 69)
     private val white = Color.WHITE
-    private val teal = Color.rgb(49, 190, 173)
     private var currentPage = "home"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = navy
-        window.navigationBarColor = navy
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        if (android.os.Build.VERSION.SDK_INT >= 23) {
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
         render()
     }
 
     override fun onBackPressed() {
-        if (currentPage != "home") {
-            currentPage = "home"
-            render()
-        } else {
-            super.onBackPressed()
-        }
+        if (currentPage != "home") { currentPage = "home"; render() } else super.onBackPressed()
     }
 
     private fun render() {
-        val content = if (currentPage == "home") homeScreen() else detailScreen(currentPage)
-        setContentView(scrollRoot ?: content)
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(bg)
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+        }
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(30))
+        }
+        scroll.addView(page)
+        if (currentPage == "home") homeScreen(page) else detailScreen(page, currentPage)
+        setContentView(scroll)
     }
 
-    private fun homeScreen(): View {
-        val root = pageRoot()
+    private fun homeScreen(root: LinearLayout) {
         header(root, "Panel de administración")
         val welcome = card()
-        welcome.addView(label("BIENVENIDO", 11, teal, true))
-        welcome.addView(label("Tu negocio, bajo control", 21, white, true))
-        welcome.addView(label("Administra tus equipos y solicitudes desde un solo lugar.", 14, muted, false))
+        welcome.addView(kicker("PANEL PRINCIPAL"))
+        welcome.addView(text("Tu negocio, bajo control.", 22, ink, true))
+        welcome.addView(text("Administra tu licencia y los dos equipos SENE VENTAS desde un solo lugar.", 14, muted))
         root.addView(welcome)
-        root.addView(space(18))
-
-        root.addView(sectionTitle("LICENCIA Y EQUIPOS"))
+        gap(root, 18)
+        root.addView(section("LICENCIA SENE · 3 ESPACIOS"))
         val license = card()
-        license.addView(row("Espacios de la licencia", "0 de 3 vinculados", white, teal))
-        license.addView(space(12))
-        license.addView(slot("SENE PATRÓN", "Dispositivo principal", "Este equipo"))
-        license.addView(space(10))
-        license.addView(slot("SENE VENTAS · EQUIPO 1", "Primer dispositivo de ventas", "Pendiente"))
-        license.addView(space(10))
-        license.addView(slot("SENE VENTAS · EQUIPO 2", "Segundo dispositivo de ventas", "Pendiente"))
+        license.addView(horizontal("Estado de la licencia", "Configuración inicial", ink, green))
+        gap(license, 12)
+        license.addView(slot("SENE PATRÓN", "Dispositivo principal · Administrador", "ESTE EQUIPO", true))
+        gap(license, 9)
+        license.addView(slot("SENE VENTAS · EQUIPO 1", "Primer dispositivo de trabajador", "DISPONIBLE", false))
+        gap(license, 9)
+        license.addView(slot("SENE VENTAS · EQUIPO 2", "Segundo dispositivo de trabajador", "DISPONIBLE", false))
         root.addView(license)
-        root.addView(space(20))
-
-        root.addView(sectionTitle("ADMINISTRACIÓN"))
-        val admin = card()
-        menuItem(admin, "Vinculación de equipos", "Revisar solicitudes para autorizar o rechazar dispositivos", "devices")
-        admin.addView(separator())
-        menuItem(admin, "Solicitudes operativas", "Consultar solicitudes que requieren tu autorización", "requests")
-        admin.addView(separator())
-        menuItem(admin, "Horarios y asistencia", "Administrar consultas de horarios de tus equipos", "schedule")
-        admin.addView(separator())
-        menuItem(admin, "Seguridad de dispositivos", "Bloqueo y sustitución de equipos autorizados", "security")
-        root.addView(admin)
-        root.addView(space(20))
-
-        val note = card()
-        note.addView(label("ESTADO DE CONEXIÓN", 11, muted, true))
-        note.addView(label("Configuración inicial", 16, white, true))
-        note.addView(label("Firebase aún no está conectado. Esta versión no autoriza equipos ni modifica licencias.", 13, muted, false))
-        root.addView(note)
-        root.addView(space(18))
-        root.addView(label("SENE PATRÓN · Versión 0.2.0", 11, muted, false).apply { gravity = Gravity.CENTER })
-        return root
+        gap(root, 20)
+        root.addView(section("CENTRO DE ADMINISTRACIÓN"))
+        val actions = listOf(
+            Triple("Vinculación de equipos", "Autoriza los dos espacios SENE VENTAS de tu licencia", "devices"),
+            Triple("Solicitudes operativas", "Revisa las solicitudes que requieren tu aprobación", "requests"),
+            Triple("Horarios y asistencia", "Consulta la actividad y los horarios de tus equipos", "schedule"),
+            Triple("Seguridad de dispositivos", "Gestiona bloqueos y sustituciones autorizadas", "security")
+        )
+        actions.forEachIndexed { i, item ->
+            root.addView(menuCard(item.first, item.second, item.third))
+            if (i != actions.lastIndex) gap(root, 10)
+        }
+        gap(root, 18)
+        val status = card()
+        status.addView(kicker("ESTADO DEL SISTEMA"))
+        status.addView(text("Interfaz de administración", 16, ink, true))
+        status.addView(text("Firebase aún no está conectado. Las autorizaciones y cambios reales se habilitarán al integrar el servidor.", 13, muted))
+        root.addView(status)
+        gap(root, 15)
+        root.addView(text("SENE PATRÓN  ·  Versión 0.3.0", 11, muted).apply { gravity = Gravity.CENTER })
     }
 
-    private fun detailScreen(page: String): View {
-        val root = pageRoot()
-        val title = when (page) {
+    private fun detailScreen(root: LinearLayout, page: String) {
+        val title = when(page) {
             "devices" -> "Vinculación de equipos"
             "requests" -> "Solicitudes operativas"
             "schedule" -> "Horarios y asistencia"
-            "security" -> "Seguridad de dispositivos"
-            else -> "Administración"
+            else -> "Seguridad de dispositivos"
         }
         header(root, title)
         val intro = card()
-        intro.addView(label(when (page) {
-            "devices" -> "DOS ESPACIOS SENE VENTAS"
-            "requests" -> "CENTRO DE AUTORIZACIONES"
-            "schedule" -> "CONTROL DE EQUIPOS"
-            "security" -> "PROTECCIÓN DE LA LICENCIA"
-            else -> "SENE PATRÓN"
-        }, 11, teal, true))
-        intro.addView(label(when (page) {
-            "devices" -> "Equipo 1 y Equipo 2"
-            "requests" -> "Solicitudes pendientes"
-            "schedule" -> "Horarios y asistencia"
-            "security" -> "Bloqueo y sustitución"
-            else -> "Administración"
-        }, 20, white, true))
-        intro.addView(label(when (page) {
-            "devices" -> "Cada espacio requiere una solicitud de vinculación y autorización válida del propietario."
-            "requests" -> "Aquí aparecerán las solicitudes que requieran una decisión del propietario."
-            "schedule" -> "Aquí se consultarán horarios y registros disponibles de los equipos autorizados."
-            "security" -> "La pérdida o sustitución de un teléfono deberá validarse con autorización segura."
-            else -> "Funciones administrativas de la licencia."
-        }, 14, muted, false))
+        intro.addView(kicker("ADMINISTRACIÓN SENE"))
+        intro.addView(text(title, 21, ink, true))
+        intro.addView(text(when(page) {
+            "devices" -> "Tu licencia contempla un dispositivo SENE PATRÓN y exactamente dos espacios SENE VENTAS."
+            "requests" -> "Centro donde el titular revisará y resolverá solicitudes de sus equipos."
+            "schedule" -> "Consulta administrativa de horarios y asistencia de los equipos autorizados."
+            else -> "Protección de los dispositivos vinculados a la licencia y control de sustituciones."
+        }, 14, muted))
         root.addView(intro)
-        root.addView(space(16))
-
-        when (page) {
+        gap(root, 14)
+        when(page) {
             "devices" -> {
-                root.addView(sectionTitle("ESTADO DE LOS ESPACIOS"))
-                root.addView(infoCard("SENE VENTAS · EQUIPO 1", "Sin dispositivo vinculado", "La solicitud de alta aparecerá aquí cuando SENE VENTAS la envíe."))
-                root.addView(space(10))
-                root.addView(infoCard("SENE VENTAS · EQUIPO 2", "Sin dispositivo vinculado", "Este espacio permanece reservado para el segundo equipo."))
+                root.addView(slot("SENE VENTAS · EQUIPO 1", "Primer espacio de trabajador", "DISPONIBLE", false))
+                gap(root, 10)
+                root.addView(slot("SENE VENTAS · EQUIPO 2", "Segundo espacio de trabajador", "DISPONIBLE", false))
+                gap(root, 10)
+                root.addView(info("REGLA DE LICENCIA", "Máximo tres dispositivos: un SENE PATRÓN y dos SENE VENTAS. Ningún equipo se autoriza por sí mismo."))
             }
-            "requests" -> root.addView(infoCard("BANDEJA DE SOLICITUDES", "Sin conexión al servidor", "No se pueden consultar solicitudes reales hasta integrar autenticación y backend."))
-            "schedule" -> root.addView(infoCard("CONSULTA DE HORARIOS", "Aún no hay datos", "Los horarios no se inventan ni se sincronizan hasta definir el mecanismo autorizado con SENE VENTAS."))
+            "requests" -> root.addView(info("BANDEJA DE SOLICITUDES", "Aquí aparecerán las solicitudes pendientes de autorización cuando se conecte el servicio."))
+            "schedule" -> root.addView(info("HORARIOS Y ASISTENCIA", "Los datos se mostrarán cuando exista una conexión autorizada con los equipos SENE VENTAS."))
             "security" -> {
-                root.addView(infoCard("BLOQUEO DE EQUIPO", "Acción todavía deshabilitada", "El bloqueo real debe ejecutarse en el servidor y dejar registro de auditoría."))
-                root.addView(space(10))
-                root.addView(infoCard("SUSTITUCIÓN DE TELÉFONO", "Requiere autorización", "Un teléfono nuevo no debe ocupar un espacio adicional ni reemplazar al anterior por sí solo."))
+                root.addView(info("BLOQUEO DE DISPOSITIVOS", "El bloqueo real deberá validarse en el servidor y conservar un registro de auditoría."))
+                gap(root, 10)
+                root.addView(info("SUSTITUCIÓN DE TELÉFONO", "La sustitución requiere autorización del titular de la plataforma y conserva el espacio de licencia."))
             }
         }
-        root.addView(space(18))
-        val warning = card()
-        warning.addView(label("MODO DE DESARROLLO", 11, teal, true))
-        warning.addView(label("Esta pantalla es navegación funcional de la interfaz. No realiza cambios en Firebase, licencias ni dispositivos.", 13, muted, false))
-        root.addView(warning)
-        root.addView(space(18))
-        root.addView(actionButton("Volver al panel principal") {
-            currentPage = "home"
-            render()
-        })
-        return root
+        gap(root, 14)
+        val note = card()
+        note.addView(kicker("MODO DE PREPARACIÓN"))
+        note.addView(text("Esta versión muestra la interfaz y navegación. Todavía no realiza cambios en Firebase ni autoriza dispositivos.", 13, muted))
+        root.addView(note)
+        gap(root, 18)
+        root.addView(primaryButton("Volver al panel principal") { currentPage = "home"; render() })
     }
-
-    private fun pageRoot(): LinearLayout {
-        val scroll = ScrollView(this).apply {
-            setBackgroundColor(navy)
-            isFillViewport = true
-        }
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(24), dp(20), dp(28))
-        }
-        scroll.addView(root)
-        // Return a scroll container while retaining the page content.
-        root.tag = scroll
-        return root.also { scrollRoot = scroll }
-    }
-
-    private var scrollRoot: ScrollView? = null
 
     private fun header(root: LinearLayout, subtitle: String) {
-        root.addView(label("SENE", 15, teal, true))
-        root.addView(label("PATRÓN", 30, white, true))
-        root.addView(label(subtitle, 14, muted, false))
-        root.addView(space(22))
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(15), dp(15), dp(15), dp(15))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(17,26,53), Color.rgb(38,59,112))).apply { cornerRadius = dp(22).toFloat() }
+            elevation = dp(4).toFloat()
+        }
+        val frame = FrameLayout(this).apply {
+            background = rounded(Color.rgb(52,74,130), 16)
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+        }
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.logo_sene_pv)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Logotipo oficial SENE"
+        }
+        frame.addView(logo, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        top.addView(frame, LinearLayout.LayoutParams(dp(62), dp(62)))
+        val brand = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), 0, 0, 0)
+        }
+        brand.addView(text("SENE / PATRÓN", 19, white, true).apply { letterSpacing = .05f })
+        brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(185,201,248), true).apply { letterSpacing = .13f })
+        top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(top, LinearLayout.LayoutParams(-1, -2))
+        val accent = View(this).apply { background = rounded(Color.rgb(255,181,71), 3) }
+        root.addView(accent, LinearLayout.LayoutParams(dp(42), dp(5)).apply { topMargin = dp(22); bottomMargin = dp(10) })
+        root.addView(text(subtitle, 26, ink, true))
+        root.addView(text("Todo bajo control.", 13, muted).apply { setPadding(0, 0, 0, dp(16)) })
     }
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(16), dp(16), dp(16), dp(16))
-        background = rounded(panel, 18)
+        setPadding(dp(16), dp(15), dp(16), dp(15))
+        background = rounded(white, 17, Color.rgb(226,230,240))
+        elevation = dp(1).toFloat()
     }
 
-    private fun infoCard(title: String, status: String, description: String): LinearLayout = card().apply {
-        addView(label(title, 12, teal, true))
-        addView(label(status, 17, white, true))
-        addView(label(description, 13, muted, false))
+    private fun info(title: String, body: String) = card().apply {
+        addView(kicker(title))
+        addView(text(body, 14, muted))
     }
 
-    private fun label(text: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
-        this.text = text
-        textSize = size.toFloat()
-        setTextColor(color)
-        if (bold) setTypeface(typeface, Typeface.BOLD)
-        setPadding(0, dp(3), 0, dp(3))
+    private fun slot(name: String, description: String, state: String, active: Boolean) = card().apply {
+        addView(horizontal(name, state, ink, if(active) green else blue))
+        addView(text(description, 12, muted))
     }
 
-    private fun sectionTitle(text: String) = label(text, 12, muted, true).apply {
-        setPadding(dp(2), 0, 0, dp(10))
+    private fun menuCard(title: String, description: String, destination: String) = card().apply {
+        isClickable = true
+        isFocusable = true
+        foreground = android.util.TypedValue().let { null }
+        addView(horizontal(title, "›", ink, green))
+        addView(text(description, 12, muted))
+        setOnClickListener { currentPage = destination; render() }
     }
 
-    private fun row(left: String, right: String, leftColor: Int, rightColor: Int) =
+    private fun horizontal(left: String, right: String, leftColor: Int, rightColor: Int) =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(label(left, 14, leftColor, true), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(label(right, 12, rightColor, true))
+            addView(text(left, 14, leftColor, true), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(text(right, 11, rightColor, true))
         }
 
-    private fun slot(name: String, description: String, state: String) =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(9), dp(12), dp(9))
-            background = rounded(Color.rgb(32, 55, 82), 12)
-            addView(row(name, state, white, if (state == "Este equipo") teal else muted))
-            addView(label(description, 12, muted, false))
-        }
+    private fun section(value: String) = text(value, 12, muted, true).apply { setPadding(dp(2), 0, 0, dp(9)) }
+    private fun kicker(value: String) = text(value, 10, green, true).apply { letterSpacing = .1f; setPadding(0, 0, 0, dp(5)) }
 
-    private fun menuItem(parent: LinearLayout, title: String, description: String, destination: String) {
-        val item = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(12), 0, dp(12))
-            isClickable = true
-            isFocusable = true
-            addView(label(title, 15, white, true))
-            addView(label(description, 12, muted, false))
-            setOnClickListener {
-                currentPage = destination
-                render()
-            }
-        }
-        parent.addView(item)
+    private fun text(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
+        text = value
+        textSize = size.toFloat()
+        setTextColor(color)
+        typeface = Typeface.create(if(bold) "sans-serif" else "sans-serif", if(bold) Typeface.BOLD else Typeface.NORMAL)
+        setPadding(0, dp(3), 0, dp(3))
+        setLineSpacing(dp(2).toFloat(), 1f)
     }
 
-    private fun actionButton(text: String, action: () -> Unit) = TextView(this).apply {
-        this.text = text
+    private fun primaryButton(value: String, action: () -> Unit) = TextView(this).apply {
+        text = value
         textSize = 15f
-        setTextColor(white)
+        typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
-        setPadding(dp(16), dp(14), dp(16), dp(14))
-        background = rounded(Color.rgb(35, 126, 125), 14)
+        setTextColor(white)
+        setPadding(dp(16), dp(16), dp(16), dp(16))
+        background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.rgb(67,95,173), Color.rgb(40,61,120))).apply { cornerRadius = dp(14).toFloat() }
+        elevation = dp(3).toFloat()
         isClickable = true
         isFocusable = true
         setOnClickListener { action() }
     }
 
-    private fun separator() = View(this).apply {
-        setBackgroundColor(Color.rgb(49, 69, 91))
-        layoutParams = LinearLayout.LayoutParams(-1, dp(1))
+    private fun gap(parent: LinearLayout, height: Int) {
+        parent.addView(View(this), LinearLayout.LayoutParams(1, dp(height)))
     }
 
-    private fun space(height: Int) = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(1, dp(height))
-    }
-
-    private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
+    private fun rounded(color: Int, radius: Int, stroke: Int = 0) = GradientDrawable().apply {
         setColor(color)
         cornerRadius = dp(radius).toFloat()
+        if (stroke != 0) setStroke(dp(1), stroke)
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
