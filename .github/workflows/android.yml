@@ -52,12 +52,12 @@ jobs:
         run: gradle assembleDebug
 
       - name: Preparar nombre comercial del APK
-        run: cp build/outputs/apk/debug/*.apk build/outputs/apk/debug/SENE-PATRON.apk
+        run: cp build/outputs/apk/debug/*.apk "build/outputs/apk/debug/SENE PATRON-online.apk"
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: SENE-PATRON
-          path: build/outputs/apk/debug/SENE-PATRON.apk
+          name: SENE PATRON-online
+          path: build/outputs/apk/debug/SENE PATRON-online.apk
           if-no-files-found: error
           retention-days: 14
