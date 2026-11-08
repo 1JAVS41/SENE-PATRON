@@ -9,6 +9,8 @@ import android.graphics.Path
 import android.graphics.PathMeasure
 import android.graphics.RectF
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -55,8 +57,6 @@ class MainActivity : Activity() {
     }
 
     private fun render() {
-        // Cada pantalla se monta dentro de un ScrollView independiente para permitir
-        // desplazamiento vertical incluso en teléfonos pequeños o con letra ampliada.
         val scroll = ScrollView(this).apply {
             setBackgroundColor(bg)
             isFillViewport = true
@@ -77,8 +77,6 @@ class MainActivity : Activity() {
             else -> detailScreen(page, currentPage)
         }
         setContentView(scroll)
-        // Cada navegación comienza arriba y deja margen inferior suficiente
-        // para poder deslizar el contenido hacia arriba en pantallas pequeñas.
         scroll.post { scroll.scrollTo(0, 0) }
     }
 
@@ -98,11 +96,10 @@ class MainActivity : Activity() {
 
         val status = card()
         status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
-        status.addView(text("La operación administrativa de SENE VENTAS permanece en el teléfono. Firebase se utilizará únicamente para solicitudes de corrección y su autorización individual por el patrón.", 12, muted))
+        status.addView(text("La operación administrativa de SENE VENTAS permanece en el teléfono. El servidor SENE se utilizará únicamente para solicitudes de corrección y su autorización individual por el patrón.", 12, muted))
         root.addView(status)
         gap(root, 14)
 
-        // Contacto del titular: los datos se muestran solo cuando el usuario pulsa el botón.
         root.addView(primaryButton("¿NECESITAS AYUDA?") { showContactDialog() })
         gap(root, 7)
         root.addView(text(
@@ -111,10 +108,11 @@ class MainActivity : Activity() {
         ).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(3), dp(8), dp(3)) })
         gap(root, 14)
 
-        // Aviso luminoso: desplazamiento moderado y destello blanco visible
-        // recorriendo continuamente los cuatro lados del contorno.
+        // Marco de altura fija: ambos trazos ocupan el mismo rectángulo y el destello queda encima.
         val warningFrame = FrameLayout(this).apply {
-            setPadding(dp(2), dp(2), dp(2), dp(2))
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+            clipChildren = false
+            clipToPadding = false
         }
         val warningBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -133,30 +131,35 @@ class MainActivity : Activity() {
             contentDescription = message
         }
         warningBox.addView(warningText, LinearLayout.LayoutParams(-1, dp(38)))
-        warningFrame.addView(warningBox, FrameLayout.LayoutParams(-1, -2))
+        warningFrame.addView(warningBox, FrameLayout.LayoutParams(-1, -1))
         warningFrame.addView(BorderRunnerView(this), FrameLayout.LayoutParams(-1, -1))
-        root.addView(warningFrame, LinearLayout.LayoutParams(-1, -2))
+        root.addView(warningFrame, LinearLayout.LayoutParams(-1, dp(66)))
         gap(root, 16)
+
         val instruction = FrameLayout(this).apply {
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setPadding(dp(5), dp(8), dp(5), dp(8))
         }
-        val instructionShadow = text(
-            "TOCA EL LOGOTIPO PARA ABRIR EL MENÚ DE ADMINISTRACIÓN",
-            12, Color.rgb(5, 35, 105), true
-        ).apply {
+        val instructionText = "TOCA EL CARRITO DE SENE COMPRAS"
+        val instructionShadow = text(instructionText, 14, Color.rgb(3, 27, 78), true).apply {
             gravity = Gravity.CENTER
-            letterSpacing = .035f
+            letterSpacing = .045f
             translationX = dp(1).toFloat()
             translationY = dp(2).toFloat()
-            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), Color.rgb(0, 28, 85))
+            setShadowLayer(dp(2).toFloat(), 0f, dp(2).toFloat(), Color.rgb(0, 18, 58))
         }
-        val instructionFace = text(
-            "TOCA EL LOGOTIPO PARA ABRIR EL MENÚ DE ADMINISTRACIÓN",
-            12, Color.rgb(35, 139, 255), true
-        ).apply {
+        val instructionFace = text(instructionText, 14, Color.rgb(80, 170, 255), true).apply {
             gravity = Gravity.CENTER
-            letterSpacing = .035f
-            setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.rgb(125, 195, 255))
+            letterSpacing = .045f
+            setShadowLayer(dp(2).toFloat(), 0f, 0f, Color.rgb(130, 205, 255))
+            post {
+                paint.shader = LinearGradient(
+                    0f, 0f, 0f, height.toFloat().coerceAtLeast(1f),
+                    intArrayOf(Color.rgb(225, 245, 255), Color.rgb(70, 160, 245),
+                        Color.rgb(15, 75, 165), Color.rgb(175, 220, 255)),
+                    null, Shader.TileMode.CLAMP
+                )
+                invalidate()
+            }
         }
         instruction.addView(instructionShadow, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
         instruction.addView(instructionFace, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
@@ -239,15 +242,13 @@ class MainActivity : Activity() {
         setOnClickListener { currentPage = destination; render() }
     }
 
-    // Contadores preparados para enlazarse a las notificaciones reales de Firebase.
-    // Permanecen en cero mientras el servicio remoto no esté conectado.
     private fun pendingAlertCount(team: String, section: String? = null): Int = 0
 
     private fun notificationCard(number: String) = card().apply {
         addView(horizontal("NOTIFICACIONES · EQUIPO $number", "●", ink, red))
         gap(this, 4)
         addView(text("Aquí aparecerán exclusivamente los avisos, solicitudes y cambios de este equipo.", 12, muted))
-        addView(text("Las alertas reales aparecerán al conectar Firebase; sin consultas periódicas", 11, red, true))
+        addView(text("Las alertas reales aparecerán al conectar el servidor SENE; sin consultas periódicas", 11, red, true))
     }
 
     private fun detailScreen(root: LinearLayout, page: String) {
@@ -290,8 +291,8 @@ class MainActivity : Activity() {
                 "Aquí se mostrará la identidad local, el estado de vinculación y la fecha de registro de este dispositivo."))
         }
         gap(root, 11)
-        root.addView(info("FUNCIONAMIENTO LOCAL Y FIREBASE",
-            "SENE VENTAS conserva localmente ventas, inventario, caja, gastos y administración; los reportes se envían por WhatsApp. Firebase se reserva para solicitudes de corrección y la respuesta del patrón. No se sincronizan ventas ni inventarios."))
+        root.addView(info("FUNCIONAMIENTO LOCAL Y SERVIDOR SENE",
+            "SENE VENTAS conserva localmente ventas, inventario, caja, gastos y administración; los reportes se envían por WhatsApp. El servidor SENE se reserva para solicitudes de corrección y la respuesta del patrón. No se sincronizan ventas ni inventarios."))
         gap(root, 12)
         root.addView(primaryButton("VOLVER A EQUIPO $teamNumber") { currentPage = teamHome; render() })
     }
@@ -339,7 +340,6 @@ class MainActivity : Activity() {
         root.addView(text("Todo bajo control.", 13, muted).apply { setPadding(0, 0, 0, dp(13)) })
     }
 
-    // Conserva el diseño original del logotipo y transforma sus colores azul/verde a rojo.
     private fun redLogo(): Bitmap {
         val source = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.logo_sene_pv)
         val result = source.copy(Bitmap.Config.ARGB_8888, true)
@@ -434,7 +434,6 @@ class MainActivity : Activity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
 
-/** Texto continuo de derecha a izquierda con velocidad controlada. */
 private class FastMarqueeTextView(context: android.content.Context) : View(context) {
     var message: String = ""
         set(value) { field = value; invalidate(); restart() }
@@ -459,8 +458,8 @@ private class FastMarqueeTextView(context: android.content.Context) : View(conte
         if (width <= 0 || textWidth <= 0f || !isAttachedToWindow) return
         val distance = textWidth + gap
         animator = ValueAnimator.ofFloat(0f, distance).apply {
-            duration = ((distance / (190f * resources.displayMetrics.density)) * 1000f)
-                .toLong().coerceAtLeast(1800L)
+            duration = ((distance / (150f * resources.displayMetrics.density)) * 1000f)
+                .toLong().coerceAtLeast(2200L)
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener { offset = it.animatedValue as Float; invalidate() }
@@ -482,21 +481,27 @@ private class FastMarqueeTextView(context: android.content.Context) : View(conte
     override fun onDetachedFromWindow() { animator?.cancel(); animator = null; super.onDetachedFromWindow() }
 }
 
-/** Destello blanco que recorre el perímetro redondeado del rectángulo. */
 private class BorderRunnerView(context: android.content.Context) : View(context) {
     private val density = resources.displayMetrics.density
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 1.4f * density
-        color = Color.argb(150, 255, 255, 255)
+        strokeWidth = 1.8f * density
+        color = Color.argb(220, 255, 255, 255)
     }
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 3.6f * density
+        strokeWidth = 9f * density
+        color = Color.argb(105, 255, 255, 255)
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 4.2f * density
         color = Color.WHITE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        setShadowLayer(8f * density, 0f, 0f, Color.WHITE)
+        setShadowLayer(10f * density, 0f, 0f, Color.WHITE)
     }
     private val border = Path()
     private val measure = PathMeasure()
@@ -506,7 +511,7 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         border.reset()
-        val inset = 2.5f * density
+        val inset = 5f * density
         border.addRoundRect(RectF(inset, inset, w - inset, h - inset),
             15f * density, 15f * density, Path.Direction.CW)
         measure.setPath(border, false)
@@ -514,13 +519,11 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // Una línea tenue mantiene visible el recorrido completo; el segmento
-        // blanco brillante es el destello móvil.
         canvas.drawPath(border, basePaint)
         val length = measure.length
         if (length <= 0f) return
         val start = progress * length
-        val segment = length * .16f
+        val segment = length * .22f
         val end = start + segment
         val highlight = Path()
         if (end <= length) {
@@ -529,7 +532,8 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
             measure.getSegment(start, length, highlight, true)
             measure.getSegment(0f, end - length, highlight, true)
         }
-        canvas.drawPath(highlight, paint)
+        canvas.drawPath(highlight, glowPaint)
+        canvas.drawPath(highlight, highlightPaint)
     }
 
     override fun onAttachedToWindow() {
@@ -537,7 +541,7 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
         setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         animator?.cancel()
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 2600L
+            duration = 3200L
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener { progress = it.animatedValue as Float; invalidate() }
