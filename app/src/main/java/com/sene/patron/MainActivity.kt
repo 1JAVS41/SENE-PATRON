@@ -36,7 +36,8 @@ class MainActivity : Activity() {
     }
 
     private fun render() {
-        setContentView(if (currentPage == "home") homeScreen() else detailScreen(currentPage))
+        val content = if (currentPage == "home") homeScreen() else detailScreen(currentPage)
+        setContentView(scrollRoot ?: content)
     }
 
     private fun homeScreen(): View {
