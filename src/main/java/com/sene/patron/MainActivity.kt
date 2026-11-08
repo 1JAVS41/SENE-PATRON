@@ -3,12 +3,19 @@ package com.sene.patron
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PathMeasure
+import android.graphics.RectF
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.animation.ValueAnimator
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -60,7 +67,7 @@ class MainActivity : Activity() {
         }
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(12), dp(18), dp(88))
+            setPadding(dp(18), dp(30), dp(18), dp(88))
         }
         scroll.addView(page)
         when (currentPage) {
@@ -104,33 +111,31 @@ class MainActivity : Activity() {
         ).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(3), dp(8), dp(3)) })
         gap(root, 14)
 
-        // Aviso luminoso con desplazamiento continuo de derecha a izquierda.
+        // Aviso luminoso: texto animado más rápido y un destello blanco que recorre
+        // continuamente los cuatro lados del contorno.
+        val warningFrame = FrameLayout(this).apply {
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        }
         val warningBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(10), dp(12), dp(10))
             background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 intArrayOf(Color.rgb(91, 10, 27), Color.rgb(190, 35, 48), Color.rgb(91, 10, 27)))
-                .apply {
-                    cornerRadius = dp(15).toFloat()
-                    setStroke(dp(1), Color.rgb(255, 132, 145))
-                }
-            elevation = dp(7).toFloat()
+                .apply { cornerRadius = dp(15).toFloat() }
+            elevation = dp(5).toFloat()
         }
-        val warningText = TextView(this).apply {
-            text = "EN CASO DE PÉRDIDA DE ALGÚN EQUIPO VINCULADO, LA REPOSICIÓN DE NUESTRA APP TIENE UN COSTO POR DISPOSICIÓN DE LICENCIA Y VINCULACIÓN. ¡CUIDA TUS EQUIPOS DE TRABAJO!     "
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
+        val warningText = FastMarqueeTextView(this).apply {
+            message = "EN CASO DE PÉRDIDA DE ALGÚN EQUIPO VINCULADO, LA REPOSICIÓN DE NUESTRA APP TIENE UN COSTO POR DISPOSICIÓN DE LICENCIA Y VINCULACIÓN. ¡CUIDA TUS EQUIPOS DE TRABAJO!"
             setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER_VERTICAL
-            isSingleLine = true
-            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
-            marqueeRepeatLimit = -1
-            isSelected = true
-            setHorizontallyScrolling(true)
+            setTextSizeSp(13f)
+            setTypeface(Typeface.DEFAULT_BOLD)
+            contentDescription = message
         }
         warningBox.addView(warningText, LinearLayout.LayoutParams(-1, dp(38)))
-        root.addView(warningBox, LinearLayout.LayoutParams(-1, -2))
+        warningFrame.addView(warningBox, FrameLayout.LayoutParams(-1, -2))
+        warningFrame.addView(BorderRunnerView(this), FrameLayout.LayoutParams(-1, -1))
+        root.addView(warningFrame, LinearLayout.LayoutParams(-1, -2))
         gap(root, 16)
         root.addView(text("Toca el logotipo para abrir el menú de administración.", 12, muted)
             .apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(8), dp(8), dp(8)) })
@@ -168,7 +173,9 @@ class MainActivity : Activity() {
     private fun teamMenuCard(title: String, description: String, destination: String) = card().apply {
         isClickable = true
         isFocusable = true
-        addView(horizontal(title, "ABRIR  ›", ink, red))
+        val count = pendingAlertCount(destination)
+        addView(horizontal(title, if (count > 0) "● $count ALERTA(S)" else "ABRIR  ›", ink,
+            if (count > 0) Color.rgb(210, 20, 35) else red))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
@@ -201,10 +208,18 @@ class MainActivity : Activity() {
     private fun teamSectionCard(title: String, description: String, destination: String) = card().apply {
         isClickable = true
         isFocusable = true
-        addView(horizontal(title, "›", ink, red))
+        val team = if (destination.startsWith("team1_")) "team1" else "team2"
+        val section = destination.substringAfter("_")
+        val count = pendingAlertCount(team, section)
+        addView(horizontal(title, if (count > 0) "● $count NUEVA(S)" else "›", ink,
+            if (count > 0) Color.rgb(210, 20, 35) else red))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
+
+    // Contadores preparados para enlazarse a las notificaciones reales de Firebase.
+    // Permanecen en cero mientras el servicio remoto no esté conectado.
+    private fun pendingAlertCount(team: String, section: String? = null): Int = 0
 
     private fun notificationCard(number: String) = card().apply {
         addView(horizontal("NOTIFICACIONES · EQUIPO $number", "●", ink, red))
@@ -395,4 +410,112 @@ class MainActivity : Activity() {
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+
+/** Texto continuo de derecha a izquierda con velocidad controlada. */
+private class FastMarqueeTextView(context: android.content.Context) : View(context) {
+    var message: String = ""
+        set(value) { field = value; invalidate(); restart() }
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private var textWidth = 0f
+    private var offset = 0f
+    private var animator: ValueAnimator? = null
+    private var gap = 72f * resources.displayMetrics.density
+
+    fun setTextColor(color: Int) { paint.color = color }
+    fun setTextSizeSp(size: Float) { paint.textSize = size * resources.displayMetrics.scaledDensity }
+    fun setTypeface(typeface: Typeface) { paint.typeface = typeface }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        restart()
+    }
+
+    private fun restart() {
+        animator?.cancel()
+        textWidth = paint.measureText(message)
+        if (width <= 0 || textWidth <= 0f || !isAttachedToWindow) return
+        val distance = textWidth + gap
+        animator = ValueAnimator.ofFloat(0f, distance).apply {
+            duration = ((distance / (155f * resources.displayMetrics.density)) * 1000f)
+                .toLong().coerceAtLeast(2200L)
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener { offset = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val baseline = height / 2f - (paint.ascent() + paint.descent()) / 2f
+        var x = -offset
+        while (x < width) {
+            canvas.drawText(message, x, baseline, paint)
+            x += textWidth + gap
+        }
+    }
+
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); restart() }
+    override fun onDetachedFromWindow() { animator?.cancel(); animator = null; super.onDetachedFromWindow() }
+}
+
+/** Destello blanco que recorre el perímetro redondeado del rectángulo. */
+private class BorderRunnerView(context: android.content.Context) : View(context) {
+    private val density = resources.displayMetrics.density
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2.2f * density
+        color = Color.WHITE
+        strokeCap = Paint.Cap.ROUND
+        setShadowLayer(5f * density, 0f, 0f, Color.WHITE)
+    }
+    private val border = Path()
+    private val measure = PathMeasure()
+    private var progress = 0f
+    private var animator: ValueAnimator? = null
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        border.reset()
+        val inset = 2.5f * density
+        border.addRoundRect(RectF(inset, inset, w - inset, h - inset),
+            15f * density, 15f * density, Path.Direction.CW)
+        measure.setPath(border, false)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val length = measure.length
+        if (length <= 0f) return
+        val start = progress * length
+        val segment = length * .22f
+        val end = start + segment
+        val highlight = Path()
+        if (end <= length) {
+            measure.getSegment(start, end, highlight, true)
+        } else {
+            measure.getSegment(start, length, highlight, true)
+            measure.getSegment(0f, end - length, highlight, true)
+        }
+        canvas.drawPath(highlight, paint)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        animator?.cancel()
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 2600L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener { progress = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        animator?.cancel()
+        animator = null
+        super.onDetachedFromWindow()
+    }
 }
