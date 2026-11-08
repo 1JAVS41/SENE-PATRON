@@ -139,17 +139,17 @@ class MainActivity : Activity() {
         val instruction = FrameLayout(this).apply {
             setPadding(dp(5), dp(8), dp(5), dp(8))
         }
-        val instructionText = "TOCA EL CARRITO DE SENE COMPRAS"
-        val instructionShadow = text(instructionText, 14, Color.rgb(3, 27, 78), true).apply {
+        val instructionText = "TOCA EL CARRITO SENE PATRÓN PARA ADMINISTRAR"
+        val instructionShadow = text(instructionText, 13, Color.rgb(3, 27, 78), false).apply {
             gravity = Gravity.CENTER
-            letterSpacing = .045f
+            letterSpacing = .025f
             translationX = dp(1).toFloat()
-            translationY = dp(2).toFloat()
-            setShadowLayer(dp(2).toFloat(), 0f, dp(2).toFloat(), Color.rgb(0, 18, 58))
+            translationY = dp(1).toFloat()
+            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), Color.rgb(0, 18, 58))
         }
-        val instructionFace = text(instructionText, 14, Color.rgb(80, 170, 255), true).apply {
+        val instructionFace = text(instructionText, 13, Color.rgb(80, 170, 255), false).apply {
             gravity = Gravity.CENTER
-            letterSpacing = .045f
+            letterSpacing = .025f
             setShadowLayer(dp(2).toFloat(), 0f, 0f, Color.rgb(130, 205, 255))
             post {
                 paint.shader = LinearGradient(
@@ -488,20 +488,15 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
         strokeWidth = 1.8f * density
         color = Color.argb(220, 255, 255, 255)
     }
-    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 9f * density
-        color = Color.argb(105, 255, 255, 255)
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
+    private val dotGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(155, 255, 255, 255)
+        setShadowLayer(9f * density, 0f, 0f, Color.WHITE)
     }
-    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 4.2f * density
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
         color = Color.WHITE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-        setShadowLayer(10f * density, 0f, 0f, Color.WHITE)
+        setShadowLayer(5f * density, 0f, 0f, Color.WHITE)
     }
     private val border = Path()
     private val measure = PathMeasure()
@@ -522,18 +517,14 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
         canvas.drawPath(border, basePaint)
         val length = measure.length
         if (length <= 0f) return
-        val start = progress * length
-        val segment = length * .22f
-        val end = start + segment
-        val highlight = Path()
-        if (end <= length) {
-            measure.getSegment(start, end, highlight, true)
-        } else {
-            measure.getSegment(start, length, highlight, true)
-            measure.getSegment(0f, end - length, highlight, true)
+        val distance = (progress * length).coerceIn(0f, length)
+        val position = FloatArray(2)
+        val tangent = FloatArray(2)
+        if (measure.getPosTan(distance, position, tangent)) {
+            // Un único punto blanco brillante recorre el perímetro completo del rectángulo.
+            canvas.drawCircle(position[0], position[1], 8f * density, dotGlowPaint)
+            canvas.drawCircle(position[0], position[1], 3.8f * density, dotPaint)
         }
-        canvas.drawPath(highlight, glowPaint)
-        canvas.drawPath(highlight, highlightPaint)
     }
 
     override fun onAttachedToWindow() {
