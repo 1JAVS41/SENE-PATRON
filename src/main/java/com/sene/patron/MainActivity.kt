@@ -36,9 +36,12 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        when (currentPage) {
-            "home" -> super.onBackPressed()
-            "menu" -> { currentPage = "home"; render() }
+        when {
+            currentPage == "home" -> super.onBackPressed()
+            currentPage == "menu" -> { currentPage = "home"; render() }
+            currentPage == "team1" || currentPage == "team2" -> { currentPage = "menu"; render() }
+            currentPage.startsWith("team1_") -> { currentPage = "team1"; render() }
+            currentPage.startsWith("team2_") -> { currentPage = "team2"; render() }
             else -> { currentPage = "menu"; render() }
         }
     }
@@ -62,6 +65,7 @@ class MainActivity : Activity() {
         when (currentPage) {
             "home" -> homeScreen(page)
             "menu" -> menuScreen(page)
+            "team1", "team2" -> teamScreen(page, currentPage)
             else -> detailScreen(page, currentPage)
         }
         setContentView(scroll)
@@ -161,50 +165,49 @@ class MainActivity : Activity() {
     }
 
     private fun detailScreen(root: LinearLayout, page: String) {
-        val title = when (page) {
-            "devices" -> "Vinculación de equipos"
+        val teamNumber = if (page.startsWith("team1_")) "1" else "2"
+        val section = page.substringAfter("_")
+        val teamHome = if (teamNumber == "1") "team1" else "team2"
+        val title = when (section) {
+            "schedule" -> "Horarios y asistencias"
             "requests" -> "Solicitudes operativas"
-            "schedule" -> "Horarios y asistencia"
-            else -> "Seguridad de dispositivos"
+            "security" -> "Seguridad del dispositivo"
+            else -> "Vinculación del equipo"
         }
         header(root, title)
         val intro = card()
-        intro.addView(kicker("ADMINISTRACIÓN SENE"))
+        intro.addView(kicker("SENE VENTAS · EQUIPO $teamNumber"))
         intro.addView(text(title, 21, ink, true))
-        intro.addView(text(when (page) {
-            "devices" -> "Tu licencia contempla un dispositivo SENE PATRÓN y exactamente dos espacios SENE VENTAS."
-            "requests" -> "Centro donde el titular revisará y resolverá solicitudes de sus equipos."
-            "schedule" -> "Consulta administrativa de horarios y asistencia de los equipos autorizados."
-            else -> "Protección de los dispositivos vinculados a la licencia y control de sustituciones."
+        intro.addView(text(when (section) {
+            "schedule" -> "Consulta los horarios, entradas, salidas y asistencias registrados por el Equipo $teamNumber."
+            "requests" -> "Revisa y autoriza únicamente las solicitudes enviadas desde el Equipo $teamNumber."
+            "security" -> "Consulta la seguridad y los eventos del dispositivo asignado al Equipo $teamNumber."
+            else -> "Consulta el vínculo y la identidad del dispositivo correspondiente al Equipo $teamNumber."
         }, 14, muted))
         root.addView(intro)
-        gap(root, 12)
-        when (page) {
-            "devices" -> {
-                root.addView(slot("SENE VENTAS · EQUIPO 1", "Primer espacio de trabajador", "DISPONIBLE"))
-                gap(root, 9)
-                root.addView(slot("SENE VENTAS · EQUIPO 2", "Segundo espacio de trabajador", "DISPONIBLE"))
-                gap(root, 9)
-                root.addView(info("REGLA DE LICENCIA",
-                    "Máximo tres dispositivos: un SENE PATRÓN y dos SENE VENTAS. Ningún equipo se autoriza por sí mismo."))
-            }
-            "requests" -> root.addView(info("BANDEJA DE SOLICITUDES",
-                "Aquí aparecerán las solicitudes pendientes de autorización cuando se conecte el servicio."))
-            "schedule" -> root.addView(info("HORARIOS Y ASISTENCIA",
-                "Los datos se mostrarán cuando exista una conexión autorizada con los equipos SENE VENTAS."))
+        gap(root, 11)
+        root.addView(notificationCard(teamNumber))
+        gap(root, 11)
+        when (section) {
+            "schedule" -> root.addView(info("REGISTROS · EQUIPO $teamNumber",
+                "Los horarios y asistencias de este equipo aparecerán aquí, separados por trabajador y fecha."))
+            "requests" -> root.addView(info("BANDEJA · EQUIPO $teamNumber",
+                "Aquí se mostrarán las solicitudes pendientes y su historial. Las autorizaciones deberán ser individuales y de un solo uso cuando corresponda."))
             "security" -> {
-                root.addView(info("BLOQUEO DE DISPOSITIVOS",
-                    "El bloqueo real deberá validarse en el servidor y conservar un registro de auditoría."))
+                root.addView(info("ESTADO DEL DISPOSITIVO · EQUIPO $teamNumber",
+                    "Los avisos de seguridad, bloqueos e incidencias se mostrarán solo para este equipo."))
                 gap(root, 9)
                 root.addView(info("SUSTITUCIÓN DE TELÉFONO",
-                    "La sustitución requiere autorización del titular de la plataforma y conserva el espacio de licencia."))
+                    "La solicitud de sustitución conservará el espacio de licencia del Equipo $teamNumber y requerirá validación del titular."))
             }
+            else -> root.addView(info("VÍNCULO · EQUIPO $teamNumber",
+                "Aquí se mostrará la identidad local, el estado de vinculación y la fecha de registro de este dispositivo."))
         }
+        gap(root, 11)
+        root.addView(info("ESTADO DE CONEXIÓN",
+            "La pantalla ya separa la información por equipo. Las notificaciones y los datos reales se activarán al conectar Firebase; esta versión no inventa avisos ni modifica registros."))
         gap(root, 12)
-        root.addView(info("MODO DE PREPARACIÓN",
-            "Esta versión muestra la interfaz y navegación. Todavía no realiza cambios en Firebase ni autoriza dispositivos."))
-        gap(root, 12)
-        root.addView(primaryButton("VOLVER AL MENÚ") { currentPage = "menu"; render() })
+        root.addView(primaryButton("VOLVER A EQUIPO $teamNumber") { currentPage = teamHome; render() })
     }
 
     private fun header(root: LinearLayout, subtitle: String) {
