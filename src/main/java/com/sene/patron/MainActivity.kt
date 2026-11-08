@@ -1,6 +1,7 @@
 package com.sene.patron
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
@@ -92,12 +93,60 @@ class MainActivity : Activity() {
         status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
         status.addView(text("La interfaz está lista para revisión. La conexión con Firebase aún está pendiente; por ahora no se autorizan equipos ni se modifican datos reales.", 12, muted))
         root.addView(status)
+        gap(root, 14)
+
+        // Contacto del titular: los datos se muestran solo cuando el usuario pulsa el botón.
+        root.addView(primaryButton("¿NECESITAS AYUDA?") { showContactDialog() })
+        gap(root, 7)
+        root.addView(text(
+            "Si perdiste un equipo, comunícate para obtener una nueva app y su vinculación.",
+            12, muted
+        ).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(3), dp(8), dp(3)) })
+        gap(root, 14)
+
+        // Aviso luminoso con desplazamiento continuo de derecha a izquierda.
+        val warningBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.rgb(91, 10, 27), Color.rgb(190, 35, 48), Color.rgb(91, 10, 27)))
+                .apply {
+                    cornerRadius = dp(15).toFloat()
+                    setStroke(dp(1), Color.rgb(255, 132, 145))
+                }
+            elevation = dp(7).toFloat()
+        }
+        val warningText = TextView(this).apply {
+            text = "EN CASO DE PÉRDIDA DE ALGÚN EQUIPO VINCULADO, LA REPOSICIÓN DE NUESTRA APP TIENE UN COSTO POR DISPOSICIÓN DE LICENCIA Y VINCULACIÓN. ¡CUIDA TUS EQUIPOS DE TRABAJO!     "
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER_VERTICAL
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true
+            setHorizontallyScrolling(true)
+        }
+        warningBox.addView(warningText, LinearLayout.LayoutParams(-1, dp(38)))
+        root.addView(warningBox, LinearLayout.LayoutParams(-1, -2))
         gap(root, 16)
         root.addView(text("Toca el logotipo para abrir el menú de administración.", 12, muted)
             .apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(8), dp(8), dp(8)) })
         gap(root, 10)
         root.addView(text("SENE PATRÓN  ·  Versión 0.5.0", 11, muted)
             .apply { gravity = Gravity.CENTER })
+    }
+
+    private fun showContactDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("DATOS DE CONTACTO")
+            .setMessage(
+                "Teléfonos:\n3325142147\n3324860833\n\nCorreo electrónico:\nnagavs28@gmail.com"
+            )
+            .setPositiveButton("CERRAR", null)
+            .show()
     }
 
     private fun menuScreen(root: LinearLayout) {
