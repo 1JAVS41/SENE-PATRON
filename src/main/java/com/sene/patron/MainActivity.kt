@@ -100,23 +100,64 @@ class MainActivity : Activity() {
         header(root, "Menú de administración")
         val intro = card()
         intro.addView(kicker("HERRAMIENTAS DEL TITULAR"))
-        intro.addView(text("¿Qué deseas administrar?", 20, ink, true))
-        intro.addView(text("Selecciona una sección. Toca de nuevo el logotipo para regresar al panel principal.", 13, muted))
+        intro.addView(text("Selecciona el equipo que deseas administrar", 20, ink, true))
+        intro.addView(text("Cada equipo tendrá sus propias configuraciones y notificaciones independientes.", 13, muted))
         root.addView(intro)
         gap(root, 13)
-        val actions = listOf(
-            Triple("Vinculación de equipos", "Administra los dos espacios SENE VENTAS de tu licencia", "devices"),
-            Triple("Solicitudes operativas", "Revisa solicitudes que requieren autorización del patrón", "requests"),
-            Triple("Horarios y asistencia", "Consulta horarios y actividad de los equipos", "schedule"),
-            Triple("Seguridad de dispositivos", "Consulta bloqueos y procesos de sustitución", "security")
-        )
-        actions.forEachIndexed { index, item ->
-            root.addView(menuCard(item.first, item.second, item.third))
-            if (index != actions.lastIndex) gap(root, 10)
-        }
+        root.addView(teamMenuCard("EQUIPO 1", "SENE VENTAS · Primer espacio de trabajador", "team1"))
+        gap(root, 11)
+        root.addView(teamMenuCard("EQUIPO 2", "SENE VENTAS · Segundo espacio de trabajador", "team2"))
         gap(root, 13)
         root.addView(info("LICENCIA SENE · 3 ESPACIOS",
-            "Un dispositivo SENE PATRÓN y exactamente dos espacios SENE VENTAS."))
+            "Un dispositivo SENE PATRÓN y dos espacios independientes SENE VENTAS."))
+    }
+
+    private fun teamMenuCard(title: String, description: String, destination: String) = card().apply {
+        isClickable = true
+        isFocusable = true
+        addView(horizontal(title, "ABRIR  ›", ink, red))
+        addView(text(description, 12, muted))
+        setOnClickListener { currentPage = destination; render() }
+    }
+
+    private fun teamScreen(root: LinearLayout, team: String) {
+        val number = if (team == "team1") "1" else "2"
+        header(root, "Equipo $number")
+        val intro = card()
+        intro.addView(kicker("CONFIGURACIÓN INDIVIDUAL"))
+        intro.addView(text("SENE VENTAS · EQUIPO $number", 20, ink, true))
+        intro.addView(text("Administra únicamente la información y las solicitudes correspondientes a este equipo.", 13, muted))
+        root.addView(intro)
+        gap(root, 11)
+        root.addView(notificationCard(number))
+        gap(root, 12)
+        val sections = listOf(
+            Triple("Horarios y asistencias", "Turnos, entradas, salidas y registros de asistencia", "schedule"),
+            Triple("Solicitudes operativas", "Correcciones de ventas y solicitudes que requieren tu autorización", "requests"),
+            Triple("Seguridad del dispositivo", "Estado de seguridad, bloqueo y sustitución del teléfono", "security"),
+            Triple("Vinculación del equipo", "Identidad, estado de vínculo y datos del dispositivo", "link")
+        )
+        sections.forEachIndexed { index, item ->
+            root.addView(teamSectionCard(item.first, item.second, team + "_" + item.third))
+            if (index != sections.lastIndex) gap(root, 9)
+        }
+        gap(root, 12)
+        root.addView(primaryButton("VOLVER A EQUIPOS") { currentPage = "menu"; render() })
+    }
+
+    private fun teamSectionCard(title: String, description: String, destination: String) = card().apply {
+        isClickable = true
+        isFocusable = true
+        addView(horizontal(title, "›", ink, red))
+        addView(text(description, 12, muted))
+        setOnClickListener { currentPage = destination; render() }
+    }
+
+    private fun notificationCard(number: String) = card().apply {
+        addView(horizontal("NOTIFICACIONES · EQUIPO $number", "●", ink, red))
+        gap(this, 4)
+        addView(text("Aquí aparecerán exclusivamente los avisos, solicitudes y cambios de este equipo.", 12, muted))
+        addView(text("Pendientes: se mostrarán al conectar Firebase", 11, red, true))
     }
 
     private fun detailScreen(root: LinearLayout, page: String) {
