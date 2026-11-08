@@ -30,10 +30,13 @@ jobs:
       - name: Compilar APK
         run: gradle assembleDebug
 
+      - name: Preparar nombre comercial del APK
+        run: cp build/outputs/apk/debug/*.apk build/outputs/apk/debug/SENE-PATRON.apk
+
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
           name: SENE-PATRON
-          path: build/outputs/apk/debug/*.apk
+          path: build/outputs/apk/debug/SENE-PATRON.apk
           if-no-files-found: error
           retention-days: 14
