@@ -486,17 +486,18 @@ private class BorderRunnerView(context: android.content.Context) : View(context)
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 1.8f * density
-        color = Color.argb(220, 255, 255, 255)
+        // Borde rosado tenue para que el punto blanco destaque claramente.
+        color = Color.argb(210, 255, 105, 125)
     }
     private val dotGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.argb(155, 255, 255, 255)
-        setShadowLayer(9f * density, 0f, 0f, Color.WHITE)
+        color = Color.argb(235, 255, 255, 255)
+        setShadowLayer(12f * density, 0f, 0f, Color.WHITE)
     }
     private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.WHITE
-        setShadowLayer(5f * density, 0f, 0f, Color.WHITE)
+        setShadowLayer(7f * density, 0f, 0f, Color.WHITE)
     }
     private val border = Path()
     private val measure = PathMeasure()
