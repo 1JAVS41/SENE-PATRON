@@ -1,6 +1,7 @@
 package com.sene.patron
 
 import android.app.Activity
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -19,6 +20,7 @@ class MainActivity : Activity() {
     private val muted = Color.rgb(111, 121, 145)
     private val blue = Color.rgb(38, 59, 112)
     private val green = Color.rgb(22, 139, 69)
+    private val red = Color.rgb(190, 35, 48)
     private val white = Color.WHITE
     private var currentPage = "home"
 
@@ -32,6 +34,7 @@ class MainActivity : Activity() {
         render()
     }
 
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
         if (currentPage != "home") { currentPage = "home"; render() } else super.onBackPressed()
     }
@@ -40,55 +43,81 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply {
             setBackgroundColor(bg)
             isFillViewport = true
+            isSmoothScrollingEnabled = true
             isVerticalScrollBarEnabled = false
+            clipToPadding = false
+            descendantFocusability = ViewGroupFocus.AFTER_DESCENDANTS
         }
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(18), dp(18), dp(30))
         }
         scroll.addView(page)
-        if (currentPage == "home") homeScreen(page) else detailScreen(page, currentPage)
+        when (currentPage) {
+            "home" -> homeScreen(page)
+            "menu" -> menuScreen(page)
+            else -> detailScreen(page, currentPage)
+        }
         setContentView(scroll)
     }
 
+    private object ViewGroupFocus { const val AFTER_DESCENDANTS = 0x20000 }
+
     private fun homeScreen(root: LinearLayout) {
-        header(root, "Panel de administración")
+        header(root, "Panel principal")
         val welcome = card()
-        welcome.addView(kicker("PANEL PRINCIPAL"))
+        welcome.addView(kicker("SENE PATRÓN"))
         welcome.addView(text("Tu negocio, bajo control.", 22, ink, true))
-        welcome.addView(text("Administra tu licencia y los dos equipos SENE VENTAS desde un solo lugar.", 14, muted))
+        welcome.addView(text("Administra desde aquí los equipos y las solicitudes de tu licencia.", 14, muted))
         root.addView(welcome)
-        gap(root, 18)
-        root.addView(section("LICENCIA SENE · 3 ESPACIOS"))
+        gap(root, 13)
+
         val license = card()
-        license.addView(horizontal("Estado de la licencia", "Configuración inicial", ink, green))
-        gap(license, 12)
-        license.addView(slot("SENE PATRÓN", "Dispositivo principal · Administrador", "ESTE EQUIPO", true))
-        gap(license, 9)
-        license.addView(slot("SENE VENTAS · EQUIPO 1", "Primer dispositivo de trabajador", "DISPONIBLE", false))
-        gap(license, 9)
-        license.addView(slot("SENE VENTAS · EQUIPO 2", "Segundo dispositivo de trabajador", "DISPONIBLE", false))
+        license.addView(kicker("TU LICENCIA"))
+        license.addView(horizontal("Dispositivos registrados", "3 espacios", ink, green))
+        gap(license, 8)
+        license.addView(text("1 SENE PATRÓN  ·  2 SENE VENTAS", 14, blue, true))
+        license.addView(text("La licencia contempla un equipo principal y dos equipos de trabajadores.", 12, muted))
         root.addView(license)
-        gap(root, 20)
-        root.addView(section("CENTRO DE ADMINISTRACIÓN"))
+        gap(root, 13)
+
+        val status = card()
+        status.addView(horizontal("Estado de administración", "Preparación", ink, red))
+        status.addView(text("Las funciones y pantallas están disponibles para revisión. La conexión real con Firebase aún está pendiente.", 12, muted))
+        root.addView(status)
+        gap(root, 18)
+        root.addView(primaryButton("ABRIR MENÚ DE ADMINISTRACIÓN") {
+            currentPage = "menu"
+            render()
+        })
+        gap(root, 12)
+        root.addView(text("Toca el logotipo rojo para abrir el menú desde cualquier pantalla.", 12, muted).apply { gravity = Gravity.CENTER })
+        gap(root, 12)
+        root.addView(text("SENE PATRÓN  ·  Versión 0.4.0", 11, muted).apply { gravity = Gravity.CENTER })
+    }
+
+    private fun menuScreen(root: LinearLayout) {
+        header(root, "Menú de administración")
+        val intro = card()
+        intro.addView(kicker("HERRAMIENTAS DEL TITULAR"))
+        intro.addView(text("¿Qué deseas administrar?", 20, ink, true))
+        intro.addView(text("Selecciona una sección. Puedes volver a este menú tocando el logotipo rojo.", 13, muted))
+        root.addView(intro)
+        gap(root, 16)
         val actions = listOf(
-            Triple("Vinculación de equipos", "Autoriza los dos espacios SENE VENTAS de tu licencia", "devices"),
-            Triple("Solicitudes operativas", "Revisa las solicitudes que requieren tu aprobación", "requests"),
-            Triple("Horarios y asistencia", "Consulta la actividad y los horarios de tus equipos", "schedule"),
-            Triple("Seguridad de dispositivos", "Gestiona bloqueos y sustituciones autorizadas", "security")
+            Triple("Vinculación de equipos", "Administra los dos espacios SENE VENTAS de tu licencia", "devices"),
+            Triple("Solicitudes operativas", "Revisa solicitudes que requieren autorización del patrón", "requests"),
+            Triple("Horarios y asistencia", "Consulta horarios y actividad de los equipos", "schedule"),
+            Triple("Seguridad de dispositivos", "Consulta bloqueos y procesos de sustitución", "security")
         )
         actions.forEachIndexed { i, item ->
             root.addView(menuCard(item.first, item.second, item.third))
             if (i != actions.lastIndex) gap(root, 10)
         }
-        gap(root, 18)
-        val status = card()
-        status.addView(kicker("ESTADO DEL SISTEMA"))
-        status.addView(text("Interfaz de administración", 16, ink, true))
-        status.addView(text("Firebase aún no está conectado. Las autorizaciones y cambios reales se habilitarán al integrar el servidor.", 13, muted))
-        root.addView(status)
-        gap(root, 15)
-        root.addView(text("SENE PATRÓN  ·  Versión 0.3.0", 11, muted).apply { gravity = Gravity.CENTER })
+        gap(root, 16)
+        root.addView(info("LICENCIA SENE · 3 ESPACIOS", "Un dispositivo SENE PATRÓN y exactamente dos dispositivos SENE VENTAS."))
+        gap(root, 10)
+        root.addView(primaryButton("VOLVER AL PANEL PRINCIPAL") { currentPage = "home"; render() })
     }
 
     private fun detailScreen(root: LinearLayout, page: String) {
@@ -132,7 +161,7 @@ class MainActivity : Activity() {
         note.addView(text("Esta versión muestra la interfaz y navegación. Todavía no realiza cambios en Firebase ni autoriza dispositivos.", 13, muted))
         root.addView(note)
         gap(root, 18)
-        root.addView(primaryButton("Volver al panel principal") { currentPage = "home"; render() })
+        root.addView(primaryButton("VOLVER AL MENÚ") { currentPage = "menu"; render() })
     }
 
     private fun header(root: LinearLayout, subtitle: String) {
@@ -144,13 +173,20 @@ class MainActivity : Activity() {
             elevation = dp(4).toFloat()
         }
         val frame = FrameLayout(this).apply {
-            background = rounded(Color.rgb(52,74,130), 16)
+            background = rounded(Color.rgb(112,30,43), 16)
             setPadding(dp(5), dp(5), dp(5), dp(5))
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Abrir menú SENE PATRÓN"
+            setOnClickListener {
+                currentPage = if (currentPage == "menu") "home" else "menu"
+                render()
+            }
         }
         val logo = ImageView(this).apply {
-            setImageResource(R.drawable.logo_sene_pv)
+            setImageBitmap(redLogo())
             scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Logotipo oficial SENE"
+            contentDescription = "Logotipo rojo SENE PATRÓN. Tocar para abrir el menú."
         }
         frame.addView(logo, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         top.addView(frame, LinearLayout.LayoutParams(dp(62), dp(62)))
@@ -163,10 +199,33 @@ class MainActivity : Activity() {
         brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(185,201,248), true).apply { letterSpacing = .13f })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(top, LinearLayout.LayoutParams(-1, -2))
-        val accent = View(this).apply { background = rounded(Color.rgb(255,181,71), 3) }
+        val accent = View(this).apply { background = rounded(red, 3) }
         root.addView(accent, LinearLayout.LayoutParams(dp(42), dp(5)).apply { topMargin = dp(22); bottomMargin = dp(10) })
         root.addView(text(subtitle, 26, ink, true))
         root.addView(text("Todo bajo control.", 13, muted).apply { setPadding(0, 0, 0, dp(16)) })
+    }
+
+    // Recolorea únicamente las zonas originales azul/verde del logotipo; conserva el fondo y el chip.
+    private fun redLogo(): Bitmap {
+        val source = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.logo_sene_pv)
+        val result = source.copy(Bitmap.Config.ARGB_8888, true)
+        for (y in 0 until result.height) {
+            for (x in 0 until result.width) {
+                val pixel = result.getPixel(x, y)
+                val a = Color.alpha(pixel)
+                val r = Color.red(pixel)
+                val g = Color.green(pixel)
+                val b = Color.blue(pixel)
+                val high = maxOf(r, g, b)
+                val low = minOf(r, g, b)
+                if (a > 0 && high - low > 28) {
+                    val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+                    val redValue = (82 + luminance * 0.66).coerceIn(0, 255)
+                    result.setPixel(x, y, Color.argb(a, redValue, 8, 22))
+                }
+            }
+        }
+        return result
     }
 
     private fun card() = LinearLayout(this).apply {
@@ -189,8 +248,7 @@ class MainActivity : Activity() {
     private fun menuCard(title: String, description: String, destination: String) = card().apply {
         isClickable = true
         isFocusable = true
-        foreground = android.util.TypedValue().let { null }
-        addView(horizontal(title, "›", ink, green))
+        addView(horizontal(title, "›", ink, red))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
@@ -204,20 +262,20 @@ class MainActivity : Activity() {
         }
 
     private fun section(value: String) = text(value, 12, muted, true).apply { setPadding(dp(2), 0, 0, dp(9)) }
-    private fun kicker(value: String) = text(value, 10, green, true).apply { letterSpacing = .1f; setPadding(0, 0, 0, dp(5)) }
+    private fun kicker(value: String) = text(value, 10, red, true).apply { letterSpacing = .1f; setPadding(0, 0, 0, dp(5)) }
 
     private fun text(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
         text = value
         textSize = size.toFloat()
         setTextColor(color)
-        typeface = Typeface.create(if(bold) "sans-serif" else "sans-serif", if(bold) Typeface.BOLD else Typeface.NORMAL)
+        typeface = Typeface.create("sans-serif", if(bold) Typeface.BOLD else Typeface.NORMAL)
         setPadding(0, dp(3), 0, dp(3))
         setLineSpacing(dp(2).toFloat(), 1f)
     }
 
     private fun primaryButton(value: String, action: () -> Unit) = TextView(this).apply {
         text = value
-        textSize = 15f
+        textSize = 14f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setTextColor(white)

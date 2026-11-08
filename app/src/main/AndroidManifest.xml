@@ -3,8 +3,8 @@
     <application
         android:allowBackup="false"
         android:label="SENE PATRÓN"
-        android:icon="@drawable/logo_sene_pv"
-        android:roundIcon="@drawable/logo_sene_pv"
+        android:icon="@drawable/ic_launcher_patron"
+        android:roundIcon="@drawable/ic_launcher_patron"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
