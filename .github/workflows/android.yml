@@ -18,6 +18,8 @@ jobs:
 
       - name: Generar icono desde el logotipo rojo del encabezado
         run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
           python3 - <<'PY'
           from PIL import Image
           src = Image.open('src/main/res/drawable-nodpi/logo_sene_pv.png').convert('RGBA')
