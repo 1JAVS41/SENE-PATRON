@@ -39,6 +39,8 @@ Cabeceras:
 - En llamadas autenticadas: `X-SENE-Challenge: <challengeId>`
 - En llamadas autenticadas: `X-SENE-Signature: <base64 DER>`
 
+`challengeId` y `signature` viajan únicamente en cabeceras; nunca dentro del JSON firmado. El hash `bodySha256` es SHA-256 de los bytes UTF-8 exactos del cuerpo JSON que se enviará al endpoint de destino. El cuerpo no cambia después de solicitar el reto.
+
 El servidor construye un mensaje canónico UTF-8 con versión, purpose, método, ruta, hash del cuerpo, deviceId o fingerprint provisional, challengeId y nonce aleatorio. Devuelve ese mensaje como `signingMessage` Base64URL. La APK firma los bytes decodificados exactamente; el servidor verifica esos mismos bytes. El reto se consume una vez y expira en 2 minutos. Las llamadas de consulta que no mutan también se firman. La APK calcula SHA-256 del cuerpo exacto que enviará y no puede cambiarlo después de pedir el reto.
 
 Respuesta de error uniforme:
@@ -84,7 +86,7 @@ El operador confirma el pago de instalación de $500 MXN en una acción privada 
 ### `POST /v1/patron/activate`
 Cuerpo:
 ```json
-{"activationCode":"código","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex","challengeId":"uuid","signature":"base64"}
+{"activationCode":"código","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex"}
 ```
 Condiciones: código válido/no revocado/no usado; reto vigente de propósito `PATRON_ACTIVATE`; firma válida; pago de instalación confirmado; no hay PATRON vinculado. El código se consume en la misma transacción que registra el PATRÓN. No inicia los 30 días hasta confirmar la primera renta mensual y completar el alta comercial según la política de pagos. Respuesta:
 ```json
@@ -109,7 +111,7 @@ El QR no contiene licenseId ni información del negocio.
 ### `POST /v1/ventas/pair`
 Cuerpo:
 ```json
-{"qrToken":"token-opaco","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex","challengeId":"uuid","signature":"base64"}
+{"qrToken":"token-opaco","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex"}
 ```
 Reto de propósito `VENTAS_PAIR`; firma válida. La transacción verifica licencia activa/vigente, PATRÓN activo, token no revocado/no vencido, usos disponibles, fingerprint no duplicada y slot VENTAS libre; registra equipo y descuenta exactamente un uso de forma atómica. Respuesta:
 ```json
@@ -120,7 +122,7 @@ El segundo equipo ocupará `VENTAS_2`. No hay tercer equipo VENTAS.
 ## 7. Autenticación y estado de licencia
 
 ### `POST /v1/device/session`
-Dispositivo registrado firma reto `DEVICE_AUTH`. Devuelve:
+Dispositivo registrado firma reto `DEVICE_AUTH` para el cuerpo `{}` y envía `X-SENE-Device`, `X-SENE-Challenge` y `X-SENE-Signature` en cabeceras. Devuelve:
 ```json
 {"deviceId":"uuid","role":"VENTAS","slot":"VENTAS_1","licenseStatus":"ACTIVE","serverTime":unix,"periodEndsAt":unix,"weeklyQuota":{"limit":20,"used":3,"remaining":17,"weekKey":"YYYY-WW"}}
 ```
