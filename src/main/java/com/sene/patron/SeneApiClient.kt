@@ -45,6 +45,24 @@ class SeneApiClient(context: Context, baseUrl: String) {
 
     fun storedDeviceId(): String? = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
 
+    fun recover(recoveryCode: String): JSONObject {
+        val identity = PatronDeviceIdentity.get(app)
+        val body = JSONObject()
+            .put("recoveryCode", recoveryCode.trim().uppercase())
+            .put("installationId", identity.installationId)
+            .put("continuityId", identity.continuityId)
+            .put("publicKeyBase64", identity.publicKeyBase64)
+            .put("fingerprint", identity.fingerprint)
+        val result = bootstrapSigned("PATRON_RECOVERY", "/v1/patron/recover", body.toString(), identity)
+        val registeredId = result.optString("deviceId")
+        if (registeredId.isNotBlank()) {
+            check(prefs.edit().putString("device_id", registeredId).commit()) {
+                "No se pudo guardar la recuperación de SENE PATRÓN"
+            }
+        }
+        return result
+    }
+
     fun createPairingToken(deviceId: String = storedDeviceId()
         ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject {
         val body = JSONObject().put("uses", 2)
