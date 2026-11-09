@@ -236,13 +236,7 @@ class MainActivity : Activity() {
             "devices" -> devicesScreen(root)
             "requests" -> requestsScreen(root)
             "schedule" -> scheduleScreen(root)
-            "security" -> {
-                root.addView(info("BLOQUEO DE DISPOSITIVOS",
-                    "El bloqueo real deberá validarse en el servidor y conservar un registro de auditoría."))
-                gap(root, 9)
-                root.addView(info("SUSTITUCIÓN DE TELÉFONO",
-                    "La sustitución requiere autorización del titular de la plataforma y conserva el espacio de licencia."))
-            }
+            "security" -> securityScreen(root)
         }
         gap(root, 12)
         root.addView(info("MODO DE PREPARACIÓN",
@@ -449,6 +443,108 @@ class MainActivity : Activity() {
                 runOnUiThread { Toast.makeText(this, "No se pudo registrar la decisión: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
             }
         }.start()
+    }
+
+    private fun securityScreen(root: LinearLayout) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val base = prefs.getString("server_base_url", null)
+        val device = prefs.getString("device_id", null)
+        if (base.isNullOrBlank() || device.isNullOrBlank()) {
+            root.addView(info("SERVICIO NO ACTIVADO", "Activa SENE PATRÓN para consultar y solicitar reemplazos de equipos."))
+            root.addView(primaryButton("IR A CONEXIÓN") { currentPage = "connection"; render() })
+            return
+        }
+        root.addView(info("SEGURIDAD DE EQUIPOS", "La sustitución no libera el espacio por sí sola. El equipo anterior permanece activo hasta que el operador SENE autorice el reemplazo."))
+        gap(root, 9)
+        root.addView(primaryButton("CONSULTAR EQUIPOS VINCULADOS") {
+            Thread {
+                try {
+                    val items = SenePatronApiClient(this, base).linkedDevices().optJSONArray("items") ?: org.json.JSONArray()
+                    val labels = ArrayList<String>()
+                    val records = ArrayList<org.json.JSONObject>()
+                    for (i in 0 until items.length()) {
+                        val item = items.optJSONObject(i) ?: continue
+                        labels.add(item.optString("slot") + " · " + item.optString("deviceId") +
+                            "\nÚltima conexión (UTC): " + item.optLong("lastSeenAt"))
+                        records.add(item)
+                    }
+                    runOnUiThread {
+                        if (labels.isEmpty()) AlertDialog.Builder(this).setTitle("EQUIPOS VINCULADOS")
+                            .setMessage("No hay equipos SENE VENTAS activos vinculados.")
+                            .setPositiveButton("CERRAR", null).show()
+                        else AlertDialog.Builder(this).setTitle("EQUIPOS VINCULADOS")
+                            .setItems(labels.toTypedArray()) { _, index ->
+                                val item = records[index]
+                                val reason = EditText(this).apply {
+                                    hint = "Motivo de sustitución (pérdida o daño)"
+                                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                                    minLines = 2
+                                }
+                                AlertDialog.Builder(this).setTitle("SOLICITAR REEMPLAZO · " + item.optString("slot"))
+                                    .setView(reason)
+                                    .setPositiveButton("ENVIAR SOLICITUD") { _, _ ->
+                                        val why = reason.text.toString().trim()
+                                        if (why.isBlank()) Toast.makeText(this, "Escribe el motivo", Toast.LENGTH_LONG).show()
+                                        else Thread {
+                                            try {
+                                                val response = SenePatronApiClient(this, base)
+                                                    .requestReplacement(item.getString("deviceId"), why)
+                                                runOnUiThread {
+                                                    Toast.makeText(this, "Solicitud enviada. Folio: " + response.optString("requestId"), Toast.LENGTH_LONG).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                runOnUiThread { Toast.makeText(this, "No se pudo solicitar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                                            }
+                                        }.start()
+                                    }.setNegativeButton("CANCELAR", null).show()
+                            }.setNegativeButton("CERRAR", null).show()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this, "No se pudieron consultar los equipos: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        })
+        gap(root, 9)
+        root.addView(primaryButton("SOLICITAR RENOVACIÓN DE LICENCIA") {
+            Thread {
+                try {
+                    val response = SenePatronApiClient(this, base).requestRenewal(device)
+                    prefs.edit().putString("renewal_request_id", response.optString("requestId")).apply()
+                    runOnUiThread {
+                        AlertDialog.Builder(this).setTitle("RENOVACIÓN · $80 MXN")
+                            .setMessage(response.optString("instructions", "Solicitud registrada. Espera la autorización del operador SENE.") +
+                                "\n\nFolio: " + response.optString("requestId"))
+                            .setPositiveButton("CERRAR", null).show()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this, "No se pudo solicitar renovación: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        })
+        gap(root, 9)
+        root.addView(primaryButton("CANJEAR CÓDIGO DE RENOVACIÓN") {
+            val requestId = prefs.getString("renewal_request_id", null)
+            if (requestId.isNullOrBlank()) {
+                Toast.makeText(this, "Primero solicita una renovación desde este equipo", Toast.LENGTH_LONG).show()
+            } else {
+                val field = EditText(this).apply {
+                    hint = "Código de autorización de 12 caracteres"
+                    setSingleLine(true)
+                }
+                AlertDialog.Builder(this).setTitle("CANJEAR RENOVACIÓN").setView(field)
+                    .setPositiveButton("CANJEAR") { _, _ ->
+                        Thread {
+                            try {
+                                val result = SenePatronApiClient(this, base).redeemRenewal(requestId, field.text.toString(), device)
+                                prefs.edit().remove("renewal_request_id").apply()
+                                runOnUiThread { Toast.makeText(this, "Licencia renovada. Nueva vigencia (UTC): " + result.optLong("periodEndsAt"), Toast.LENGTH_LONG).show() }
+                            } catch (e: Exception) {
+                                runOnUiThread { Toast.makeText(this, "No se pudo canjear: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                            }
+                        }.start()
+                    }.setNegativeButton("CANCELAR", null).show()
+            }
+        })
     }
 
     private fun scheduleScreen(root: LinearLayout) {
