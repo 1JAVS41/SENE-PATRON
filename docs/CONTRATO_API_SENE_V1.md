@@ -144,46 +144,24 @@ No entrega ventas, inventario, caja ni gastos.
 
 ## 8. Solicitudes de corrección de venta
 
-**Estado real:** los endpoints de corrección descritos en esta sección son contrato pendiente; no aparecen implementados en el router actual del Worker. No conectar la APK suponiendo que existen.
+**Estado real:** los cuatro endpoints están implementados en el Worker de la rama. Se añadió prueba CI SQLite de autorización y consumo único. Aún falta E2E en Cloudflare y conexión Android; no están desplegados.
 
 ### `POST /v1/ventas/corrections`
 Solo VENTAS autenticado. Cuerpo:
 ```json
-{"saleId":"id local de venta","reason":"Motivo breve"}
+{"saleId":"id local de venta","reason":"Motivo breve","idempotencyKey":"uuid"}
 ```
-No enviar monto, artículos, cliente ni historial de ventas. El backend obtiene licenseId y deviceId de la sesión firmada. Crea solicitud pendiente. Respuesta:
-```json
-{"requestId":"uuid","status":"pending","createdAt":unix}
-```
-Idempotencia: cada solicitud lleva `Idempotency-Key` UUID; repetir la misma clave devuelve el mismo resultado sin duplicar.
+No enviar monto, artículos, cliente ni historial de ventas. El backend obtiene licenseId y deviceId de la sesión firmada. Crea solicitud pendiente. Repetir la misma clave en el mismo dispositivo devuelve el registro existente.
 
-### `GET /v1/patron/corrections?slot=VENTAS_1&status=pending`
-Solo PATRÓN autenticado. Lista metadatos mínimos:
-```json
-{"items":[{"requestId":"uuid","slot":"VENTAS_1","saleId":"id","reason":"Motivo","status":"pending","createdAt":unix}]}
-```
-Nunca devuelve contenido de la venta.
+### `POST /v1/patron/corrections/inbox`
+Solo PATRÓN autenticado. Cuerpo `{"slot":"VENTAS_1","status":"pending"}`; también admite `VENTAS_2` y `status:"all"`. Devuelve los metadatos mínimos: requestId, saleId, reason, status y fechas. Los equipos se consultan por separado.
 
-### `POST /v1/patron/corrections/{requestId}/decision`
-Solo PATRÓN autenticado. Cuerpo:
-```json
-{"decision":"approve"}
-```
-o `{"decision":"reject"}`. Aprobación crea un grant único ligado al request, license, device y sale. Decisión y grant se guardan atómicamente. No se puede decidir dos veces. Respuesta:
-```json
-{"requestId":"uuid","status":"approved","grantId":"uuid","usesAllowed":1}
-```
+### `POST /v1/patron/corrections/decision`
+Solo PATRÓN autenticado. Cuerpo `{"requestId":"uuid","decision":"approve"}` o `{"requestId":"uuid","decision":"reject"}`. Aprobación crea un grant único ligado a solicitud, licencia, dispositivo VENTAS y venta. Decisión, grant y auditoría se guardan en un batch D1. No se puede decidir dos veces.
 
 ### `POST /v1/ventas/corrections/consume`
-Solo el dispositivo VENTAS al que pertenece la solicitud. Cuerpo:
-```json
-{"requestId":"uuid","grantId":"uuid","saleId":"id"}
-```
-Transacción atómica comprueba que grant aprobado, no consumido, del mismo license/device/sale y que licencia sigue autorizada para operaciones remotas; marca grant consumido y request `consumed`. Respuesta:
-```json
-{"authorized":true,"requestId":"uuid","saleId":"id","consumedAt":unix,"usesRemaining":0}
-```
-Una repetición devuelve `409 GRANT_ALREADY_CONSUMED`. La APK solo habilita una corrección tras respuesta positiva del servidor.
+Solo el dispositivo VENTAS de la solicitud. Cuerpo `{"requestId":"uuid","grantId":"uuid","saleId":"id"}`. Verifica licencia vigente, dispositivo, venta y permiso aprobado no consumido; marca grant y solicitud consumidos en batch. Una repetición devuelve conflicto. La APK solo habilita una corrección tras respuesta positiva.
+
 
 ## 9. Sustitución por pérdida
 
@@ -265,7 +243,7 @@ El código no tiene caducidad temporal automática. Una solicitud abierta evita 
 | Reportes de cierre y nómina | Implementado en Worker | Sintaxis/SQLite | No desplegado |
 | Cuota 20 por semana | Implementado con UPSERT condicional atómico | Prueba 20/21 aprobada | No desplegado |
 | Historial de dispositivos / un activo por slot | Migración 0004 | Prueba de referencias e integridad aprobada | Migración no aplicada |
-| Correcciones de venta | Contrato solamente; falta código | No | No |
+| Correcciones de venta | Implementadas: solicitud idempotente, bandeja por equipo, decisión y grant de un uso | Prueba CI SQLite añadida | No desplegado / falta E2E y Android |
 | Reemplazo autorizado de VENTAS | Implementado: solicitud PATRÓN, aprobación/rechazo privada, revocación e invalidación QR | CI SQLite añadido | No desplegado / falta E2E |
 | Recuperación de PATRÓN perdido | Pendiente; requiere recuperación de identidad/bootstrap segura | No | No |
 | Renovación mensual por código manual | Implementada en Worker y migración 0005 | Prueba SQL/CI aprobada; falta E2E | No |
