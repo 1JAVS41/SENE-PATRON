@@ -3,6 +3,7 @@ package com.sene.patron
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Bitmap
+import android.graphics.Bitmap.Config
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -22,6 +23,8 @@ import android.widget.EditText
 import android.widget.Toast
 import android.widget.FrameLayout
 import android.widget.ImageView
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -464,6 +467,56 @@ class MainActivity : Activity() {
         }.start()
     }
 
+
+    private fun showPairingQr() {
+        val baseUrl = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+            .getString("server_base_url", null)?.takeIf { it.isNotBlank() }
+        if (baseUrl == null) {
+            showServerConfig()
+            return
+        }
+        Thread {
+            try {
+                val result = SeneApiClient(this, baseUrl).createPairingToken()
+                val payload = result.optString("qrPayload")
+                if (payload.isBlank()) throw IllegalStateException("El servidor no devolvió el QR")
+                val matrix = QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, 640, 640)
+                val pixels = IntArray(640 * 640)
+                for (y in 0 until 640) for (x in 0 until 640) {
+                    pixels[y * 640 + x] = if (matrix.get(x, y)) Color.BLACK else Color.WHITE
+                }
+                val bitmap = Bitmap.createBitmap(640, 640, Bitmap.Config.ARGB_8888)
+                bitmap.setPixels(pixels, 0, 640, 0, 0, 640, 640)
+                runOnUiThread {
+                    val content = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        setPadding(dp(18), dp(8), dp(18), dp(8))
+                    }
+                    content.addView(ImageView(this).apply {
+                        setImageBitmap(bitmap)
+                        adjustViewBounds = true
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                    }, LinearLayout.LayoutParams(dp(280), dp(280)))
+                    content.addView(text("Escanea este QR desde SENE VENTAS. Usos restantes: " +
+                        result.optInt("remainingUses", 2) + "\nVence: " +
+                        java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale("es", "MX"))
+                            .format(java.util.Date(result.optLong("expiresAt", 0L) * 1000)), 13, muted))
+                    AlertDialog.Builder(this)
+                        .setTitle("VINCULAR SENE VENTAS")
+                        .setMessage("QR de un solo proceso. No lo compartas con personas ajenas a tu negocio.")
+                        .setView(content)
+                        .setPositiveButton("CERRAR", null)
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "No se pudo generar el QR: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
     private fun showServerConfig() {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val field = EditText(this).apply {
@@ -780,8 +833,12 @@ class MainActivity : Activity() {
                 root.addView(info("SUSTITUCIÓN DE TELÉFONO",
                     "La solicitud de sustitución conservará el espacio de licencia del Equipo $teamNumber y requerirá validación del titular."))
             }
-            else -> root.addView(info("VÍNCULO · EQUIPO $teamNumber",
-                "Aquí se mostrará la identidad local, el estado de vinculación y la fecha de registro de este dispositivo."))
+            else -> {
+                root.addView(info("VÍNCULO · EQUIPO $teamNumber",
+                    "Genera un QR temporal para vincular el teléfono SENE VENTAS que ocupará este espacio. Cada QR permite dos vinculaciones y vence en 24 horas."))
+                gap(root, 9)
+                root.addView(primaryButton("GENERAR QR DE VINCULACIÓN") { showPairingQr() })
+            }
         }
         gap(root, 11)
         root.addView(info("FUNCIONAMIENTO LOCAL Y SERVIDOR SENE",
