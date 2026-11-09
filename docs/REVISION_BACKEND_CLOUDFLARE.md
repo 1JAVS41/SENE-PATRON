@@ -176,3 +176,12 @@ No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revi
 - Migración `0006_device_replacement_flow.sql` impone una sola solicitud pendiente por equipo y por slot.
 - CI incluye prueba SQLite de duplicados, revocación, invalidación QR y reutilización del slot.
 - Pendiente: recuperación segura de un PATRÓN perdido; interfaz privada de operador; E2E en Cloudflare; migraciones aún no aplicadas a D1 real. No desplegar.
+
+
+## Actualización: correcciones de venta y control de cuota (2026-11-09)
+
+- Worker implementa solicitud idempotente de corrección, bandeja PATRÓN filtrada por Equipo 1/2, aprobación/rechazo y permiso de un solo uso ligado a licencia, dispositivo y venta.
+- El consumo actualiza grant y solicitud en batch D1; una segunda utilización se rechaza. Se añadió prueba CI SQLite para comprobar single-use.
+- La cuota ahora se consume después de validar rol y vigencia de licencia en el contexto del dispositivo. La excepción de renovación permite que un PATRÓN vencido solicite/canjee renovación; los rechazos por licencia no consumen cuota. La emisión de QR sí consume cuota.
+- Se corrigió el parseo del encabezado `Authorization: Bearer` en el operador privado.
+- Pendiente: revisar integración real Android, ejecutar CI del último commit, pruebas E2E contra entorno de pruebas Cloudflare, y desplegar solo tras aprobación explícita. No se tocó D1 real.
