@@ -1062,10 +1062,22 @@ async function patronCorrectionsInbox(request, env) {
   const slot = body.slot === "VENTAS_1" ? 2 : body.slot === "VENTAS_2" ? 3 : null;
   const status = body.status === "all" ? "all" : "pending";
   if (!slot) return json({ error: "INVALID_REQUEST" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "UPDATE correction_requests SET seen_at = ? WHERE status = 'pending' AND seen_at IS NULL AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ? AND status = 'active')"
+  ).bind(now, ctx.licenseId, slot).run();
   const rows = await env.DB.prepare(
     "SELECT r.id, r.sale_id, r.reason, r.status, r.created_at, r.decided_at FROM correction_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND d.slot_number = ? AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
   ).bind(ctx.licenseId, slot, status).all();
-  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", items: (rows.results || []).map((r) => ({
+  const counts = await env.DB.prepare(
+    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests w WHERE w.ventas_device_id = d.id AND w.status = 'pending' AND w.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
+  ).bind(ctx.licenseId).all();
+  const pendingByTeam = { VENTAS_1: 0, VENTAS_2: 0 };
+  for (const row of (counts.results || [])) {
+    if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.pending_count);
+    if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.pending_count);
+  }
+  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", pendingByTeam, items: (rows.results || []).map((r) => ({
     requestId: r.id, saleId: r.sale_id, reason: r.reason, status: r.status,
     createdAt: r.created_at, decidedAt: r.decided_at
   })) });
@@ -1279,11 +1291,17 @@ async function patronRequestsInbox(request, env) {
   const slot = body.slot === "VENTAS_1" || body.slot === "VENTAS_2" ? body.slot : null;
   const status = body.status === "all" ? "all" : "pending";
   const slotNumber = slot === "VENTAS_1" ? 2 : slot === "VENTAS_2" ? 3 : null;
+  if (slotNumber !== null) {
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      "UPDATE work_requests SET seen_at = ? WHERE status = 'pending' AND seen_at IS NULL AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ? AND status = 'active')"
+    ).bind(now, ctx.licenseId, slotNumber).run();
+  }
   const rows = await env.DB.prepare(
     "SELECT r.id, r.request_type, r.details_json, r.status, r.created_at, r.decided_at, d.slot_number FROM work_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND (? IS NULL OR d.slot_number = ?) AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
   ).bind(ctx.licenseId, slotNumber, slotNumber, status).all();
   const counts = await env.DB.prepare(
-    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests r WHERE r.ventas_device_id = d.id AND r.status = 'pending') + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending') AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
+    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests r WHERE r.ventas_device_id = d.id AND r.status = 'pending' AND r.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
   ).bind(ctx.licenseId).all();
   const pendingByTeam = { VENTAS_1: 0, VENTAS_2: 0 };
   for (const row of (counts.results || [])) {
