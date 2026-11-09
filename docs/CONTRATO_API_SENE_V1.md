@@ -72,30 +72,20 @@ El servidor genera el nonce y construye `signingMessage` incluyendo purpose, cha
 
 ## 5. Alta y activación inicial
 
-### Operador privado — `POST /v1/admin/licenses`
-Requiere autenticación de operador verificada en servidor; el secreto de administración solo vive como secret de Worker. Cuerpo:
-```json
-{"businessName":"Nombre del negocio","setupPaymentReference":"folio opcional"}
-```
-Crea licencia `PENDING_SETUP`, los tres slots fijos y un código aleatorio de activación de un solo uso. Respuesta única:
-```json
-{"licenseId":"uuid","activationCode":"código mostrado una sola vez","slots":["PATRON","VENTAS_1","VENTAS_2"],"status":"PENDING_SETUP"}
-```
-El operador confirma el pago de instalación de $500 MXN en una acción privada separada y auditable.
+### Operador privado
+El alta se crea mediante `POST /v1/operator/licenses/create` (ver sección 5-A). El operador confirma manualmente el pago completo de $580 MXN: $500 de alta y $80 de primera renta. El código de activación solo se entrega tras verificar ambos importes.
 
 ### `POST /v1/patron/activate`
 Cuerpo:
 ```json
 {"activationCode":"código","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex"}
 ```
-Condiciones: código válido/no revocado/no usado; reto vigente de propósito `PATRON_ACTIVATE`; firma válida; pago de instalación confirmado; no hay PATRON vinculado. El código se consume en la misma transacción que registra el PATRÓN. No inicia los 30 días hasta confirmar la primera renta mensual y completar el alta comercial según la política de pagos.
+Requiere reto vigente `PATRON_ACTIVATE`, firma válida y coincidencia de identidad. En una operación D1 atómica registra el dispositivo PATRÓN, consume el código y activa la licencia por 30 días desde la hora del servidor. El Worker exige `setup_paid_at` y `first_rent_paid_at`; si falta cualquiera, no registra el dispositivo ni consume el código. El código es de un solo uso y el servidor conserva únicamente su hash.
 
-**Implementación en Worker (parcial):** el handler verifica firma, identidad, hash del código y `setup_paid_at`; inserta el slot PATRON y consume el código en un `DB.batch`. La licencia queda `pending` y la respuesta `PENDING_PAYMENT`. La confirmación privada del pago de instalación y la primera renta todavía deben implementarse; por ello este endpoint no puede completar una activación comercial hasta que el flujo privado registre `setup_paid_at`. Respuesta:
+Respuesta exitosa:
 ```json
-{"deviceId":"uuid","slot":"PATRON","licenseStatus":"PENDING_PAYMENT","periodEndsAt":null}
+{"deviceId":"uuid","slot":"PATRON","licenseStatus":"ACTIVE","periodEndsAt":unix}
 ```
-
-El operador confirma por separado la primera mensualidad de $80 MXN. Al confirmar, backend activa licencia por 30 días. Las renovaciones confirmadas agregan 30 días al vencimiento futuro; si ya venció, empiezan desde la confirmación. La confirmación de un pago tiene identificador único para impedir doble extensión.
 
 ## 5-A. Alta privada y confirmación del pago inicial — implementación en rama
 
