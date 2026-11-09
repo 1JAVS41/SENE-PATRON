@@ -32,6 +32,160 @@ const sha256 = async (value) =>
 const sha256Bytes = async (value) =>
   hex(await crypto.subtle.digest("SHA-256", value));
 
+
+function strictBase64(value) {
+  if (typeof value !== "string" || value.length < 8 || value.length > 2048 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null;
+  try {
+    const bytes = Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+    return bytes.length ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+// Android Keystore returns ECDSA signatures as ASN.1 DER; WebCrypto expects
+// the fixed-width P-1363 form r||s for ECDSA verification.
+function derEcdsaToP1363(der) {
+  if (!(der instanceof Uint8Array) || der.length < 8 || der.length > 80 || der[0] !== 0x30) {
+    return null;
+  }
+  let offset = 1;
+  let sequenceLength = der[offset++];
+  if (sequenceLength & 0x80) {
+    const count = sequenceLength & 0x7f;
+    if (count !== 1 || offset >= der.length) return null;
+    sequenceLength = der[offset++];
+  }
+  if (sequenceLength !== der.length - offset || der[offset++] !== 0x02) return null;
+  const rLength = der[offset++];
+  if (!rLength || offset + rLength + 2 > der.length) return null;
+  const r = der.slice(offset, offset + rLength);
+  offset += rLength;
+  if (der[offset++] !== 0x02) return null;
+  const sLength = der[offset++];
+  if (!sLength || offset + sLength !== der.length) return null;
+  const s = der.slice(offset, offset + sLength);
+
+  const normalize = (integer) => {
+    if (integer[0] & 0x80) return null; // DER INTEGER must be positive.
+    let value = integer;
+    while (value.length > 1 && value[0] === 0) value = value.slice(1);
+    if (value.length > 32) return null;
+    const out = new Uint8Array(32);
+    out.set(value, 32 - value.length);
+    return out;
+  };
+  const rr = normalize(r);
+  const ss = normalize(s);
+  if (!rr || !ss) return null;
+  const result = new Uint8Array(64);
+  result.set(rr, 0);
+  result.set(ss, 32);
+  return result;
+}
+
+async function verifySignedRequest(request, env, expectedPurpose) {
+  const challengeId = request.headers.get("X-SENE-Challenge") || "";
+  const signatureText = request.headers.get("X-SENE-Signature") || "";
+  const deviceHeader = request.headers.get("X-SENE-Device") || "";
+  if (!challengeId || !signatureText) return { ok: false, status: 401, error: "INVALID_SIGNATURE" };
+
+  const signatureDer = strictBase64(signatureText);
+  const signature = signatureDer && derEcdsaToP1363(signatureDer);
+  if (!signature) return { ok: false, status: 401, error: "INVALID_SIGNATURE" };
+
+  const bodyBytes = new Uint8Array(await request.clone().arrayBuffer());
+  if (bodyBytes.length > 32768) return { ok: false, status: 413, error: "REQUEST_TOO_LARGE" };
+  const bodyHash = await sha256Bytes(bodyBytes);
+  const path = new URL(request.url).pathname;
+  const method = request.method.toUpperCase();
+
+  const challenge = await env.DB.prepare(
+    "SELECT id, nonce, purpose, installation_id, created_at, expires_at, consumed_at, device_id, fingerprint, target_method, target_path, body_sha256, signing_message FROM challenges WHERE id = ? LIMIT 1"
+  ).bind(challengeId).first();
+
+  const now = Math.floor(Date.now() / 1000);
+  if (!challenge || challenge.purpose !== expectedPurpose ||
+      challenge.target_method !== method || challenge.target_path !== path ||
+      challenge.body_sha256 !== bodyHash || challenge.expires_at < now ||
+      challenge.consumed_at !== null) {
+    return { ok: false, status: 401, error: "CHALLENGE_INVALID_OR_EXPIRED" };
+  }
+
+  let publicKeyBytes;
+  let signerIdentity;
+  if (challenge.device_id) {
+    if (deviceHeader !== challenge.device_id) {
+      return { ok: false, status: 401, error: "DEVICE_MISMATCH" };
+    }
+    const device = await env.DB.prepare(
+      "SELECT public_key, fingerprint, status FROM devices WHERE id = ? LIMIT 1"
+    ).bind(challenge.device_id).first();
+    if (!device || device.status !== "active" ||
+        String(device.fingerprint).toLowerCase() !== String(challenge.fingerprint).toLowerCase()) {
+      return { ok: false, status: 401, error: "DEVICE_NOT_REGISTERED" };
+    }
+    publicKeyBytes = new Uint8Array(device.public_key);
+    signerIdentity = challenge.device_id;
+  } else {
+    if (deviceHeader) return { ok: false, status: 401, error: "UNEXPECTED_DEVICE_HEADER" };
+    let body;
+    try { body = JSON.parse(new TextDecoder().decode(bodyBytes)); } catch {
+      return { ok: false, status: 400, error: "INVALID_REQUEST" };
+    }
+    if (body.installationId !== challenge.installation_id) {
+      return { ok: false, status: 401, error: "DEVICE_MISMATCH" };
+    }
+    const identity = await validateBootstrapIdentity(body);
+    if (!identity || identity.fingerprint !== String(challenge.fingerprint).toLowerCase()) {
+      return { ok: false, status: 401, error: "INVALID_DEVICE_IDENTITY" };
+    }
+    publicKeyBytes = identity.publicKey;
+    signerIdentity = identity.fingerprint;
+  }
+
+  const signingText = [
+    "SENE-API-V1",
+    challenge.purpose,
+    challenge.id,
+    challenge.nonce,
+    challenge.target_method,
+    challenge.target_path,
+    challenge.body_sha256,
+    signerIdentity,
+  ].join("\n");
+  const expectedMessage = base64Url(new TextEncoder().encode(signingText));
+  if (expectedMessage !== challenge.signing_message) {
+    return { ok: false, status: 401, error: "CHALLENGE_CORRUPT" };
+  }
+
+  let valid = false;
+  try {
+    const key = await crypto.subtle.importKey(
+      "spki", publicKeyBytes,
+      { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]
+    );
+    valid = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" }, key, signature,
+      fromBase64(challenge.signing_message)
+    );
+  } catch {
+    valid = false;
+  }
+  if (!valid) return { ok: false, status: 401, error: "INVALID_SIGNATURE" };
+
+  // Conditional write makes a valid challenge one-use even under concurrent replay.
+  const consumed = await env.DB.prepare(
+    "UPDATE challenges SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND expires_at >= ?"
+  ).bind(now, challengeId, now).run();
+  if ((consumed.meta?.changes ?? 0) !== 1) {
+    return { ok: false, status: 409, error: "CHALLENGE_ALREADY_USED" };
+  }
+
+  return { ok: true, bodyBytes, bodyText: new TextDecoder().decode(bodyBytes), challenge };
+}
+
 function makeCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(12));
