@@ -269,8 +269,8 @@ class MainActivity : Activity() {
                 if (status == "pending") {
                     gap(requestCard, 7)
                     val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    val approve = button("APROBAR", success) { decideTeamRequest(team, requestId, true) }
-                    val reject = button("RECHAZAR", red) {
+                    val approve = primaryButton("APROBAR") { decideTeamRequest(team, requestId, true) }
+                    val reject = primaryButton("RECHAZAR") {
                         AlertDialog.Builder(this)
                             .setTitle("Rechazar solicitud")
                             .setMessage("¿Confirmas que deseas rechazar esta solicitud?")
