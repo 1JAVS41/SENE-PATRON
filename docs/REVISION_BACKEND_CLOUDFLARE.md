@@ -203,3 +203,13 @@ No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revi
 
 
 **Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
+
+
+## Recuperación de PATRÓN perdido (2026-11-09)
+
+- Migración 0009: solicitud privada con código hash único, ligada a licencia y al PATRÓN anterior.
+- El operador puede crear, consultar pendientes, reemitir (rotando e invalidando el código anterior) o cancelar.
+- El nuevo PATRÓN firma reto bootstrap P-256. El batch revoca el anterior, invalida pairing tokens, registra el nuevo dispositivo en slot 1, consume código y audita.
+- Licencia vencida puede recuperar el dispositivo, pero debe renovar antes de operaciones remotas.
+- El cliente Android PATRÓN ya tiene método firmado `recover(recoveryCode)` y guarda el nuevo deviceId.
+- CI SQLite de recuperación se añadió; pendiente comprobar el run más reciente y E2E en Cloudflare.
