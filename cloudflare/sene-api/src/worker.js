@@ -778,13 +778,20 @@ async function cancelRenewal(request, env) {
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
   const now = Math.floor(Date.now() / 1000);
-  const result = await env.DB.prepare(
-    "UPDATE renewal_requests SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status IN ('pending_payment','authorized')"
-  ).bind(now, requestId).run();
-  if ((result.meta?.changes ?? 0) !== 1) return json({ error: "RENEWAL_NOT_CANCELLABLE" }, 409);
-  await env.DB.prepare(
-    "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, 'operator', 'operator', 'renewal_cancelled', ?, ? FROM renewal_requests WHERE id = ?"
-  ).bind(crypto.randomUUID(), JSON.stringify({ requestId }), now, requestId).run();
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE renewal_requests SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status IN ('pending_payment','authorized')"
+      ).bind(now, requestId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, 'operator', 'operator', 'renewal_cancelled', ?, ? FROM renewal_requests WHERE id = ? AND status = 'cancelled' AND cancelled_at = ?"
+      ).bind(crypto.randomUUID(), JSON.stringify({ requestId }), now, requestId, now)
+    ]);
+  } catch {
+    return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+  }
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1) return json({ error: "RENEWAL_NOT_CANCELLABLE" }, 409);
   return json({ requestId, status: "cancelled" });
 }
 
