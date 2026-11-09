@@ -49,6 +49,49 @@ class SenePatronApiClient(context: Context, baseUrl: String) {
         ?: throw IllegalStateException("SENE PATRÓN todavía no está activado")): JSONObject =
         deviceSigned("PATRON_NOTIFICATIONS", "/v1/patron/notifications", "{}", deviceId)
 
+    fun linkedDevices(deviceId: String = storedDeviceId()
+        ?: throw IllegalStateException("SENE PATRÓN todavía no está activado")): JSONObject =
+        deviceSigned("PATRON_DEVICES_LIST", "/v1/patron/devices/list", "{}", deviceId)
+
+    fun requestReplacement(
+        deviceIdToReplace: String,
+        reason: String,
+        patronDeviceId: String = storedDeviceId()
+            ?: throw IllegalStateException("SENE PATRÓN todavía no está activado")
+    ): JSONObject {
+        require(deviceIdToReplace.isNotBlank() && reason.isNotBlank())
+        val body = JSONObject().put("deviceId", deviceIdToReplace).put("reason", reason.trim())
+        return deviceSigned("PATRON_REPLACEMENT_REQUEST", "/v1/patron/devices/replacement-request", body.toString(), patronDeviceId)
+    }
+
+    fun requestRenewal(
+        patronDeviceId: String = storedDeviceId()
+            ?: throw IllegalStateException("SENE PATRÓN todavía no está activado")
+    ): JSONObject = deviceSigned("PATRON_RENEWAL_REQUEST", "/v1/patron/renewals/request", "{}", patronDeviceId)
+
+    fun redeemRenewal(
+        requestId: String,
+        authorizationCode: String,
+        patronDeviceId: String = storedDeviceId()
+            ?: throw IllegalStateException("SENE PATRÓN todavía no está activado")
+    ): JSONObject {
+        val body = JSONObject().put("requestId", requestId).put("authorizationCode", authorizationCode.trim())
+        return deviceSigned("PATRON_RENEWAL_REDEEM", "/v1/patron/renewals/redeem", body.toString(), patronDeviceId)
+    }
+
+    fun recover(recoveryCode: String): JSONObject {
+        val identity = PatronDeviceIdentity.get(app)
+        val body = JSONObject()
+            .put("recoveryCode", recoveryCode.trim().uppercase())
+            .put("installationId", identity.installationId)
+            .put("continuityId", identity.continuityId)
+            .put("publicKeyBase64", identity.publicKeyBase64)
+            .put("fingerprint", identity.fingerprint)
+        val result = bootstrapSigned("PATRON_RECOVERY", "/v1/patron/recover", body.toString(), identity)
+        saveDevice(result)
+        return result
+    }
+
     fun requestsInbox(
         slot: String,
         status: String = "pending",
