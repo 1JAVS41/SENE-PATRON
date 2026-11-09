@@ -82,10 +82,8 @@ jobs:
           sqlite3 "$DB_FILE" "UPDATE renewal_requests SET status='consumed', consumed_at=400 WHERE id='renew-1' AND status='authorized' AND code_hash='hash-once';"
           test "$(sqlite3 "$DB_FILE" "SELECT status FROM renewal_requests WHERE id='renew-1';")" = "consumed"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM payments WHERE idempotency_key='renewal:renew-1' AND amount_cents=8000 AND status='CONFIRMED';")" = "1"
-          if sqlite3 "$DB_FILE" "UPDATE renewal_requests SET status='consumed', consumed_at=401 WHERE id='renew-1' AND status='authorized' AND code_hash='hash-once';" 2>/dev/null; then
-            echo "ERROR: se permitió consumir el mismo código dos veces"
-            exit 1
-          fi
+          sqlite3 "$DB_FILE" "UPDATE renewal_requests SET status='consumed', consumed_at=401 WHERE id='renew-1' AND status='authorized' AND code_hash='hash-once';"
+          test "$(sqlite3 "$DB_FILE" "SELECT consumed_at FROM renewal_requests WHERE id='renew-1';")" = "400"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
       - name: Probar reemplazo conservando historial y referencias
