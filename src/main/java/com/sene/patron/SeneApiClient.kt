@@ -96,7 +96,14 @@ class SeneApiClient(context: Context, baseUrl: String) {
     fun requestsInbox(slot: String, all: Boolean = false): JSONObject {
         require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
         val body = JSONObject().put("slot", slot).put("status", if (all) "all" else "pending")
-        return deviceSigned("PATRON_REQUESTS_INBOX", "/v1/patron/requests/inbox", body.toString())
+        val result = deviceSigned("PATRON_REQUESTS_INBOX", "/v1/patron/requests/inbox", body.toString())
+        val counts = result.optJSONObject("pendingByTeam") ?: JSONObject()
+        check(prefs.edit()
+            .putInt("notifications_team1", counts.optInt("VENTAS_1", 0))
+            .putInt("notifications_team2", counts.optInt("VENTAS_2", 0))
+            .putLong("notifications_updated_at", System.currentTimeMillis() / 1000)
+            .commit()) { "No se pudieron guardar los contadores de notificaciones" }
+        return result
     }
 
     fun decideRequest(requestId: String, approve: Boolean, decisionDetails: JSONObject = JSONObject()): JSONObject {
