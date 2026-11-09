@@ -200,6 +200,7 @@ async function requireAdmin(request, env) {
 
 const CHALLENGE_TARGETS = {
   PATRON_ACTIVATE: ["POST", "/v1/patron/activate"],
+  PATRON_RECOVERY: ["POST", "/v1/patron/recover"],
   VENTAS_PAIR: ["POST", "/v1/ventas/pair"],
   DEVICE_AUTH: ["POST", "/v1/device/session"],
   PATRON_PAIRING_TOKEN: ["POST", "/v1/patron/pairing-tokens"],
@@ -276,7 +277,7 @@ async function issueChallenge(request, env) {
   let fingerprint = "";
   let deviceId = null;
 
-  if (purpose === "PATRON_ACTIVATE" || purpose === "VENTAS_PAIR") {
+  if (purpose === "PATRON_ACTIVATE" || purpose === "VENTAS_PAIR" || purpose === "PATRON_RECOVERY") {
     const identity = await validateBootstrapIdentity(body);
     if (!identity) return json({ error: "INVALID_DEVICE_IDENTITY" }, 400);
     installationId = identity.installationId;
@@ -451,6 +452,123 @@ async function activatePatron(request, env) {
     licenseStatus: activated?.status === "active" ? "ACTIVE" : "PENDING_PAYMENT",
     periodEndsAt: activated?.expires_at ?? null
   }, 201);
+}
+
+async function recoverPatron(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_RECOVERY");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const code = typeof body.recoveryCode === "string" ? body.recoveryCode.trim().toUpperCase() : "";
+  const identity = await validateBootstrapIdentity(body);
+  if (!identity || !/^[A-HJ-NP-Z2-9]{12}$/.test(code) ||
+      identity.installationId !== proof.challenge.installation_id ||
+      identity.fingerprint !== String(proof.challenge.fingerprint).toLowerCase()) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const codeHash = await sha256(code);
+  const recovery = await env.DB.prepare(
+    "SELECT r.id, r.license_id, r.old_patron_device_id, l.status AS license_status FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id WHERE r.code_hash = ? AND r.status = 'pending' LIMIT 1"
+  ).bind(codeHash).first();
+  if (!recovery || !["active", "expired"].includes(recovery.license_status)) {
+    return json({ error: "RECOVERY_CODE_INVALID_OR_USED" }, 409);
+  }
+  const newDeviceId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE devices SET status = 'revoked' WHERE id = ? AND license_id = ? AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'pending')"
+      ).bind(recovery.old_patron_device_id, recovery.license_id, recovery.id, codeHash),
+      env.DB.prepare(
+        "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked') AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'pending')"
+      ).bind(now, recovery.license_id, recovery.old_patron_device_id, recovery.id, codeHash),
+      env.DB.prepare(
+        "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT ?, r.license_id, 'PATRON', ?, ?, ?, ?, 1, 'active', ? FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id JOIN devices old ON old.id = r.old_patron_device_id WHERE r.id = ? AND r.code_hash = ? AND r.status = 'pending' AND old.status = 'revoked' AND l.status IN ('active','expired') AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id = r.license_id AND d.slot_number = 1 AND d.status = 'active')"
+      ).bind(newDeviceId, identity.installationId, body.continuityId.toLowerCase(), identity.publicKey, identity.fingerprint, now, recovery.id, codeHash),
+      env.DB.prepare(
+        "UPDATE patron_recovery_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND code_hash = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND status = 'active')"
+      ).bind(now, recovery.id, codeHash, newDeviceId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'system', 'patron_recovery', 'patron_device_recovered', ?, ? WHERE EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND status = 'consumed' AND consumed_at = ?) AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'active')"
+      ).bind(crypto.randomUUID(), recovery.license_id, newDeviceId, JSON.stringify({ recoveryRequestId: recovery.id, oldDeviceId: recovery.old_patron_device_id }), now, recovery.id, now, newDeviceId)
+    ]);
+  } catch {
+    return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
+  }
+  if (results?.some((result) => (result?.meta?.changes ?? 0) !== 1)) {
+    return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
+  }
+  return json({
+    deviceId: newDeviceId,
+    slot: "PATRON",
+    licenseStatus: recovery.license_status === "active" ? "ACTIVE" : "EXPIRED",
+    periodEndsAt: null,
+    recovered: true
+  }, 201);
+}
+
+async function createPatronRecovery(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
+  const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+  if (!/^[0-9a-f-]{36}$/i.test(licenseId) || !reason) return json({ error: "INVALID_REQUEST" }, 400);
+  const oldPatron = await env.DB.prepare(
+    "SELECT d.id FROM devices d JOIN licenses l ON l.id = d.license_id WHERE d.license_id = ? AND d.device_type = 'PATRON' AND d.slot_number = 1 AND d.status = 'active' AND l.status IN ('active','expired') LIMIT 1"
+  ).bind(licenseId).first();
+  if (!oldPatron) return json({ error: "ACTIVE_PATRON_NOT_FOUND" }, 409);
+  const id = crypto.randomUUID();
+  const code = makeCode();
+  const codeHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO patron_recovery_requests (id, license_id, old_patron_device_id, code_hash, reason, status, created_at, created_by) VALUES (?, ?, ?, ?, ?, 'pending', ?, 'operator')"
+      ).bind(id, licenseId, oldPatron.id, codeHash, reason, now),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, ?, 'operator', 'operator', 'patron_recovery_created', ?, ?)"
+      ).bind(crypto.randomUUID(), licenseId, oldPatron.id, JSON.stringify({ recoveryRequestId: id, reason }), now)
+    ]);
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+      return json({ error: "PATRON_RECOVERY_ALREADY_PENDING" }, 409);
+    }
+  } catch {
+    return json({ error: "PATRON_RECOVERY_ALREADY_PENDING" }, 409);
+  }
+  return json({
+    recoveryRequestId: id,
+    recoveryCode: code,
+    licenseId,
+    expiresAt: null,
+    note: "Código de recuperación de un solo uso, sin caducidad temporal. Entrégalo solo al titular tras verificar su identidad y negocio."
+  }, 201);
+}
+
+async function cancelPatronRecovery(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.recoveryRequestId === "string" ? body.recoveryRequestId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare("UPDATE patron_recovery_requests SET status = 'cancelled' WHERE id = ? AND status = 'pending'").bind(requestId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, 'operator', 'operator', 'patron_recovery_cancelled', ?, ? FROM patron_recovery_requests WHERE id = ? AND status = 'cancelled'"
+      ).bind(crypto.randomUUID(), JSON.stringify({ recoveryRequestId: requestId }), now, requestId)
+    ]);
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+      return json({ error: "PATRON_RECOVERY_NOT_PENDING" }, 409);
+    }
+  } catch {
+    return json({ error: "PATRON_RECOVERY_NOT_PENDING" }, 409);
+  }
+  return json({ recoveryRequestId: requestId, status: "cancelled" });
 }
 
 async function createPairingToken(request, env) {
@@ -1439,6 +1557,10 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/activate") {
     return activatePatron(request, env);
   }
+
+  if (request.method === "POST" && url.pathname === "/v1/patron/recover") return recoverPatron(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/create") return createPatronRecovery(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/cancel") return cancelPatronRecovery(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/patron/pairing-tokens") {
     return createPairingToken(request, env);
