@@ -1530,7 +1530,8 @@ async function patronPayrollSettingsSet(request, env) {
       (paymentDay !== null && (!Number.isInteger(paymentDay) || paymentDay < 1 || paymentDay > 31)) ||
       !Array.isArray(paymentDates) || paymentDates.length > 60 ||
       paymentDates.some((date) => typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-        !Number.isFinite(Date.parse(date + "T00:00:00Z")))) {
+        !Number.isFinite(Date.parse(date + "T00:00:00Z")) ||
+        new Date(date + "T00:00:00Z").toISOString().slice(0, 10) !== date)) {
     return json({ error: "INVALID_PAYROLL_SETTINGS" }, 400);
   }
   if (paymentDay === null && paymentDates.length === 0) {
