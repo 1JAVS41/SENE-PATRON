@@ -597,10 +597,24 @@ async function requireOperator(request, env) {
     constantTimeTextEqual(supplied, expected);
 }
 
+async function renewalPatronContext(proof, env) {
+  const deviceId = proof.challenge.device_id;
+  const row = await env.DB.prepare(
+    "SELECT d.id, d.license_id, d.device_type, d.slot_number, d.status AS device_status, l.status AS license_status FROM devices d JOIN licenses l ON l.id = d.license_id WHERE d.id = ? LIMIT 1"
+  ).bind(deviceId).first();
+  if (!row || row.device_status !== "active" || row.device_type !== "PATRON" || row.slot_number !== 1) {
+    return { error: "DEVICE_NOT_REGISTERED", status: 401 };
+  }
+  if (!["active", "expired"].includes(row.license_status)) {
+    return { error: "LICENSE_NOT_RENEWABLE", status: 403 };
+  }
+  return { deviceId, licenseId: row.license_id, deviceType: row.device_type, slotNumber: row.slot_number };
+}
+
 async function createRenewalRequest(request, env) {
   const proof = await verifySignedRequest(request, env, "PATRON_RENEWAL_REQUEST");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
-  const ctx = await signedDeviceContext({ ...proof, env }, "PATRON");
+  const ctx = await renewalPatronContext(proof, env);
   if (ctx.error) return json({ error: ctx.error }, ctx.status);
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
@@ -689,9 +703,12 @@ async function redeemRenewal(request, env) {
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
   const license = await env.DB.prepare(
-    "SELECT expires_at FROM licenses WHERE id = ? LIMIT 1"
+    "SELECT expires_at, status FROM licenses WHERE id = ? LIMIT 1"
   ).bind(ctx.licenseId).first();
-  const nextExpiry = Math.max(Number(license?.expires_at || 0), now) + 30 * 86400;
+  if (!license || !["active", "expired"].includes(license.status)) {
+    return json({ error: "LICENSE_NOT_RENEWABLE" }, 403);
+  }
+  const nextExpiry = Math.max(Number(license.expires_at || 0), now) + 30 * 86400;
   const results = await env.DB.batch([
     env.DB.prepare(
       "UPDATE renewal_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND license_id = ? AND patron_device_id = ? AND status = 'authorized' AND code_hash = ?"
