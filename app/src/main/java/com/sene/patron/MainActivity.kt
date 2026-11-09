@@ -5,14 +5,18 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.text.InputType
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 class MainActivity : Activity() {
     private val bg = Color.rgb(244, 245, 250)
@@ -61,6 +65,7 @@ class MainActivity : Activity() {
         when (currentPage) {
             "home" -> homeScreen(page)
             "menu" -> menuScreen(page)
+            "connection" -> connectionScreen(page)
             else -> detailScreen(page, currentPage)
         }
         setContentView(scroll)
@@ -84,6 +89,8 @@ class MainActivity : Activity() {
         status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
         status.addView(text("La interfaz está lista para revisión. La conexión segura con el servidor SENE aún está pendiente; por ahora no se autorizan equipos ni se modifican datos reales.", 12, muted))
         root.addView(status)
+        gap(root, 12)
+        root.addView(primaryButton("CONECTAR / ACTIVAR LICENCIA") { currentPage = "connection"; render() })
         gap(root, 16)
         root.addView(text("Toca el logotipo para abrir el menú de administración.", 12, muted)
             .apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(8), dp(8), dp(8)) })
@@ -104,7 +111,8 @@ class MainActivity : Activity() {
             Triple("Vinculación de equipos", "Administra los dos espacios SENE VENTAS de tu licencia", "devices"),
             Triple("Solicitudes operativas", "Revisa solicitudes que requieren autorización del patrón", "requests"),
             Triple("Horarios y asistencia", "Consulta horarios y actividad de los equipos", "schedule"),
-            Triple("Seguridad de dispositivos", "Consulta bloqueos y procesos de sustitución", "security")
+            Triple("Seguridad de dispositivos", "Consulta bloqueos y procesos de sustitución", "security"),
+            Triple("Conexión y activación", "Conecta el panel con el servidor seguro SENE", "connection")
         )
         actions.forEachIndexed { index, item ->
             root.addView(menuCard(item.first, item.second, item.third))
@@ -115,8 +123,93 @@ class MainActivity : Activity() {
             "Un dispositivo SENE PATRÓN y exactamente dos espacios SENE VENTAS."))
     }
 
+    private fun connectionScreen(root: LinearLayout) {
+        header(root, "Conexión y activación")
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val base = EditText(this).apply {
+            hint = "https://tu-worker.workers.dev"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+            setText(prefs.getString("server_base_url", ""))
+        }
+        val code = EditText(this).apply {
+            hint = "Código de activación entregado por SENE"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            setSingleLine(true)
+        }
+        val fields = card()
+        fields.addView(kicker("SERVIDOR OFICIAL SENE"))
+        fields.addView(text("Dirección HTTPS del Worker", 13, ink, true))
+        fields.addView(base)
+        fields.addView(text("Código de activación", 13, ink, true))
+        fields.addView(code)
+        root.addView(fields)
+        gap(root, 12)
+        root.addView(primaryButton("GUARDAR DIRECCIÓN") {
+            val value = base.text.toString().trim().trimEnd('/')
+            val uri = Uri.parse(value)
+            if (!value.startsWith("https://") || uri.host.isNullOrBlank() || value.any { it.isWhitespace() }) {
+                Toast.makeText(this, "Escribe una dirección HTTPS válida", Toast.LENGTH_LONG).show()
+            } else {
+                prefs.edit().putString("server_base_url", value).apply()
+                Toast.makeText(this, "Dirección guardada en este teléfono", Toast.LENGTH_LONG).show()
+            }
+        })
+        gap(root, 9)
+        root.addView(primaryButton("ACTIVAR SENE PATRÓN") {
+            val value = base.text.toString().trim().trimEnd('/')
+            val activationCode = code.text.toString().trim()
+            val uri = Uri.parse(value)
+            if (!value.startsWith("https://") || uri.host.isNullOrBlank() || activationCode.isBlank()) {
+                Toast.makeText(this, "Captura una dirección HTTPS y el código de activación", Toast.LENGTH_LONG).show()
+            } else {
+                prefs.edit().putString("server_base_url", value).apply()
+                Toast.makeText(this, "Validando activación con el servidor SENE…", Toast.LENGTH_LONG).show()
+                Thread {
+                    try {
+                        val api = SenePatronApiClient(this, value)
+                        val activated = api.activate(activationCode)
+                        val state = api.session(activated.getString("deviceId"))
+                        runOnUiThread {
+                            code.text.clear()
+                            Toast.makeText(this, "SENE PATRÓN activado. Estado: " + state.optString("licenseStatus"), Toast.LENGTH_LONG).show()
+                            currentPage = "home"
+                            render()
+                        }
+                    } catch (e: Exception) {
+                        val detail = (e as? SenePatronApiException)?.responseBody.orEmpty()
+                        val error = try { org.json.JSONObject(detail).optString("error", detail) } catch (_: Exception) { detail }
+                        runOnUiThread { Toast.makeText(this, "No se pudo activar: " + (error.ifBlank { e.message ?: "Error de conexión" }), Toast.LENGTH_LONG).show() }
+                    }
+                }.start()
+            }
+        })
+        gap(root, 9)
+        root.addView(primaryButton("VERIFICAR ESTADO DE LICENCIA") {
+            val value = prefs.getString("server_base_url", null)
+            val deviceId = prefs.getString("device_id", null)
+            if (value.isNullOrBlank() || deviceId.isNullOrBlank()) {
+                Toast.makeText(this, "Primero guarda el servidor y activa el equipo", Toast.LENGTH_LONG).show()
+            } else {
+                Thread {
+                    try {
+                        val state = SenePatronApiClient(this, value).session(deviceId)
+                        runOnUiThread { Toast.makeText(this, "Licencia: " + state.optString("licenseStatus") + " · Vigencia: " + state.optLong("periodEndsAt"), Toast.LENGTH_LONG).show() }
+                    } catch (e: Exception) {
+                        runOnUiThread { Toast.makeText(this, "No se pudo consultar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                    }
+                }.start()
+            }
+        })
+        gap(root, 12)
+        root.addView(info("SEGURIDAD", "La clave privada permanece dentro de Android Keystore. El código de activación no se guarda. No uses la dirección temporal Hello World: el servidor SENE debe estar desplegado y validado antes de activar."))
+        gap(root, 12)
+        root.addView(primaryButton("VOLVER AL MENÚ") { currentPage = "menu"; render() })
+    }
+
     private fun detailScreen(root: LinearLayout, page: String) {
         val title = when (page) {
+            "connection" -> "Conexión y activación"
             "devices" -> "Vinculación de equipos"
             "requests" -> "Solicitudes operativas"
             "schedule" -> "Horarios y asistencia"
