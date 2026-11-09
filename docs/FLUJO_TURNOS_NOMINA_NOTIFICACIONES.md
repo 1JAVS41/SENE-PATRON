@@ -53,3 +53,6 @@ La migración es local al repositorio: **no debe ejecutarse todavía en la base 
 
 
 **Contador independiente por equipo:** la respuesta de `POST /v1/patron/requests/inbox` incluye `pendingByTeam` con `VENTAS_1` y `VENTAS_2`. Cada número suma solicitudes operativas pendientes y correcciones de venta pendientes del dispositivo activo en ese slot. Cero se representa sin notificación (botón rojo); uno o más muestra botón verde con el número exacto. Consultar o atender una solicitud actualiza el conteo sin mezclar historiales de equipos.
+
+
+**Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
