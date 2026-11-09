@@ -65,3 +65,8 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 - Ningún fallo remoto debe borrar datos locales ni conceder permisos.
 - Nunca poner `ADMIN_TOKEN` u `OPERATOR_TOKEN` en las APK.
 - Mantener Cloudflare Workers y D1 en plan Free; no activar Workers Paid ni Firebase Blaze.
+
+
+## Recuperación de códigos
+
+Se implementaron `POST /v1/operator/licenses/reissue-activation-code` y `POST /v1/operator/renewals/reissue-code`. Rotan el hash del código, invalidan el anterior, exigen pago confirmado y dejan auditoría. Los códigos no se guardan en texto claro. Migración 0007 añade `authorized_by` a renovaciones. CI debe aplicar 0001–0007.
