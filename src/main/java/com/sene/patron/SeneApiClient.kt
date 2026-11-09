@@ -55,6 +55,56 @@ class SeneApiClient(context: Context, baseUrl: String) {
         ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject =
         deviceSigned("DEVICE_AUTH", "/v1/device/session", "{}", deviceId)
 
+    fun requestsInbox(slot: String, all: Boolean = false): JSONObject {
+        require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
+        val body = JSONObject().put("slot", slot).put("status", if (all) "all" else "pending")
+        return deviceSigned("PATRON_REQUESTS_INBOX", "/v1/patron/requests/inbox", body.toString())
+    }
+
+    fun decideRequest(requestId: String, approve: Boolean, decisionDetails: JSONObject = JSONObject()): JSONObject {
+        val body = JSONObject()
+            .put("requestId", requestId)
+            .put("decision", if (approve) "approve" else "reject")
+            .put("decisionDetails", decisionDetails)
+        return deviceSigned("PATRON_REQUEST_DECISION", "/v1/patron/requests/decision", body.toString())
+    }
+
+    fun reportsInbox(slot: String): JSONObject {
+        require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
+        return deviceSigned("PATRON_REPORTS_INBOX", "/v1/patron/reports/inbox", JSONObject().put("slot", slot).toString())
+    }
+
+    fun correctionInbox(slot: String, all: Boolean = false): JSONObject {
+        require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
+        val body = JSONObject().put("slot", slot).put("status", if (all) "all" else "pending")
+        return deviceSigned("PATRON_CORRECTIONS_INBOX", "/v1/patron/corrections/inbox", body.toString())
+    }
+
+    fun decideCorrection(requestId: String, approve: Boolean): JSONObject {
+        val body = JSONObject().put("requestId", requestId)
+            .put("decision", if (approve) "approve" else "reject")
+        return deviceSigned("PATRON_CORRECTION_DECISION", "/v1/patron/corrections/decision", body.toString())
+    }
+
+    fun requestRenewal(): JSONObject =
+        deviceSigned("PATRON_RENEWAL_REQUEST", "/v1/patron/renewals/request", "{}")
+
+    fun redeemRenewal(requestId: String, authorizationCode: String): JSONObject {
+        val body = JSONObject().put("requestId", requestId).put("authorizationCode", authorizationCode.trim())
+        return deviceSigned("PATRON_RENEWAL_REDEEM", "/v1/patron/renewals/redeem", body.toString())
+    }
+
+    fun requestReplacement(deviceId: String, reason: String): JSONObject {
+        val body = JSONObject().put("deviceId", deviceId).put("reason", reason.trim())
+        return deviceSigned("PATRON_REPLACEMENT_REQUEST", "/v1/patron/devices/replacement-request", body.toString())
+    }
+
+    private fun deviceSigned(purpose: String, path: String, body: String): JSONObject {
+        val deviceId = storedDeviceId()
+            ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")
+        return deviceSigned(purpose, path, body, deviceId)
+    }
+
     private fun bootstrapSigned(
         purpose: String,
         path: String,
