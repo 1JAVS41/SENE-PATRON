@@ -353,7 +353,7 @@ class MainActivity : Activity() {
                 val salaryValue = salary.text.toString().trim().replace(",", ".").toDoubleOrNull()
                 val dayValue = day.text.toString().trim().takeIf { it.isNotBlank() }?.toIntOrNull()
                 val dateValues = dates.text.toString().split(',', '\n').map { it.trim() }.filter { it.isNotBlank() }
-                if (salaryValue == null || salaryValue < 0 || salaryValue > 10_000_000 ||
+                if (salaryValue == null || salaryValue <= 0 || salaryValue > 10_000_000 ||
                     (day.text.isNotBlank() && (dayValue == null || dayValue !in 1..31)) ||
                     (dayValue == null && dateValues.isEmpty()) ||
                     dateValues.any { !it.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) }) {
