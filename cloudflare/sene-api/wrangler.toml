@@ -4,8 +4,8 @@ compatibility_date = "2026-11-08"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "sene-licensing"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_name = "sene-licencias"
+database_id = "22f73e97-e43e-44f1-870b-58fad88e7028"
 migrations_dir = "migrations"
 
 [vars]
