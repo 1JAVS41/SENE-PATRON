@@ -39,9 +39,7 @@ Cabeceras:
 - En llamadas autenticadas: `X-SENE-Challenge: <challengeId>`
 - En llamadas autenticadas: `X-SENE-Signature: <base64 DER>`
 
-La firma se calcula sobre UTF-8 de la cadena:
-`SENE1\n<METHOD>\n<PATH incluyendo query exacta>\n<SHA256 hexadecimal del cuerpo HTTP exacto>\n<challenge Base64URL decodificado como UTF-8 no se usa>`
-Para evitar ambigüedad: el servidor entrega un `signingMessage` Base64URL junto con el reto; la APK firma los bytes decodificados de `signingMessage` exactamente. El servidor verifica esos bytes. El mensaje incluye método, ruta, hash de cuerpo, deviceId, challengeId y nonce. El reto se consume una vez y expira en 2 minutos. Las llamadas de consulta que no mutan también se firman.
+El servidor construye un mensaje canónico UTF-8 con versión, purpose, método, ruta, hash del cuerpo, deviceId o fingerprint provisional, challengeId y nonce aleatorio. Devuelve ese mensaje como `signingMessage` Base64URL. La APK firma los bytes decodificados exactamente; el servidor verifica esos mismos bytes. El reto se consume una vez y expira en 2 minutos. Las llamadas de consulta que no mutan también se firman. La APK calcula SHA-256 del cuerpo exacto que enviará y no puede cambiarlo después de pedir el reto.
 
 Respuesta de error uniforme:
 ```json
@@ -61,14 +59,14 @@ Sin datos privados. Respuesta:
 Emite reto para registro inicial o dispositivo ya vinculado.
 Solicitud:
 ```json
-{"purpose":"PATRON_ACTIVATE","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex"}
+{"purpose":"PATRON_ACTIVATE","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex","targetMethod":"POST","targetPath":"/v1/patron/activate","bodySha256":"hex del cuerpo exacto que se firmará"}
 ```
-Valores de `purpose`: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH`, `DEVICE_RECOVERY`.
+Para sesiones existentes, se omiten los datos de clave/instalación ya registrados, pero se envían `targetMethod`, `targetPath` y `bodySha256`. Valores de `purpose`: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH`, `DEVICE_RECOVERY`.
 Respuesta:
 ```json
 {"challengeId":"uuid","challenge":"base64url","signingMessage":"base64url","expiresAt":unix}
 ```
-El servidor no acepta que el cliente elija el nonce ni el vencimiento.
+El servidor genera el nonce y construye `signingMessage` incluyendo purpose, challengeId, nonce, método, ruta, hash del cuerpo y deviceId o fingerprint provisional. El cliente firma exactamente los bytes de `signingMessage` decodificados desde Base64URL. El endpoint de negocio debe recibir exactamente el cuerpo cuyo hash se incluyó en el reto. El servidor no acepta que el cliente elija el nonce ni el vencimiento.
 
 ## 5. Alta y activación inicial
 
