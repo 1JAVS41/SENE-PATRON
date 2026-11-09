@@ -235,6 +235,7 @@ const CHALLENGE_TARGETS = {
   PATRON_REPORTS_INBOX: ["POST", "/v1/patron/reports/inbox"],
   PATRON_RENEWAL_REQUEST: ["POST", "/v1/patron/renewals/request"],
   PATRON_RENEWAL_REDEEM: ["POST", "/v1/patron/renewals/redeem"],
+  PATRON_REPLACEMENT_REQUEST: ["POST", "/v1/patron/devices/replacement-request"],
 };
 
 async function validateBootstrapIdentity(body) {
@@ -835,6 +836,114 @@ async function redeemRenewal(request, env) {
   return json({ requestId, licenseStatus: "ACTIVE", periodEndsAt: nextExpiry, renewedDays: 30 }, 200);
 }
 
+
+async function createReplacementRequest(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_REPLACEMENT_REQUEST");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const oldDeviceId = typeof body.deviceId === "string" ? body.deviceId : "";
+  const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+  if (!/^[0-9a-f-]{36}$/i.test(oldDeviceId) || !reason) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const oldDevice = await env.DB.prepare(
+    "SELECT id, device_type, slot_number, status FROM devices WHERE id = ? AND license_id = ? LIMIT 1"
+  ).bind(oldDeviceId, ctx.licenseId).first();
+  if (!oldDevice || oldDevice.device_type !== "VENTAS" || ![2, 3].includes(oldDevice.slot_number)) {
+    return json({ error: "DEVICE_NOT_FOUND", message: "Solo se puede solicitar el reemplazo de Equipo 1 o Equipo 2." }, 404);
+  }
+  if (oldDevice.status !== "active") {
+    return json({ error: "DEVICE_NOT_ACTIVE" }, 409);
+  }
+  const existing = await env.DB.prepare(
+    "SELECT id, status, created_at FROM replacement_requests WHERE old_device_id = ? AND status = 'pending' LIMIT 1"
+  ).bind(oldDeviceId).first();
+  if (existing) return json({ requestId: existing.id, status: existing.status, createdAt: existing.created_at, duplicate: true });
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO replacement_requests (id, license_id, old_device_id, slot_number, reason, status, created_at) SELECT ?, ?, ?, ?, ?, 'pending', ? WHERE EXISTS (SELECT 1 FROM devices WHERE id = ? AND license_id = ? AND status = 'active')"
+      ).bind(id, ctx.licenseId, oldDeviceId, oldDevice.slot_number, reason, now, oldDeviceId, ctx.licenseId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'patron', ?, 'replacement_requested', ?, ? WHERE EXISTS (SELECT 1 FROM replacement_requests WHERE id = ? AND status = 'pending')"
+      ).bind(crypto.randomUUID(), ctx.licenseId, oldDeviceId, ctx.deviceId, JSON.stringify({ requestId: id, slotNumber: oldDevice.slot_number, reason }), now, id)
+    ]);
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT id, status, created_at FROM replacement_requests WHERE old_device_id = ? AND status = 'pending' LIMIT 1"
+    ).bind(oldDeviceId).first();
+    if (raced) return json({ requestId: raced.id, status: raced.status, createdAt: raced.created_at, duplicate: true });
+    return json({ error: "REPLACEMENT_REQUEST_CONFLICT" }, 409);
+  }
+  const inserted = await env.DB.prepare("SELECT id FROM replacement_requests WHERE id = ? AND status = 'pending'").bind(id).first();
+  if (!inserted) return json({ error: "REPLACEMENT_REQUEST_CONFLICT" }, 409);
+  return json({ requestId: id, deviceId: oldDeviceId, slot: oldDevice.slot_number === 2 ? "VENTAS_1" : "VENTAS_2", status: "pending", createdAt: now }, 201);
+}
+
+async function listOperatorReplacements(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const rows = await env.DB.prepare(
+    "SELECT r.id, r.license_id, l.business_name, r.old_device_id, r.slot_number, r.reason, r.created_at FROM replacement_requests r JOIN licenses l ON l.id = r.license_id WHERE r.status = 'pending' ORDER BY r.created_at ASC LIMIT 100"
+  ).all();
+  return json({ items: rows.results || [] });
+}
+
+async function decideOperatorReplacement(request, env, decision) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const row = await env.DB.prepare(
+    "SELECT id, license_id, old_device_id, slot_number FROM replacement_requests WHERE id = ? AND status = 'pending' LIMIT 1"
+  ).bind(requestId).first();
+  if (!row) return json({ error: "REPLACEMENT_NOT_PENDING" }, 409);
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    let results;
+    if (decision === "approve") {
+      results = await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE devices SET status = 'revoked' WHERE id = ? AND license_id = ? AND slot_number = ? AND device_type = 'VENTAS' AND status = 'active'"
+        ).bind(row.old_device_id, row.license_id, row.slot_number),
+        env.DB.prepare(
+          "UPDATE replacement_requests SET status = 'approved', decided_at = ?, decided_by = 'operator' WHERE id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked')"
+        ).bind(now, requestId, row.old_device_id),
+        env.DB.prepare(
+          "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL"
+        ).bind(now, row.license_id),
+        env.DB.prepare(
+          "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'operator', 'operator', 'device_replacement_approved', ?, ? WHERE EXISTS (SELECT 1 FROM replacement_requests WHERE id = ? AND status = 'approved')"
+        ).bind(crypto.randomUUID(), row.license_id, row.old_device_id, JSON.stringify({ requestId, slotNumber: row.slot_number }), now, requestId)
+      ]);
+      if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+        return json({ error: "REPLACEMENT_CONFLICT" }, 409);
+      }
+      return json({ requestId, status: "approved", revokedDeviceId: row.old_device_id, slot: row.slot_number === 2 ? "VENTAS_1" : "VENTAS_2", nextStep: "El PATRÓN debe generar un QR nuevo; el equipo sustituto se vincula ocupando el espacio liberado." });
+    }
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE replacement_requests SET status = 'rejected', decided_at = ?, decided_by = 'operator' WHERE id = ? AND status = 'pending'"
+      ).bind(now, requestId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, old_device_id, 'operator', 'operator', 'device_replacement_rejected', ?, ? FROM replacement_requests WHERE id = ? AND status = 'rejected' AND decided_at = ?"
+      ).bind(crypto.randomUUID(), row.license_id, JSON.stringify({ requestId }), now, requestId, now)
+    ]);
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1) return json({ error: "REPLACEMENT_CONFLICT" }, 409);
+    return json({ requestId, status: "rejected" });
+  } catch {
+    return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+  }
+}
+
 async function deviceSession(request, env) {
   const proof = await verifySignedRequest(request, env, "DEVICE_AUTH");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -1120,6 +1229,10 @@ async function handle(request, env) {
   }
   if (request.method === "POST" && url.pathname === "/v1/patron/renewals/request") return createRenewalRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/renewals/redeem") return redeemRenewal(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/devices/replacement-request") return createReplacementRequest(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/operator/replacements/pending") return listOperatorReplacements(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/replacements/approve") return decideOperatorReplacement(request, env, "approve");
+  if (request.method === "POST" && url.pathname === "/v1/operator/replacements/reject") return decideOperatorReplacement(request, env, "reject");
   if (request.method === "POST" && url.pathname === "/v1/operator/licenses/create") return createOperatorLicense(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/licenses/confirm-initial-payment") return confirmInitialPayment(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/renewals/pending") return listOperatorRenewals(request, env);
