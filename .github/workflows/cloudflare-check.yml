@@ -274,3 +274,24 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-patron-recovery' AND slot_number=1 AND status='active';")" = "1"
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Probar bandejas independientes de solicitudes y correcciones por equipo
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-inbox', 'TIENDA INBOX', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('ventas-inbox-1', 'license-inbox', 'VENTAS', 'i1', 'c1', x'01', 'f1', 2, 'active', 1), ('ventas-inbox-2', 'license-inbox', 'VENTAS', 'i2', 'c2', x'02', 'f2', 3, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO work_requests (id, license_id, ventas_device_id, request_type, details_json, status, created_at, idempotency_key) VALUES ('work-inbox-1', 'license-inbox', 'ventas-inbox-1', 'LOAN', '{}', 'pending', 2, 'work-key-1'), ('work-inbox-2', 'license-inbox', 'ventas-inbox-2', 'VACATION', '{}', 'pending', 2, 'work-key-2');"
+          sqlite3 "$DB_FILE" "INSERT INTO correction_requests (id, license_id, ventas_device_id, sale_id, reason, status, created_at, idempotency_key) VALUES ('correction-inbox-1', 'license-inbox', 'ventas-inbox-1', 'sale-1', 'Error de captura', 'pending', 2, 'correction-key-1'), ('correction-inbox-2', 'license-inbox', 'ventas-inbox-2', 'sale-2', 'Producto equivocado', 'pending', 2, 'correction-key-2');"
+          sqlite3 "$DB_FILE" "UPDATE work_requests SET seen_at=10 WHERE status='pending' AND seen_at IS NULL AND ventas_device_id IN (SELECT id FROM devices WHERE license_id='license-inbox' AND slot_number=2 AND status='active');"
+          sqlite3 "$DB_FILE" "UPDATE correction_requests SET seen_at=10 WHERE status='pending' AND seen_at IS NULL AND ventas_device_id IN (SELECT id FROM devices WHERE license_id='license-inbox' AND slot_number=2 AND status='active');"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at=10;")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at=10;")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending' AND seen_at IS NULL;")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending' AND seen_at IS NULL;")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT (SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at IS NULL);")" = "0"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')" = ""
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
