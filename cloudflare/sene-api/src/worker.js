@@ -1330,7 +1330,8 @@ async function deviceSession(request, env) {
   const deviceId = proof.challenge.device_id;
   const row = await env.DB.prepare(
     `SELECT d.id AS device_id, d.device_type, d.slot_number, d.status AS device_status,
-            l.id AS license_id, l.status AS license_status, l.expires_at
+            l.id AS license_id, l.status AS license_status, l.expires_at,
+            (SELECT COUNT(*) FROM devices v WHERE v.license_id = l.id AND v.device_type = 'VENTAS' AND v.status = 'active') AS linked_ventas_count
        FROM devices d JOIN licenses l ON l.id = d.license_id
       WHERE d.id = ? LIMIT 1`
   ).bind(deviceId).first();
@@ -1363,6 +1364,7 @@ async function deviceSession(request, env) {
     licenseStatus: licenseStatus === "active" ? "ACTIVE" : licenseStatus.toUpperCase(),
     serverTime: now,
     periodEndsAt: row.expires_at ?? null,
+    linkedVentasCount: Number(row.linked_ventas_count || 0),
     weeklyQuota: { limit: 20, used, remaining: Math.max(0, 20 - used), weekKey }
   });
 }
