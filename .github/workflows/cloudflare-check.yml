@@ -45,6 +45,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0007_renewal_operator_audit.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0008_notification_seen_state.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0009_patron_recovery.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0010_payroll_settings.sql
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
@@ -72,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-renew', 'ABARROTES TERE', 'expired', 3, 1, 100);"
@@ -95,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, label, business_name, status, max_devices, activation_code_hash, created_at) VALUES ('license-initial', 'TIENDA TEST', 'TIENDA TEST', 'pending', 3, 'activation-hash', 100);"
@@ -152,7 +153,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-recovery', 'TIENDA RECOVERY', 'active', 3, 1, 9999999999);"
@@ -178,7 +179,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-correction', 'active', 3, 1, 9999999999);"
@@ -213,7 +214,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, activation_code_hash, created_at, setup_paid_at) VALUES ('license-unpaid-rent', 'TIENDA PENDIENTE', 'pending', 3, 'activation-hash', 1, 2);"
@@ -228,7 +229,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, activation_code_hash, created_at, setup_paid_at, first_rent_paid_at) VALUES ('license-reissue', 'TIENDA CODIGO', 'pending', 3, 'old-activation-hash', 1, 2, 2);"
@@ -251,7 +252,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-patron-recovery', 'TIENDA RECUPERAR', 'expired', 3, 1, 100);"
@@ -279,7 +280,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-inbox', 'TIENDA INBOX', 'active', 3, 1, 9999999999);"
@@ -294,4 +295,20 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending' AND seen_at IS NULL;")" = "1"
           test "$(sqlite3 "$DB_FILE" "SELECT (SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at IS NULL);")" = "0"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')" = ""
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Probar configuración de sueldo y fechas de pago aisladas por equipo
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-payroll', 'TIENDA NOMINA', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-payroll', 'license-payroll', 'PATRON', 'ip', 'cp', x'01', 'fp', 1, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO payroll_settings (license_id, slot_number, salary_cents, payment_day, payment_dates_json, updated_at, updated_by_device_id) VALUES ('license-payroll', 2, 950000, 15, '[]', 10, 'patron-payroll'), ('license-payroll', 3, 875000, NULL, '[\"2026-11-30\",\"2026-12-15\"]', 10, 'patron-payroll');"
+          test "$(sqlite3 "$DB_FILE" "SELECT salary_cents || ':' || payment_day FROM payroll_settings WHERE license_id='license-payroll' AND slot_number=2;")" = "950000:15"
+          test "$(sqlite3 "$DB_FILE" "SELECT salary_cents || ':' || payment_dates_json FROM payroll_settings WHERE license_id='license-payroll' AND slot_number=3;")" = "875000:[\"2026-11-30\",\"2026-12-15\"]"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM payroll_settings WHERE license_id='license-payroll';")" = "2"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
