@@ -23,7 +23,8 @@ const base64Url = (bytes) =>
 
 const fromBase64 = (value) => {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  return Uint8Array.from(atob(normalized), (c) => c.charCodeAt(0));
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
 };
 
 const sha256 = async (value) =>
