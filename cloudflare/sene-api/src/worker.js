@@ -1526,7 +1526,7 @@ async function patronPayrollSettingsSet(request, env) {
   const salaryCents = body.salaryCents;
   const paymentDay = body.paymentDay === null || body.paymentDay === undefined ? null : body.paymentDay;
   const paymentDates = body.paymentDates;
-  if (!slot || !Number.isSafeInteger(salaryCents) || salaryCents < 0 || salaryCents > 1000000000 ||
+  if (!slot || !Number.isSafeInteger(salaryCents) || salaryCents <= 0 || salaryCents > 1000000000 ||
       (paymentDay !== null && (!Number.isInteger(paymentDay) || paymentDay < 1 || paymentDay > 31)) ||
       !Array.isArray(paymentDates) || paymentDates.length > 60 ||
       paymentDates.some((date) => typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
