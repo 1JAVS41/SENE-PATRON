@@ -233,8 +233,7 @@ class MainActivity : Activity() {
         when (page) {
             "devices" -> devicesScreen(root)
             "requests" -> requestsScreen(root)
-            "schedule" -> root.addView(info("HORARIOS Y ASISTENCIA",
-                "Los datos se mostrarán cuando exista una conexión autorizada con los equipos SENE VENTAS."))
+            "schedule" -> scheduleScreen(root)
             "security" -> {
                 root.addView(info("BLOQUEO DE DISPOSITIVOS",
                     "El bloqueo real deberá validarse en el servidor y conservar un registro de auditoría."))
@@ -388,8 +387,8 @@ class MainActivity : Activity() {
                         }
                         AlertDialog.Builder(this).setTitle(if (correction) "AUTORIZAR CORRECCIÓN" else "REVISAR SOLICITUD")
                             .setMessage(details + "\n\n¿Deseas aprobar o rechazar?")
-                            .setPositiveButton("APROBAR") { _, _ -> decideTeamItem(base, item, correction, "approve") }
-                            .setNegativeButton("RECHAZAR") { _, _ -> decideTeamItem(base, item, correction, "reject") }
+                            .setPositiveButton("APROBAR") { _, _ -> decideTeamItem(base, item, correction, "approve", slot) }
+                            .setNegativeButton("RECHAZAR") { _, _ -> decideTeamItem(base, item, correction, "reject", slot) }
                             .setNeutralButton("VOLVER", null).show()
                     }.setNegativeButton("CERRAR", null).show()
                 }
@@ -399,7 +398,7 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun decideTeamItem(base: String, item: org.json.JSONObject, correction: Boolean, decision: String) {
+    private fun decideTeamItem(base: String, item: org.json.JSONObject, correction: Boolean, decision: String, slot: String) {
         Thread {
             try {
                 val api = SenePatronApiClient(this, base)
@@ -407,11 +406,119 @@ class MainActivity : Activity() {
                 else api.decideRequest(item.getString("requestId"), decision)
                 runOnUiThread {
                     Toast.makeText(this, if (decision == "approve") "Solicitud aprobada." else "Solicitud rechazada.", Toast.LENGTH_LONG).show()
-                    val slot = item.optString("slot", "")
                     if (slot == "VENTAS_1" || slot == "VENTAS_2") loadTeamInbox(slot, base)
                 }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, "No se pudo registrar la decisión: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun scheduleScreen(root: LinearLayout) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val base = prefs.getString("server_base_url", null)
+        val device = prefs.getString("device_id", null)
+        if (base.isNullOrBlank() || device.isNullOrBlank()) {
+            root.addView(info("SERVICIO NO ACTIVADO", "Conecta y activa SENE PATRÓN para administrar sueldo y consultar reportes."))
+            root.addView(primaryButton("IR A CONEXIÓN") { currentPage = "connection"; render() })
+            return
+        }
+        root.addView(info("SUELDO Y DÍA DE PAGO", "La configuración se guarda por separado para Equipo 1 y Equipo 2. El servidor valida la fecha de pago usando la hora de Ciudad de México."))
+        gap(root, 9)
+        root.addView(primaryButton("CONFIGURAR SUELDO · EQUIPO 1") { showPayrollSettings("VENTAS_1", base) })
+        gap(root, 9)
+        root.addView(primaryButton("CONFIGURAR SUELDO · EQUIPO 2") { showPayrollSettings("VENTAS_2", base) })
+        gap(root, 14)
+        root.addView(info("REPORTES RECIBIDOS", "Consulta por separado los cierres de turno y los reportes de nómina enviados por cada trabajador."))
+        gap(root, 9)
+        root.addView(primaryButton("REPORTES · EQUIPO 1") { showTeamReports("VENTAS_1", base) })
+        gap(root, 9)
+        root.addView(primaryButton("REPORTES · EQUIPO 2") { showTeamReports("VENTAS_2", base) })
+    }
+
+    private fun showPayrollSettings(slot: String, base: String) {
+        Thread {
+            try {
+                val api = SenePatronApiClient(this, base)
+                val all = api.payrollSettings().optJSONObject("settings") ?: org.json.JSONObject()
+                val current = all.optJSONObject(slot)
+                runOnUiThread {
+                    val form = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(20), dp(8), dp(20), dp(4))
+                    }
+                    val salary = EditText(this).apply {
+                        hint = "Sueldo base en pesos"
+                        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                        setSingleLine(true)
+                        if (current != null) setText(String.format(java.util.Locale.US, "%.2f", current.optLong("salaryCents") / 100.0))
+                    }
+                    val day = EditText(this).apply {
+                        hint = "Día de pago mensual (1 a 31)"
+                        inputType = InputType.TYPE_CLASS_NUMBER
+                        setSingleLine(true)
+                        if (current != null && !current.isNull("paymentDay")) setText(current.optString("paymentDay"))
+                    }
+                    form.addView(text("Sueldo base mensual", 13, ink, true))
+                    form.addView(salary)
+                    form.addView(text("Día fijo de pago", 13, ink, true))
+                    form.addView(day)
+                    val extraDates = current?.optJSONArray("paymentDates") ?: org.json.JSONArray()
+                    AlertDialog.Builder(this).setTitle(if (slot == "VENTAS_1") "NÓMINA · EQUIPO 1" else "NÓMINA · EQUIPO 2")
+                        .setView(form)
+                        .setMessage("Fechas adicionales configuradas: " + extraDates.length())
+                        .setPositiveButton("GUARDAR") { _, _ ->
+                            val amount = salary.text.toString().trim().replace(",", ".").toDoubleOrNull()
+                            val paymentDay = day.text.toString().trim().toIntOrNull()
+                            if (amount == null || amount <= 0 || amount > 10000000 || paymentDay !in 1..31) {
+                                Toast.makeText(this, "Captura un sueldo válido y un día de pago del 1 al 31", Toast.LENGTH_LONG).show()
+                            } else {
+                                Thread {
+                                    try {
+                                        api.savePayrollSettings(slot, Math.round(amount * 100.0), paymentDay)
+                                        runOnUiThread { Toast.makeText(this, "Configuración guardada para " + slot, Toast.LENGTH_LONG).show() }
+                                    } catch (e: Exception) {
+                                        runOnUiThread { Toast.makeText(this, "No se pudo guardar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                                    }
+                                }.start()
+                            }
+                        }.setNegativeButton("CANCELAR", null).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, "No se pudo leer la nómina: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun showTeamReports(slot: String, base: String) {
+        Thread {
+            try {
+                val result = SenePatronApiClient(this, base).reportsInbox(slot)
+                val shifts = result.optJSONArray("shiftReports") ?: org.json.JSONArray()
+                val payroll = result.optJSONArray("payrollReports") ?: org.json.JSONArray()
+                val labels = ArrayList<String>()
+                val details = ArrayList<String>()
+                for (i in 0 until shifts.length()) {
+                    val item = shifts.optJSONObject(i) ?: continue
+                    labels.add("CIERRE DE TURNO · " + item.optString("shiftKey"))
+                    details.add(item.optJSONObject("report")?.toString(2) ?: "{}")
+                }
+                for (i in 0 until payroll.length()) {
+                    val item = payroll.optJSONObject(i) ?: continue
+                    labels.add("NÓMINA · " + item.optString("periodKey"))
+                    details.add(item.optJSONObject("report")?.toString(2) ?: "{}")
+                }
+                runOnUiThread {
+                    val title = if (slot == "VENTAS_1") "REPORTES · EQUIPO 1" else "REPORTES · EQUIPO 2"
+                    if (labels.isEmpty()) AlertDialog.Builder(this).setTitle(title)
+                        .setMessage("Todavía no hay reportes recibidos.").setPositiveButton("CERRAR", null).show()
+                    else AlertDialog.Builder(this).setTitle(title).setItems(labels.toTypedArray()) { _, index ->
+                        AlertDialog.Builder(this).setTitle(labels[index]).setMessage(details[index])
+                            .setPositiveButton("CERRAR", null).show()
+                    }.setNegativeButton("CERRAR", null).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, "No se pudieron consultar reportes: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
             }
         }.start()
     }
