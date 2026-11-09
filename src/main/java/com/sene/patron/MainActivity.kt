@@ -820,7 +820,7 @@ class MainActivity : Activity() {
 
     private fun refreshNotificationsFromServer(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (refreshingNotifications || (!force && now - lastNotificationRefreshAt < 43_200_000L)) return
+        if (refreshingNotifications || (!force && now - lastNotificationRefreshAt < 86_400_000L)) return
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         if (prefs.getString("device_id", null).isNullOrBlank()) return
