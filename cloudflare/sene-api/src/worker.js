@@ -609,7 +609,11 @@ async function handle(request, env) {
     return issueChallenge(request, env);
   }
 
-  if (request.method === "POST" && url.pathname === "/v1/patron/activate") {\n    return activatePatron(request, env);\n  }\n\n  if (request.method === "POST" && url.pathname === "/v1/patron/pairing-tokens") {
+  if (request.method === "POST" && url.pathname === "/v1/patron/activate") {
+    return activatePatron(request, env);
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/patron/pairing-tokens") {
     return createPairingToken(request, env);
   }
 
