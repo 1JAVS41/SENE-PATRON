@@ -1636,6 +1636,25 @@ async function saveReport(request, env, purpose, table, keyField, keyName) {
   }
   const reportJson = JSON.stringify(body.report);
   if (reportJson.length > 16384) return json({ error: "REQUEST_TOO_LARGE" }, 413);
+  if (table === "payroll_reports") {
+    const device = await env.DB.prepare(
+      "SELECT slot_number FROM devices WHERE id = ? AND license_id = ? AND device_type = 'VENTAS' AND status = 'active' LIMIT 1"
+    ).bind(ctx.deviceId, ctx.licenseId).first();
+    if (!device || ![2, 3].includes(Number(device.slot_number))) return json({ error: "DEVICE_SLOT_INVALID" }, 403);
+    const settings = await env.DB.prepare(
+      "SELECT payment_day, payment_dates_json FROM payroll_settings WHERE license_id = ? AND slot_number = ? LIMIT 1"
+    ).bind(ctx.licenseId, Number(device.slot_number)).first();
+    if (!settings) return json({ error: "PAYROLL_NOT_CONFIGURED" }, 403);
+    const mexicoDate = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(new Date());
+    const dayOfMonth = Number(mexicoDate.slice(8, 10));
+    let paymentDates = [];
+    try { paymentDates = JSON.parse(settings.payment_dates_json || "[]"); } catch { return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503); }
+    const isPaymentDate = (settings.payment_day !== null && Number(settings.payment_day) === dayOfMonth) ||
+      (Array.isArray(paymentDates) && paymentDates.includes(mexicoDate));
+    if (!isPaymentDate) return json({ error: "PAYROLL_NOT_DUE", nextPaymentDay: settings.payment_day ?? null });
+  }
   const existing = await env.DB.prepare(
     "SELECT id, created_at FROM " + table + " WHERE ventas_device_id = ? AND " + keyName + " = ? LIMIT 1"
   ).bind(ctx.deviceId, key).first();
