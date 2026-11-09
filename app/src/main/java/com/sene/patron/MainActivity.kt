@@ -142,12 +142,19 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             setSingleLine(true)
         }
+        val recoveryCode = EditText(this).apply {
+            hint = "Código de recuperación de PATRÓN (12 caracteres)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            setSingleLine(true)
+        }
         val fields = card()
         fields.addView(kicker("SERVIDOR OFICIAL SENE"))
         fields.addView(text("Dirección HTTPS del Worker", 13, ink, true))
         fields.addView(base)
         fields.addView(text("Código de activación", 13, ink, true))
         fields.addView(code)
+        fields.addView(text("Recuperación de un PATRÓN perdido", 13, ink, true))
+        fields.addView(recoveryCode)
         root.addView(fields)
         gap(root, 12)
         root.addView(primaryButton("GUARDAR DIRECCIÓN") {
@@ -185,6 +192,32 @@ class MainActivity : Activity() {
                         val detail = (e as? SenePatronApiException)?.responseBody.orEmpty()
                         val error = try { org.json.JSONObject(detail).optString("error", detail) } catch (_: Exception) { detail }
                         runOnUiThread { Toast.makeText(this, "No se pudo activar: " + (error.ifBlank { e.message ?: "Error de conexión" }), Toast.LENGTH_LONG).show() }
+                    }
+                }.start()
+            }
+        })
+        gap(root, 9)
+        root.addView(primaryButton("RECUPERAR PATRÓN EN UN TELÉFONO NUEVO") {
+            val value = base.text.toString().trim().trimEnd('/')
+            val recovery = recoveryCode.text.toString().trim()
+            val uri = Uri.parse(value)
+            if (!value.startsWith("https://") || uri.host.isNullOrBlank() || recovery.isBlank()) {
+                Toast.makeText(this, "Captura la dirección HTTPS y el código de recuperación", Toast.LENGTH_LONG).show()
+            } else {
+                prefs.edit().putString("server_base_url", value).apply()
+                Thread {
+                    try {
+                        val api = SenePatronApiClient(this, value)
+                        val recovered = api.recover(recovery)
+                        val state = api.session(recovered.getString("deviceId"))
+                        runOnUiThread {
+                            recoveryCode.text.clear()
+                            Toast.makeText(this, "PATRÓN recuperado. Estado: " + state.optString("licenseStatus"), Toast.LENGTH_LONG).show()
+                            currentPage = "home"
+                            render()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { Toast.makeText(this, "No se pudo recuperar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
                     }
                 }.start()
             }
@@ -240,7 +273,7 @@ class MainActivity : Activity() {
         }
         gap(root, 12)
         root.addView(info("MODO DE PREPARACIÓN",
-            "Esta versión muestra la interfaz y navegación. Todavía no se conecta al servidor SENE ni autoriza dispositivos."))
+            "Las pantallas de activación, vinculación, solicitudes, notificaciones, reemplazos y nómina ya están conectadas al cliente HTTPS firmado. Requieren que la API SENE esté desplegada y validada antes de usarse."))
         gap(root, 12)
         root.addView(primaryButton("VOLVER AL MENÚ") { currentPage = "menu"; render() })
     }
