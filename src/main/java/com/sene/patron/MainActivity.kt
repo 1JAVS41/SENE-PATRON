@@ -879,11 +879,15 @@ class MainActivity : Activity() {
         when (section) {
             "schedule" -> {
                 renderTeamReports(root, teamHome)
+                gap(root, 8)
+                root.addView(primaryButton("ACTUALIZAR REPORTES") { refreshTeamReports(teamHome, force = true) })
                 refreshTeamReports(teamHome)
             }
             "requests" -> {
                 renderRequestsInbox(root, teamHome)
                 renderCorrectionInbox(root, teamHome)
+                gap(root, 8)
+                root.addView(primaryButton("ACTUALIZAR SOLICITUDES") { refreshTeamRequests(teamHome, force = true) })
                 refreshTeamRequests(teamHome)
             }
             "security" -> {
