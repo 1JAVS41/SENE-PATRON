@@ -1,44 +1,40 @@
 # SENE Licensing API (Cloudflare Workers + D1)
 
-Backend scaffold for SENE PATRÓN / SENE VENTAS. Target: Workers Free + D1 Free; no Firebase Blaze and no payment method should be enabled for this project.
+Backend en construcción para SENE PATRÓN / SENE VENTAS. Objetivo: Workers Free + D1 Free, sin Firebase Blaze, tarjeta ni plan de pago.
 
-## Current implemented slice
+## Estado real
 
-- `GET /health`: health check.
-- `POST /admin/licenses`: protected by `Authorization: Bearer <ADMIN_TOKEN>`; creates one pending package with exactly 3 device slots and returns a one-time activation code. Only the SHA-256 hash is stored.
-- Database schema for licenses, devices, one-time QR pairing tokens, proof-of-possession challenges, correction requests and one-use grants.
+- Implementado en el Worker: `GET /health` y `POST /admin/licenses` de scaffold. Este último usa `ADMIN_TOKEN`; todavía no es un panel privado de operador listo para producción.
+- Esquema inicial `0001_initial.sql`: licencias, dispositivos, QR, retos y correcciones.
+- Migración aditiva `0002_security_billing_usage.sql`: pagos en centavos MXN, campos para retos ligados al método/ruta/hash del cuerpo, idempotencia de solicitudes, cuota semanal por dispositivo, reemplazos y auditoría.
+- `wrangler.toml` ya apunta a la D1 existente `sene-licencias` y su ID real.
+- La migración 0002 fue validada localmente contra SQLite usando el esquema 0001. **Todavía no se ha aplicado a la D1 remota ni se ha probado desde el Worker.**
 
-## Not implemented yet (do not connect production APKs to this scaffold)
+## No conectar APKs todavía
 
-- Patron activation-code redemption and device proof-of-possession.
-- QR token issuance and atomic two-device claim.
-- 30-day activation/expiry enforcement and signed offline lease.
-- Correction request, owner approval/rejection and atomic one-use grant consumption.
-- Replacement of a lost device.
-- Admin dashboard / protected operator workflow.
+No conectar ni distribuir las APK como producción hasta implementar y probar activación PATRÓN, firma de retos ECDSA, QR de dos usos, sesiones, vigencia/pagos, cuotas, correcciones de un solo uso y reemplazos. La autenticación del operador debe validarse en servidor; ningún secreto administrativo va dentro de las APK.
 
-The mobile apps must fail closed for remote authorization decisions while preserving all local sales, inventory and cash data. Never let a client app write license counters or approve its own correction grant.
+## Base D1 existente
 
-## Setup (after reviewing and completing the API)
+Nombre: `sene-licencias`
 
-1. Create a Cloudflare account on the Free plan. Do not upgrade to Workers Paid.
-2. Create a D1 database named `sene-licensing`.
-3. Replace `REPLACE_WITH_D1_DATABASE_ID` in `wrangler.toml`.
-4. Apply the migration: `npx wrangler d1 migrations apply sene-licensing --remote`.
-5. Set the secret: `npx wrangler secret put ADMIN_TOKEN`.
-6. Deploy: `npx wrangler deploy`.
-7. Verify `GET /health`.
+ID: `22f73e97-e43e-44f1-870b-58fad88e7028`
 
-Do not deploy or distribute APKs as production-ready until all endpoints above are implemented, security-reviewed and tested.
+Binding del Worker: `DB`
 
-## Free-tier planning limits
+La base ya contiene las tablas de `0001_initial.sql`. **No volver a ejecutar manualmente la migración 0001.** Aplicar únicamente `0002_security_billing_usage.sql` una vez, después de revisar el SQL y confirmar que la base remota sigue teniendo las tablas esperadas.
 
-- Workers: 100,000 requests/day.
-- D1 Free: 5 million rows read/day, 100,000 rows written/day, 5 GB total account storage; per-database size limit is 500 MB.
-- Daily quotas reset at 00:00 UTC. Storage is cumulative and does not reset.
-- D1 quota exhaustion causes queries to fail; handle that as unavailable, not as permission granted.
+## Configuración y despliegue
 
-See official Cloudflare docs:
-- https://developers.cloudflare.com/workers/platform/limits/
-- https://developers.cloudflare.com/d1/reference/faq/
-- https://developers.cloudflare.com/d1/platform/limits/
+1. Mantener Cloudflare en Free. No activar Workers Paid ni agregar tarjeta.
+2. Aplicar la migración 0002 a la D1 existente. No volver a crear la base.
+3. Configurar secretos solo en Cloudflare cuando exista un flujo de operador seguro. No ponerlos en el repositorio ni en APK.
+4. Implementar endpoints de forma incremental y probarlos con casos de seguridad y concurrencia.
+5. Desplegar el Worker solo después de completar las pruebas; verificar `GET /health`.
+
+## Límites gratuitos de referencia
+
+- Workers Free: 100,000 solicitudes/día.
+- D1 Free: 5 millones de filas leídas/día, 100,000 filas escritas/día y 5 GB de almacenamiento total de cuenta (límite por base según plan).
+- Si D1/Worker falla o agota cuota, las acciones remotas se deniegan; los datos comerciales locales de VENTAS permanecen intactos.
+
