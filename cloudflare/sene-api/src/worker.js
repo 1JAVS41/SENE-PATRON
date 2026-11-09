@@ -669,9 +669,14 @@ async function createOperatorLicense(request, env) {
   const codeHash = await sha256(activationCode);
   const now = Math.floor(Date.now() / 1000);
   try {
-    await env.DB.prepare(
-      "INSERT INTO licenses (id, label, business_name, status, max_devices, activation_code_hash, created_at) VALUES (?, ?, ?, 'pending', 3, ?, ?)"
-    ).bind(licenseId, businessName, businessName, codeHash, now).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO licenses (id, label, business_name, status, max_devices, activation_code_hash, created_at) VALUES (?, ?, ?, 'pending', 3, ?, ?)"
+      ).bind(licenseId, businessName, businessName, codeHash, now),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, 'operator', 'operator', 'license_created', ?, ?)"
+      ).bind(crypto.randomUUID(), licenseId, JSON.stringify({ businessName }), now)
+    ]);
   } catch {
     return json({ error: "LICENSE_CREATE_FAILED" }, 503);
   }
