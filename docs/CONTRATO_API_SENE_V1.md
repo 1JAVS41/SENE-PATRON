@@ -63,7 +63,7 @@ Solicitud:
 ```json
 {"purpose":"PATRON_ACTIVATE","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex","targetMethod":"POST","targetPath":"/v1/patron/activate","bodySha256":"hex del cuerpo exacto que se firmará"}
 ```
-Para sesiones existentes, se envían `deviceId`, `targetMethod`, `targetPath` y `bodySha256`; se omiten los datos de clave/instalación porque el servidor recupera la clave pública registrada. Valores implementados para emisión inicial de reto: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH`. `DEVICE_RECOVERY` queda pendiente de diseño e implementación.
+Para sesiones existentes, se envían `deviceId`, `targetMethod`, `targetPath` y `bodySha256`; se omiten los datos de clave/instalación porque el servidor recupera la clave pública registrada. Valores implementados para emisión inicial de reto: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH` y `PATRON_PAIRING_TOKEN`. `DEVICE_RECOVERY` queda pendiente de diseño e implementación.
 Respuesta:
 ```json
 {"challengeId":"uuid","challenge":"base64url","signingMessage":"base64url","expiresAt":unix}
@@ -100,7 +100,9 @@ El operador confirma por separado la primera mensualidad de $80 MXN. Al confirma
 ## 6. Vinculación de SENE VENTAS por QR
 
 ### `POST /v1/patron/pairing-tokens`
-Requiere dispositivo PATRÓN autenticado y licencia vigente. Cuerpo:
+Requiere dispositivo PATRÓN autenticado y licencia vigente. El reto usa el propósito `PATRON_PAIRING_TOKEN`; el cuerpo firmado es `{"uses":2}`. El QR se genera con 2 usos máximos y vencimiento de 24 horas. El token aleatorio se almacena únicamente como hash.
+
+**Implementación en Worker (parcial):** emisión firmada de QR y vinculación firmada de VENTAS ya tienen handlers. El alta de VENTAS inserta el dispositivo y descuenta un uso del QR en un `DB.batch`, asignando únicamente slots 2 y 3 y rechazando licencias no activas/vencidas, token vencido/revocado, huellas duplicadas o slots ocupados. El plazo QR se fijó en 24 horas como valor recomendado; puede ajustarse antes de producción. Cuerpo:
 ```json
 {"uses":2}
 ```
