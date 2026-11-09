@@ -200,8 +200,8 @@ class MainActivity : Activity() {
         isClickable = true
         isFocusable = true
         val count = pendingAlertCount(destination)
-        addView(horizontal(title, if (count > 0) "● $count ALERTA(S)" else "ABRIR  ›", ink,
-            if (count > 0) success else red))
+        addView(horizontal(title, when { count > 0 -> "● $count ALERTA(S)"; count == 0 -> "ABRIR  ›"; else -> "SIN CONEXIÓN" }, ink,
+            when { count > 0 -> success; count == 0 -> red; else -> muted }))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
@@ -243,11 +243,12 @@ class MainActivity : Activity() {
         setOnClickListener { currentPage = destination; render() }
     }
 
-    private fun pendingAlertCount(team: String, section: String? = null): Int = 0
+    private fun pendingAlertCount(team: String, section: String? = null): Int =
+        getSharedPreferences("sene_patron_server", MODE_PRIVATE).getInt("notifications_$team", -1)
 
     private fun notificationCard(number: String) = card().apply {
         val count = pendingAlertCount(if (number == "1") "team1" else "team2")
-        addView(horizontal("NOTIFICACIONES · EQUIPO $number", if (count > 0) "● $count" else "SIN AVISOS", ink, if (count > 0) success else red))
+        addView(horizontal("NOTIFICACIONES · EQUIPO $number", when { count > 0 -> "● $count"; count == 0 -> "SIN AVISOS"; else -> "SIN CONEXIÓN" }, ink, when { count > 0 -> success; count == 0 -> red; else -> muted }))
         gap(this, 4)
         addView(text("Aquí aparecerán exclusivamente los avisos, solicitudes y cambios de este equipo.", 12, muted))
         addView(text("La bandeja de este equipo se actualizará al consultar el servidor SENE.", 11, muted))
