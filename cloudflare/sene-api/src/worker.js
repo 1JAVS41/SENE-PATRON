@@ -203,6 +203,13 @@ const CHALLENGE_TARGETS = {
   VENTAS_PAIR: ["POST", "/v1/ventas/pair"],
   DEVICE_AUTH: ["POST", "/v1/device/session"],
   PATRON_PAIRING_TOKEN: ["POST", "/v1/patron/pairing-tokens"],
+  VENTAS_REQUEST: ["POST", "/v1/ventas/requests"],
+  PATRON_REQUESTS_INBOX: ["POST", "/v1/patron/requests/inbox"],
+  PATRON_REQUEST_DECISION: ["POST", "/v1/patron/requests/decision"],
+  VENTAS_REQUEST_UPDATES: ["POST", "/v1/ventas/requests/updates"],
+  VENTAS_SHIFT_REPORT: ["POST", "/v1/ventas/shift-reports"],
+  VENTAS_PAYROLL_REPORT: ["POST", "/v1/ventas/payroll-reports"],
+  PATRON_REPORTS_INBOX: ["POST", "/v1/patron/reports/inbox"],
 };
 
 async function validateBootstrapIdentity(body) {
@@ -598,6 +605,211 @@ async function deviceSession(request, env) {
   });
 }
 
+
+
+const WORK_REQUEST_TYPES = new Set([
+  "LOAN", "CONSUMPTION", "ABSENCE_PERMISSION", "LATE_ARRIVAL",
+  "SCHEDULE_CHANGE", "VACATION", "INCIDENT", "SHORTAGE",
+  "REST_DAY_CHANGE", "SALARY_ADVANCE", "DAMAGED_EQUIPMENT", "SUGGESTION"
+]);
+
+async function signedDeviceContext(proof, expectedType) {
+  const deviceId = proof.challenge.device_id;
+  const row = await proof.env.DB.prepare(
+    "SELECT d.id, d.device_type, d.slot_number, d.license_id, d.status, l.status AS license_status, l.expires_at FROM devices d JOIN licenses l ON l.id = d.license_id WHERE d.id = ? LIMIT 1"
+  ).bind(deviceId).first();
+  const now = Math.floor(Date.now() / 1000);
+  if (!row || row.status !== "active" || (expectedType && row.device_type !== expectedType)) {
+    return { error: "DEVICE_NOT_REGISTERED", status: 401 };
+  }
+  if (row.license_status !== "active" || !row.expires_at || row.expires_at <= now) {
+    return { error: "LICENSE_EXPIRED", status: 403 };
+  }
+  return { deviceId, licenseId: row.license_id, deviceType: row.device_type, slotNumber: row.slot_number };
+}
+
+async function verifyBusinessProof(request, env, purpose) {
+  const proof = await verifySignedRequest(request, env, purpose);
+  if (!proof.ok) return { response: json({ error: proof.error }, proof.status) };
+  proof.env = env;
+  return { proof };
+}
+
+async function createWorkRequest(request, env) {
+  const checked = await verifyBusinessProof(request, env, "VENTAS_REQUEST");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const type = typeof body.type === "string" ? body.type : "";
+  const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey : "";
+  if (!WORK_REQUEST_TYPES.has(type) || !/^[0-9a-f-]{36}$/i.test(idempotencyKey) ||
+      !body.details || typeof body.details !== "object" || Array.isArray(body.details)) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const detailsJson = JSON.stringify(body.details);
+  if (detailsJson.length > 8192) return json({ error: "REQUEST_TOO_LARGE" }, 413);
+  const existing = await env.DB.prepare(
+    "SELECT id, status, created_at FROM work_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
+  ).bind(ctx.deviceId, idempotencyKey).first();
+  if (existing) return json({ requestId: existing.id, status: existing.status, createdAt: existing.created_at, duplicate: true });
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO work_requests (id, license_id, ventas_device_id, request_type, details_json, status, created_at, idempotency_key) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)"
+    ).bind(id, ctx.licenseId, ctx.deviceId, type, detailsJson, now, idempotencyKey).run();
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT id, status, created_at FROM work_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
+    ).bind(ctx.deviceId, idempotencyKey).first();
+    if (raced) return json({ requestId: raced.id, status: raced.status, createdAt: raced.created_at, duplicate: true });
+    return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+  }
+  return json({ requestId: id, status: "pending", createdAt: now }, 201);
+}
+
+async function patronRequestsInbox(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_REQUESTS_INBOX");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const slot = body.slot === "VENTAS_1" || body.slot === "VENTAS_2" ? body.slot : null;
+  const status = body.status === "all" ? "all" : "pending";
+  const slotNumber = slot === "VENTAS_1" ? 2 : slot === "VENTAS_2" ? 3 : null;
+  const rows = await env.DB.prepare(
+    "SELECT r.id, r.request_type, r.details_json, r.status, r.created_at, r.decided_at, d.slot_number FROM work_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND (? IS NULL OR d.slot_number = ?) AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
+  ).bind(ctx.licenseId, slotNumber, slotNumber, status).all();
+  const counts = await env.DB.prepare(
+    "SELECT d.slot_number, COUNT(r.id) AS pending_count FROM devices d LEFT JOIN work_requests r ON r.ventas_device_id = d.id AND r.status = 'pending' WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' GROUP BY d.slot_number"
+  ).bind(ctx.licenseId).all();
+  const pendingByTeam = { VENTAS_1: 0, VENTAS_2: 0 };
+  for (const row of (counts.results || [])) {
+    if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.pending_count);
+    if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.pending_count);
+  }
+  return json({
+    pendingByTeam,
+    items: (rows.results || []).map((r) => ({
+      requestId: r.id, type: r.request_type, details: JSON.parse(r.details_json),
+      status: r.status, createdAt: r.created_at, decidedAt: r.decided_at,
+      slot: r.slot_number === 2 ? "VENTAS_1" : "VENTAS_2"
+    }))
+  });
+}
+
+async function decideWorkRequest(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_REQUEST_DECISION");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
+  if (!requestId || !decision) return json({ error: "INVALID_REQUEST" }, 400);
+  const decisionData = body.decisionDetails && typeof body.decisionDetails === "object" && !Array.isArray(body.decisionDetails)
+    ? body.decisionDetails : {};
+  if (decisionData.deduction !== undefined) {
+    if (!decisionData.deduction || typeof decisionData.deduction !== "object" ||
+        typeof decisionData.deduction.authorized !== "boolean") return json({ error: "INVALID_DEDUCTION" }, 400);
+    if (!decisionData.deduction.authorized) delete decisionData.deduction.amountCents;
+    else if (!Number.isInteger(decisionData.deduction.amountCents) || decisionData.deduction.amountCents < 0 || decisionData.deduction.amountCents > 100000000) {
+      return json({ error: "INVALID_DEDUCTION" }, 400);
+    }
+  }
+  const decisionJson = JSON.stringify(decisionData);
+  if (decisionJson.length > 4096) return json({ error: "REQUEST_TOO_LARGE" }, 413);
+  const now = Math.floor(Date.now() / 1000);
+  const result = await env.DB.prepare(
+    "UPDATE work_requests SET status = ?, decision_json = ?, decided_at = ?, decided_by_device_id = ? WHERE id = ? AND license_id = ? AND status = 'pending'"
+  ).bind(decision, decisionJson, now, ctx.deviceId, requestId, ctx.licenseId).run();
+  if ((result.meta?.changes ?? 0) !== 1) return json({ error: "REQUEST_NOT_PENDING_OR_NOT_FOUND" }, 409);
+  return json({ requestId, status: decision, decidedAt: now, decisionDetails: decisionData });
+}
+
+async function ventasRequestUpdates(request, env) {
+  const checked = await verifyBusinessProof(request, env, "VENTAS_REQUEST_UPDATES");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const since = Number.isSafeInteger(body.since) && body.since > 0 ? body.since : 0;
+  const rows = await env.DB.prepare(
+    "SELECT id, request_type, status, decision_json, created_at, decided_at FROM work_requests WHERE ventas_device_id = ? AND decided_at IS NOT NULL AND decided_at > ? ORDER BY decided_at ASC LIMIT 100"
+  ).bind(ctx.deviceId, since).all();
+  return json({ items: (rows.results || []).map((r) => ({
+    requestId: r.id, type: r.request_type, status: r.status,
+    decisionDetails: r.decision_json ? JSON.parse(r.decision_json) : {},
+    createdAt: r.created_at, decidedAt: r.decided_at
+  })) });
+}
+
+async function saveReport(request, env, purpose, table, keyField, keyName) {
+  const checked = await verifyBusinessProof(request, env, purpose);
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const key = typeof body[keyField] === "string" ? body[keyField].trim() : "";
+  if (!/^[A-Za-z0-9._:-]{1,100}$/.test(key) || !body.report || typeof body.report !== "object" || Array.isArray(body.report)) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const reportJson = JSON.stringify(body.report);
+  if (reportJson.length > 16384) return json({ error: "REQUEST_TOO_LARGE" }, 413);
+  const existing = await env.DB.prepare(
+    "SELECT id, created_at FROM " + table + " WHERE ventas_device_id = ? AND " + keyName + " = ? LIMIT 1"
+  ).bind(ctx.deviceId, key).first();
+  if (existing) return json({ reportId: existing.id, createdAt: existing.created_at, duplicate: true });
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO " + table + " (id, license_id, ventas_device_id, " + keyName + ", report_json, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(id, ctx.licenseId, ctx.deviceId, key, reportJson, now).run();
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT id, created_at FROM " + table + " WHERE ventas_device_id = ? AND " + keyName + " = ? LIMIT 1"
+    ).bind(ctx.deviceId, key).first();
+    if (raced) return json({ reportId: raced.id, createdAt: raced.created_at, duplicate: true });
+    return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+  }
+  return json({ reportId: id, createdAt: now }, 201);
+}
+
+async function patronReportsInbox(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_REPORTS_INBOX");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const slot = body.slot === "VENTAS_1" ? 2 : body.slot === "VENTAS_2" ? 3 : null;
+  if (!slot) return json({ error: "INVALID_REQUEST" }, 400);
+  const shifts = await env.DB.prepare(
+    "SELECT id, shift_key, report_json, created_at FROM shift_reports WHERE license_id = ? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ?) ORDER BY created_at DESC LIMIT 50"
+  ).bind(ctx.licenseId, ctx.licenseId, slot).all();
+  const payroll = await env.DB.prepare(
+    "SELECT id, period_key, report_json, created_at FROM payroll_reports WHERE license_id = ? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ?) ORDER BY created_at DESC LIMIT 50"
+  ).bind(ctx.licenseId, ctx.licenseId, slot).all();
+  return json({
+    slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
+    shiftReports: (shifts.results || []).map((r) => ({ reportId: r.id, shiftKey: r.shift_key, report: JSON.parse(r.report_json), createdAt: r.created_at })),
+    payrollReports: (payroll.results || []).map((r) => ({ reportId: r.id, periodKey: r.period_key, report: JSON.parse(r.report_json), createdAt: r.created_at }))
+  });
+}
+
 async function handle(request, env) {
   const url = new URL(request.url);
 
@@ -624,6 +836,14 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/device/session") {
     return deviceSession(request, env);
   }
+
+  if (request.method === "POST" && url.pathname === "/v1/ventas/requests") return createWorkRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/requests/inbox") return patronRequestsInbox(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/requests/decision") return decideWorkRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/ventas/requests/updates") return ventasRequestUpdates(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/ventas/shift-reports") return saveReport(request, env, "VENTAS_SHIFT_REPORT", "shift_reports", "shiftKey", "shift_key");
+  if (request.method === "POST" && url.pathname === "/v1/ventas/payroll-reports") return saveReport(request, env, "VENTAS_PAYROLL_REPORT", "payroll_reports", "periodKey", "period_key");
+  if (request.method === "POST" && url.pathname === "/v1/patron/reports/inbox") return patronReportsInbox(request, env);
 
   // Temporary operator scaffold only. Do not expose this token in either APK.
   if (request.method === "POST" && url.pathname === "/admin/licenses") {
