@@ -41,3 +41,20 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+
+      - name: Probar límite semanal atómico de 20 operaciones
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0001_initial.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-test', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('device-test', 'license-test', 'VENTAS', 'install-test', 'continuity-test', x'00', 'fingerprint-test', 2, 'active', 1);"
+          for expected in $(seq 1 20); do
+            actual="$(sqlite3 "$DB_FILE" "INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at) VALUES (lower(hex(randomblob(16))), 'device-test', '2026-W46', 1, 1) ON CONFLICT(device_id, week_key) DO UPDATE SET used = weekly_usage.used + 1, updated_at = excluded.updated_at WHERE weekly_usage.used < 20 RETURNING used;")"
+            test "$actual" = "$expected"
+          done
+          overflow="$(sqlite3 "$DB_FILE" "INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at) VALUES (lower(hex(randomblob(16))), 'device-test', '2026-W46', 1, 1) ON CONFLICT(device_id, week_key) DO UPDATE SET used = weekly_usage.used + 1, updated_at = excluded.updated_at WHERE weekly_usage.used < 20 RETURNING used;")"
+          test -z "$overflow"
+          test "$(sqlite3 "$DB_FILE" "SELECT used FROM weekly_usage WHERE device_id='device-test' AND week_key='2026-W46';")" = "20"
