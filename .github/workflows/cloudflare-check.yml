@@ -86,6 +86,25 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT consumed_at FROM renewal_requests WHERE id='renew-1';")" = "400"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
+      - name: Probar alta inicial, pago de $580 y activación por 30 días
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/000{1..5}_*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, label, business_name, status, max_devices, activation_code_hash, created_at) VALUES ('license-initial', 'TIENDA TEST', 'TIENDA TEST', 'pending', 3, 'activation-hash', 100);"
+          sqlite3 "$DB_FILE" "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES ('setup-payment', 'license-initial', 'SETUP', 50000, 'MXN', 'CONFIRMED', 'folio-580', 'initial-setup:license-initial', 200, 200, 'operator'), ('rent-payment', 'license-initial', 'FIRST_RENT', 8000, 'MXN', 'CONFIRMED', 'folio-580', 'initial-rent:license-initial', 200, 200, 'operator');"
+          sqlite3 "$DB_FILE" "UPDATE licenses SET setup_paid_at=200, first_rent_paid_at=200 WHERE id='license-initial' AND status='pending';"
+          test "$(sqlite3 "$DB_FILE" "SELECT SUM(amount_cents) FROM payments WHERE license_id='license-initial' AND status='CONFIRMED';")" = "58000"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT 'patron-initial', id, 'PATRON', 'install', 'continuity', x'01', 'fingerprint', 1, 'active', 300 FROM licenses WHERE id='license-initial' AND status='pending' AND setup_paid_at IS NOT NULL;"
+          sqlite3 "$DB_FILE" "UPDATE licenses SET activation_code_hash=NULL WHERE id='license-initial' AND activation_code_hash='activation-hash' AND EXISTS (SELECT 1 FROM devices WHERE id='patron-initial' AND license_id=licenses.id);"
+          sqlite3 "$DB_FILE" "UPDATE licenses SET status='active', activated_at=300, expires_at=2592300 WHERE id=(SELECT license_id FROM devices WHERE id='patron-initial') AND status='pending' AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL;"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM licenses WHERE id='license-initial';")" = "active"
+          test "$(sqlite3 "$DB_FILE" "SELECT expires_at FROM licenses WHERE id='license-initial';")" = "2592300"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar reemplazo conservando historial y referencias
         run: |
           set -euo pipefail
