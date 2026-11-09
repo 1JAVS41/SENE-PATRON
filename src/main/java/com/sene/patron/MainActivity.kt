@@ -352,7 +352,7 @@ class MainActivity : Activity() {
             .setPositiveButton("GUARDAR") { _, _ ->
                 val salaryValue = salary.text.toString().trim().replace(",", ".").toDoubleOrNull()
                 val dayValue = day.text.toString().trim().takeIf { it.isNotBlank() }?.toIntOrNull()
-                val dateValues = dates.text.toString().split(",", "\\n").map { it.trim() }.filter { it.isNotBlank() }
+                val dateValues = dates.text.toString().split(',', '\n').map { it.trim() }.filter { it.isNotBlank() }
                 if (salaryValue == null || salaryValue < 0 || salaryValue > 10_000_000 ||
                     (day.text.isNotBlank() && (dayValue == null || dayValue !in 1..31)) ||
                     (dayValue == null && dateValues.isEmpty()) ||
