@@ -265,3 +265,10 @@ No desplegar ni conectar APK hasta que las filas pendientes de correcciones, rec
 
 
 **Protección de activación:** el Worker exige la confirmación de los dos pagos (alta $500 y primera renta $80) antes de registrar el PATRÓN o consumir el código. Si falta uno, el código permanece utilizable y la licencia pendiente.
+
+
+### Recuperación de códigos privados (implementada en rama)
+
+- `POST /v1/operator/licenses/reissue-activation-code`: cuerpo `{"licenseId":"uuid"}`. Solo permite reemitir si alta y primera renta están confirmadas, la licencia sigue pendiente y no existe PATRÓN activo. Invalida el hash anterior y devuelve el código nuevo una sola vez.
+- `POST /v1/operator/renewals/reissue-code`: cuerpo `{"requestId":"uuid"}`. Solo permite rotar el código de una renovación autorizada con pago mensual confirmado. Invalida el código anterior y devuelve el nuevo una sola vez.
+- Ningún código se almacena en texto claro. Ambas acciones requieren autenticación privada de operador y quedan auditadas. No hay recuperación del código antiguo; se emite uno nuevo.
