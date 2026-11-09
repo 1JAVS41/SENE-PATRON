@@ -236,6 +236,10 @@ const CHALLENGE_TARGETS = {
   PATRON_RENEWAL_REQUEST: ["POST", "/v1/patron/renewals/request"],
   PATRON_RENEWAL_REDEEM: ["POST", "/v1/patron/renewals/redeem"],
   PATRON_REPLACEMENT_REQUEST: ["POST", "/v1/patron/devices/replacement-request"],
+  VENTAS_CORRECTION_CREATE: ["POST", "/v1/ventas/corrections"],
+  PATRON_CORRECTIONS_INBOX: ["POST", "/v1/patron/corrections/inbox"],
+  PATRON_CORRECTION_DECISION: ["POST", "/v1/patron/corrections/decision"],
+  VENTAS_CORRECTION_CONSUME: ["POST", "/v1/ventas/corrections/consume"],
 };
 
 async function validateBootstrapIdentity(body) {
@@ -944,6 +948,142 @@ async function decideOperatorReplacement(request, env, decision) {
   }
 }
 
+
+async function createCorrectionRequest(request, env) {
+  const checked = await verifyBusinessProof(request, env, "VENTAS_CORRECTION_CREATE");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const saleId = typeof body.saleId === "string" ? body.saleId.trim() : "";
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey : "";
+  if (!saleId || saleId.length > 120 || !reason || reason.length > 500 ||
+      !/^[0-9a-f-]{36}$/i.test(idempotencyKey)) return json({ error: "INVALID_REQUEST" }, 400);
+  const existing = await env.DB.prepare(
+    "SELECT id, status, created_at, sale_id FROM correction_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
+  ).bind(ctx.deviceId, idempotencyKey).first();
+  if (existing) return json({ requestId: existing.id, saleId: existing.sale_id, status: existing.status, createdAt: existing.created_at, duplicate: true });
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO correction_requests (id, license_id, ventas_device_id, sale_id, reason, status, created_at, idempotency_key) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)"
+      ).bind(id, ctx.licenseId, ctx.deviceId, saleId, reason, now, idempotencyKey),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, ?, 'ventas', ?, 'correction_requested', ?, ?)"
+      ).bind(crypto.randomUUID(), ctx.licenseId, ctx.deviceId, ctx.deviceId, JSON.stringify({ requestId: id, saleId }), now)
+    ]);
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT id, status, created_at, sale_id FROM correction_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
+    ).bind(ctx.deviceId, idempotencyKey).first();
+    if (raced) return json({ requestId: raced.id, saleId: raced.sale_id, status: raced.status, createdAt: raced.created_at, duplicate: true });
+    return json({ error: "CORRECTION_REQUEST_CONFLICT" }, 409);
+  }
+  return json({ requestId: id, saleId, status: "pending", createdAt: now }, 201);
+}
+
+async function patronCorrectionsInbox(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_CORRECTIONS_INBOX");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const slot = body.slot === "VENTAS_1" ? 2 : body.slot === "VENTAS_2" ? 3 : null;
+  const status = body.status === "all" ? "all" : "pending";
+  if (!slot) return json({ error: "INVALID_REQUEST" }, 400);
+  const rows = await env.DB.prepare(
+    "SELECT r.id, r.sale_id, r.reason, r.status, r.created_at, r.decided_at FROM correction_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND d.slot_number = ? AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
+  ).bind(ctx.licenseId, slot, status).all();
+  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", items: (rows.results || []).map((r) => ({
+    requestId: r.id, saleId: r.sale_id, reason: r.reason, status: r.status,
+    createdAt: r.created_at, decidedAt: r.decided_at
+  })) });
+}
+
+async function decideCorrectionRequest(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_CORRECTION_DECISION");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !decision) return json({ error: "INVALID_REQUEST" }, 400);
+  const row = await env.DB.prepare(
+    "SELECT id, license_id, ventas_device_id, sale_id FROM correction_requests WHERE id = ? AND license_id = ? AND status = 'pending' LIMIT 1"
+  ).bind(requestId, ctx.licenseId).first();
+  if (!row) return json({ error: "CORRECTION_NOT_PENDING" }, 409);
+  const now = Math.floor(Date.now() / 1000);
+  const grantId = decision === "approved" ? crypto.randomUUID() : null;
+  try {
+    const statements = [
+      env.DB.prepare(
+        "UPDATE correction_requests SET status = ?, decided_at = ? WHERE id = ? AND license_id = ? AND status = 'pending'"
+      ).bind(decision, now, requestId, ctx.licenseId)
+    ];
+    if (decision === "approved") statements.push(env.DB.prepare(
+      "INSERT INTO correction_grants (id, request_id, license_id, ventas_device_id, sale_id, uses_allowed, uses_consumed, created_at) SELECT ?, id, license_id, ventas_device_id, sale_id, 1, 0, ? FROM correction_requests WHERE id = ? AND status = 'approved' AND decided_at = ?"
+    ).bind(grantId, now, requestId, now));
+    statements.push(env.DB.prepare(
+      "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'patron', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM correction_requests WHERE id = ? AND status = ? AND decided_at = ?)"
+    ).bind(crypto.randomUUID(), ctx.licenseId, row.ventas_device_id, ctx.deviceId, decision === "approved" ? "correction_approved" : "correction_rejected", JSON.stringify({ requestId, saleId: row.sale_id, grantId }), now, requestId, decision, now));
+    const results = await env.DB.batch(statements);
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+        (decision === "approved" && (results?.[1]?.meta?.changes ?? 0) !== 1)) {
+      return json({ error: "CORRECTION_DECISION_CONFLICT" }, 409);
+    }
+  } catch {
+    return json({ error: "CORRECTION_DECISION_CONFLICT" }, 409);
+  }
+  return json({ requestId, saleId: row.sale_id, status: decision, grantId, usesAllowed: decision === "approved" ? 1 : 0, decidedAt: now });
+}
+
+async function consumeCorrectionGrant(request, env) {
+  const checked = await verifyBusinessProof(request, env, "VENTAS_CORRECTION_CONSUME");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  const grantId = typeof body.grantId === "string" ? body.grantId : "";
+  const saleId = typeof body.saleId === "string" ? body.saleId.trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !/^[0-9a-f-]{36}$/i.test(grantId) || !saleId) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE correction_grants SET uses_consumed = 1, consumed_at = ? WHERE id = ? AND request_id = ? AND license_id = ? AND ventas_device_id = ? AND sale_id = ? AND uses_allowed = 1 AND uses_consumed = 0 AND EXISTS (SELECT 1 FROM correction_requests WHERE id = ? AND status = 'approved' AND sale_id = ?)"
+      ).bind(now, grantId, requestId, ctx.licenseId, ctx.deviceId, saleId, requestId, saleId),
+      env.DB.prepare(
+        "UPDATE correction_requests SET status = 'consumed' WHERE id = ? AND license_id = ? AND ventas_device_id = ? AND sale_id = ? AND status = 'approved' AND EXISTS (SELECT 1 FROM correction_grants WHERE id = ? AND uses_consumed = 1 AND consumed_at = ?)"
+      ).bind(requestId, ctx.licenseId, ctx.deviceId, saleId, grantId, now),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'ventas', ?, 'correction_grant_consumed', ?, ? WHERE EXISTS (SELECT 1 FROM correction_requests WHERE id = ? AND status = 'consumed')"
+      ).bind(crypto.randomUUID(), ctx.licenseId, ctx.deviceId, ctx.deviceId, JSON.stringify({ requestId, grantId, saleId }), now, requestId)
+    ]);
+  } catch {
+    return json({ error: "CORRECTION_GRANT_CONFLICT" }, 409);
+  }
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "GRANT_ALREADY_CONSUMED_OR_MISMATCH" }, 409);
+  }
+  return json({ authorized: true, requestId, grantId, saleId, consumedAt: now, usesRemaining: 0 });
+}
+
 async function deviceSession(request, env) {
   const proof = await verifySignedRequest(request, env, "DEVICE_AUTH");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -1246,6 +1386,10 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/ventas/shift-reports") return saveReport(request, env, "VENTAS_SHIFT_REPORT", "shift_reports", "shiftKey", "shift_key");
   if (request.method === "POST" && url.pathname === "/v1/ventas/payroll-reports") return saveReport(request, env, "VENTAS_PAYROLL_REPORT", "payroll_reports", "periodKey", "period_key");
   if (request.method === "POST" && url.pathname === "/v1/patron/reports/inbox") return patronReportsInbox(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/ventas/corrections") return createCorrectionRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/corrections/inbox") return patronCorrectionsInbox(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/corrections/decision") return decideCorrectionRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/ventas/corrections/consume") return consumeCorrectionGrant(request, env);
 
   // Temporary operator scaffold only. Do not expose this token in either APK.
   if (request.method === "POST" && url.pathname === "/admin/licenses") {
