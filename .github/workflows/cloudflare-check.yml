@@ -241,3 +241,30 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM licenses WHERE activation_code_hash IN ('old-activation-hash','new-activation-hash');")" = "1"
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Probar recuperación de PATRON perdido y revocación de QR
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/000{1..9}_*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-patron-recovery', 'TIENDA RECUPERAR', 'expired', 3, 1, 100);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-lost', 'license-patron-recovery', 'PATRON', 'old-install', 'old-continuity', x'01', 'old-fingerprint', 1, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at) VALUES ('old-pair-token', 'license-patron-recovery', 'patron-lost', 2, 2, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_requests (id, license_id, old_patron_device_id, code_hash, reason, status, created_at, created_by) VALUES ('recovery-1', 'license-patron-recovery', 'patron-lost', 'valid-code-hash', 'Teléfono perdido', 'pending', 3, 'operator');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-lost';")" = "active"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM patron_recovery_requests WHERE id='recovery-1';")" = "pending"
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='patron-lost' AND license_id='license-patron-recovery' AND device_type='PATRON' AND slot_number=1 AND status='active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id='recovery-1' AND code_hash='valid-code-hash' AND status='pending');"
+          test "$(sqlite3 "$DB_FILE" "SELECT changes();")" = "0"
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='patron-lost' AND license_id='license-patron-recovery' AND device_type='PATRON' AND slot_number=1 AND status='active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id='recovery-1' AND code_hash='valid-code-hash' AND status='pending');"
+          sqlite3 "$DB_FILE" "UPDATE pairing_tokens SET revoked_at=10 WHERE license_id='license-patron-recovery' AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id='patron-lost' AND status='revoked') AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id='recovery-1' AND code_hash='valid-code-hash' AND status='pending');"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT 'patron-new', r.license_id, 'PATRON', 'new-install', 'new-continuity', x'02', 'new-fingerprint', 1, 'active', 11 FROM patron_recovery_requests r JOIN licenses l ON l.id=r.license_id JOIN devices old ON old.id=r.old_patron_device_id WHERE r.id='recovery-1' AND r.code_hash='valid-code-hash' AND r.status='pending' AND old.status='revoked' AND l.status IN ('active','expired') AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=r.license_id AND d.slot_number=1 AND d.status='active');"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_requests SET status='consumed', consumed_at=11 WHERE id='recovery-1' AND code_hash='valid-code-hash' AND status='pending' AND EXISTS (SELECT 1 FROM devices WHERE id='patron-new' AND status='active');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-lost';")" = "revoked"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-new';")" = "active"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM patron_recovery_requests WHERE id='recovery-1';")" = "consumed"
+          test "$(sqlite3 "$DB_FILE" "SELECT revoked_at FROM pairing_tokens WHERE token_hash='old-pair-token';")" = "10"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-patron-recovery' AND slot_number=1 AND status='active';")" = "1"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
