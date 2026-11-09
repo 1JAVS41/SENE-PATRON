@@ -8,7 +8,8 @@ Backend en construcción para SENE PATRÓN / SENE VENTAS. Objetivo: Workers Free
 - Esquema inicial `0001_initial.sql`: licencias, dispositivos, QR, retos y correcciones.
 - Migración aditiva `0002_security_billing_usage.sql`: pagos en centavos MXN, campos para retos ligados al método/ruta/hash del cuerpo, idempotencia de solicitudes, cuota semanal por dispositivo, reemplazos y auditoría.
 - `wrangler.toml` ya apunta a la D1 existente `sene-licencias` y su ID real.
-- La migración 0002 fue validada localmente contra SQLite usando el esquema 0001. **Todavía no se ha aplicado a la D1 remota ni se ha probado desde el Worker.**
+- Se probó con Node/WebCrypto una firma ECDSA P-256 de prueba: DER → P1363 verifica correctamente y un mensaje alterado se rechaza. Esta prueba valida la conversión criptográfica, no una ejecución desplegada de Cloudflare.
+- **Todavía no se ha aplicado la migración 0002 a la D1 remota ni se ha probado el Worker en Cloudflare.**
 
 ## No conectar APKs todavía
 
