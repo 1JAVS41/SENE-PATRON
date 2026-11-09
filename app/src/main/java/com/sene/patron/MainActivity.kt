@@ -1,6 +1,7 @@
 package com.sene.patron
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
@@ -13,6 +14,8 @@ import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.MultiFormatWriter
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -228,16 +231,8 @@ class MainActivity : Activity() {
         root.addView(intro)
         gap(root, 12)
         when (page) {
-            "devices" -> {
-                root.addView(slot("SENE VENTAS · EQUIPO 1", "Primer espacio de trabajador", "DISPONIBLE"))
-                gap(root, 9)
-                root.addView(slot("SENE VENTAS · EQUIPO 2", "Segundo espacio de trabajador", "DISPONIBLE"))
-                gap(root, 9)
-                root.addView(info("REGLA DE LICENCIA",
-                    "Máximo tres dispositivos: un SENE PATRÓN y dos SENE VENTAS. Ningún equipo se autoriza por sí mismo."))
-            }
-            "requests" -> root.addView(info("BANDEJA DE SOLICITUDES",
-                "Aquí aparecerán las solicitudes pendientes de autorización cuando se conecte el servicio."))
+            "devices" -> devicesScreen(root)
+            "requests" -> requestsScreen(root)
             "schedule" -> root.addView(info("HORARIOS Y ASISTENCIA",
                 "Los datos se mostrarán cuando exista una conexión autorizada con los equipos SENE VENTAS."))
             "security" -> {
@@ -253,6 +248,172 @@ class MainActivity : Activity() {
             "Esta versión muestra la interfaz y navegación. Todavía no se conecta al servidor SENE ni autoriza dispositivos."))
         gap(root, 12)
         root.addView(primaryButton("VOLVER AL MENÚ") { currentPage = "menu"; render() })
+    }
+
+    private fun devicesScreen(root: LinearLayout) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val base = prefs.getString("server_base_url", null)
+        val device = prefs.getString("device_id", null)
+        if (base.isNullOrBlank() || device.isNullOrBlank()) {
+            root.addView(info("EQUIPOS SIN ACTIVAR", "Primero conecta y activa SENE PATRÓN para consultar los espacios de la licencia."))
+            root.addView(primaryButton("IR A CONEXIÓN Y ACTIVACIÓN") { currentPage = "connection"; render() })
+            return
+        }
+        root.addView(primaryButton("CONSULTAR ESTADO DE LOS EQUIPOS") {
+            Thread {
+                try {
+                    val state = SenePatronApiClient(this, base).session(device)
+                    val count = state.optInt("linkedVentasCount", 0)
+                    runOnUiThread {
+                        AlertDialog.Builder(this).setTitle("ESTADO DE LICENCIA")
+                            .setMessage("Empresa: " + state.optString("businessName", "—") +
+                                "\nEquipos SENE VENTAS vinculados: $count de 2" +
+                                "\nEstado: " + state.optString("licenseStatus") +
+                                "\nVencimiento (UTC): " + state.optLong("periodEndsAt"))
+                            .setPositiveButton("CERRAR", null).show()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this, "No se pudo consultar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        })
+        gap(root, 9)
+        root.addView(primaryButton("GENERAR QR PARA VINCULAR EQUIPOS") {
+            Thread {
+                try {
+                    val result = SenePatronApiClient(this, base).createPairingToken(device)
+                    val payload = result.getString("qrPayload")
+                    val matrix = MultiFormatWriter().encode(payload, BarcodeFormat.QR_CODE, 720, 720)
+                    val bitmap = Bitmap.createBitmap(720, 720, Bitmap.Config.ARGB_8888)
+                    for (y in 0 until 720) for (x in 0 until 720) {
+                        bitmap.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
+                    }
+                    runOnUiThread {
+                        val image = ImageView(this).apply {
+                            setImageBitmap(bitmap)
+                            setPadding(dp(12), dp(12), dp(12), dp(12))
+                            adjustViewBounds = true
+                        }
+                        val content = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(12), dp(8), dp(12), dp(8))
+                            addView(image, LinearLayout.LayoutParams(-1, dp(280)))
+                            addView(text("Usos restantes: " + result.optInt("remainingUses") +
+                                "\nVálido hasta (UTC): " + result.optLong("expiresAt"), 12, muted))
+                            addView(text(payload, 10, muted))
+                        }
+                        AlertDialog.Builder(this).setTitle("QR DE VINCULACIÓN SENE VENTAS")
+                            .setView(content).setPositiveButton("CERRAR", null).show()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this, "No se pudo generar el QR: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        })
+        gap(root, 9)
+        root.addView(primaryButton("IR A SOLICITUDES Y NOTIFICACIONES") { currentPage = "requests"; render() })
+        gap(root, 9)
+        root.addView(info("REGLA DE LICENCIA", "Un equipo SENE PATRÓN y exactamente dos espacios SENE VENTAS. Cada QR permite dos vinculaciones y el servidor asigna el equipo libre."))
+    }
+
+    private fun requestsScreen(root: LinearLayout) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val base = prefs.getString("server_base_url", null)
+        val device = prefs.getString("device_id", null)
+        if (base.isNullOrBlank() || device.isNullOrBlank()) {
+            root.addView(info("SERVICIO NO ACTIVADO", "Conecta y activa SENE PATRÓN para recibir solicitudes."))
+            root.addView(primaryButton("IR A CONEXIÓN") { currentPage = "connection"; render() })
+            return
+        }
+        root.addView(info("NOTIFICACIONES INDEPENDIENTES", "Cada equipo conserva su propio contador. Rojo significa cero pendientes sin consultar; verde significa que hay una o más notificaciones."))
+        gap(root, 9)
+        root.addView(primaryButton("ACTUALIZAR CONTADORES") {
+            Thread {
+                try {
+                    val result = SenePatronApiClient(this, base).notifications(device)
+                    val counts = result.optJSONObject("pendingByTeam") ?: org.json.JSONObject()
+                    runOnUiThread {
+                        AlertDialog.Builder(this).setTitle("NOTIFICACIONES POR EQUIPO")
+                            .setMessage("Equipo 1: " + counts.optInt("VENTAS_1", 0) +
+                                "\nEquipo 2: " + counts.optInt("VENTAS_2", 0))
+                            .setPositiveButton("CERRAR", null).show()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { Toast.makeText(this, "No se pudieron actualizar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                }
+            }.start()
+        })
+        gap(root, 9)
+        root.addView(primaryButton("EQUIPO 1 · SENE VENTAS") { loadTeamInbox("VENTAS_1", base) })
+        gap(root, 9)
+        root.addView(primaryButton("EQUIPO 2 · SENE VENTAS") { loadTeamInbox("VENTAS_2", base) })
+        gap(root, 9)
+        root.addView(info("IMPORTANTE", "Al abrir la bandeja de un equipo, el servidor marca como vistas sus notificaciones pendientes de ese equipo. Las solicitudes permanecen en el historial hasta que se aprueban o rechazan."))
+    }
+
+    private fun loadTeamInbox(slot: String, base: String) {
+        Thread {
+            try {
+                val api = SenePatronApiClient(this, base)
+                val result = api.requestsInbox(slot, "pending")
+                val work = result.optJSONArray("items") ?: org.json.JSONArray()
+                val corrections = result.optJSONArray("corrections") ?: org.json.JSONArray()
+                val labels = ArrayList<String>()
+                val kinds = ArrayList<String>()
+                val records = ArrayList<org.json.JSONObject>()
+                for (i in 0 until work.length()) {
+                    val item = work.optJSONObject(i) ?: continue
+                    labels.add("SOLICITUD · " + item.optString("type") + "\n" + item.optJSONObject("details")?.optString("description").orEmpty())
+                    kinds.add("work"); records.add(item)
+                }
+                for (i in 0 until corrections.length()) {
+                    val item = corrections.optJSONObject(i) ?: continue
+                    labels.add("CORRECCIÓN DE VENTA\nVenta: " + item.optString("saleId") + "\nMotivo: " + item.optString("reason"))
+                    kinds.add("correction"); records.add(item)
+                }
+                val counts = result.optJSONObject("pendingByTeam") ?: org.json.JSONObject()
+                val message = if (labels.isEmpty()) "No hay solicitudes pendientes para este equipo." else
+                    "Notificaciones sin consultar: " + counts.optInt(slot, 0) + "\nSelecciona una solicitud para revisar y responder."
+                runOnUiThread {
+                    val builder = AlertDialog.Builder(this).setTitle(if (slot == "VENTAS_1") "EQUIPO 1 · BANDEJA" else "EQUIPO 2 · BANDEJA")
+                    if (labels.isEmpty()) builder.setMessage(message).setPositiveButton("CERRAR", null).show()
+                    else builder.setMessage(message).setItems(labels.toTypedArray()) { _, index ->
+                        val item = records[index]
+                        val correction = kinds[index] == "correction"
+                        val details = if (correction) {
+                            "Venta: " + item.optString("saleId") + "\nMotivo: " + item.optString("reason")
+                        } else {
+                            "Tipo: " + item.optString("type") + "\nDetalle: " +
+                                (item.optJSONObject("details")?.toString(2) ?: "{}")
+                        }
+                        AlertDialog.Builder(this).setTitle(if (correction) "AUTORIZAR CORRECCIÓN" else "REVISAR SOLICITUD")
+                            .setMessage(details + "\n\n¿Deseas aprobar o rechazar?")
+                            .setPositiveButton("APROBAR") { _, _ -> decideTeamItem(base, item, correction, "approve") }
+                            .setNegativeButton("RECHAZAR") { _, _ -> decideTeamItem(base, item, correction, "reject") }
+                            .setNeutralButton("VOLVER", null).show()
+                    }.setNegativeButton("CERRAR", null).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, "No se pudo cargar la bandeja: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun decideTeamItem(base: String, item: org.json.JSONObject, correction: Boolean, decision: String) {
+        Thread {
+            try {
+                val api = SenePatronApiClient(this, base)
+                if (correction) api.decideCorrection(item.getString("requestId"), decision)
+                else api.decideRequest(item.getString("requestId"), decision)
+                runOnUiThread {
+                    Toast.makeText(this, if (decision == "approve") "Solicitud aprobada." else "Solicitud rechazada.", Toast.LENGTH_LONG).show()
+                    val slot = item.optString("slot", "")
+                    if (slot == "VENTAS_1" || slot == "VENTAS_2") loadTeamInbox(slot, base)
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, "No se pudo registrar la decisión: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun header(root: LinearLayout, subtitle: String) {
