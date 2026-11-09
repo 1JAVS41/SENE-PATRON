@@ -548,6 +548,42 @@ async function createPatronRecovery(request, env) {
   }, 201);
 }
 
+async function listPatronRecoveries(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const rows = await env.DB.prepare(
+    "SELECT r.id, r.license_id, l.business_name, r.old_patron_device_id, r.reason, r.created_at FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id WHERE r.status = 'pending' ORDER BY r.created_at ASC LIMIT 100"
+  ).all();
+  return json({ items: rows.results || [] });
+}
+
+async function reissuePatronRecoveryCode(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.recoveryRequestId === "string" ? body.recoveryRequestId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const code = makeCode();
+  const codeHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE patron_recovery_requests SET code_hash = ? WHERE id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = patron_recovery_requests.old_patron_device_id AND status = 'active')"
+      ).bind(codeHash, requestId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, old_patron_device_id, 'operator', 'operator', 'patron_recovery_code_reissued', ?, ? FROM patron_recovery_requests WHERE id = ? AND status = 'pending' AND code_hash = ?"
+      ).bind(crypto.randomUUID(), JSON.stringify({ recoveryRequestId: requestId }), now, requestId, codeHash)
+    ]);
+  } catch {
+    return json({ error: "PATRON_RECOVERY_NOT_REISSUABLE" }, 409);
+  }
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "PATRON_RECOVERY_NOT_REISSUABLE" }, 409);
+  }
+  return json({ recoveryRequestId: requestId, recoveryCode: code, expiresAt: null, note: "Código anterior invalidado; el nuevo es de un solo uso." }, 200);
+}
+
 async function cancelPatronRecovery(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
   let body;
@@ -1560,6 +1596,8 @@ async function handle(request, env) {
 
   if (request.method === "POST" && url.pathname === "/v1/patron/recover") return recoverPatron(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/create") return createPatronRecovery(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/operator/patron-recovery/pending") return listPatronRecoveries(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/reissue-code") return reissuePatronRecoveryCode(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/cancel") return cancelPatronRecovery(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/patron/pairing-tokens") {
