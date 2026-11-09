@@ -328,11 +328,13 @@ class MainActivity : Activity() {
         }
         root.addView(info("NOTIFICACIONES INDEPENDIENTES", "Cada equipo conserva su propio contador. Rojo significa cero pendientes sin consultar; verde significa que hay una o más notificaciones."))
         gap(root, 9)
-        team1StatusButton = teamStatusButton("VENTAS_1", "EQUIPO 1 · SENE VENTAS", base)
-        team2StatusButton = teamStatusButton("VENTAS_2", "EQUIPO 2 · SENE VENTAS", base)
-        root.addView(team1StatusButton)
+        val firstTeamButton = teamStatusButton("VENTAS_1", "EQUIPO 1 · SENE VENTAS", base)
+        val secondTeamButton = teamStatusButton("VENTAS_2", "EQUIPO 2 · SENE VENTAS", base)
+        team1StatusButton = firstTeamButton
+        team2StatusButton = secondTeamButton
+        root.addView(firstTeamButton)
         gap(root, 9)
-        root.addView(team2StatusButton)
+        root.addView(secondTeamButton)
         gap(root, 9)
         root.addView(primaryButton("ACTUALIZAR CONTADORES") { refreshNotificationButtons(base) })
         refreshNotificationButtons(base)
