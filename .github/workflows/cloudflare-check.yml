@@ -38,5 +38,6 @@ jobs:
           DB_FILE="$(mktemp)"
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0001_initial.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
