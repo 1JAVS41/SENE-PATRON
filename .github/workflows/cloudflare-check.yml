@@ -39,6 +39,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0001_initial.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
@@ -49,6 +50,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0001_initial.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-test', 'active', 3, 1, 9999999999);"
           sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('device-test', 'license-test', 'VENTAS', 'install-test', 'continuity-test', x'00', 'fingerprint-test', 2, 'active', 1);"
           for expected in $(seq 1 20); do
@@ -58,3 +60,36 @@ jobs:
           overflow="$(sqlite3 "$DB_FILE" "INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at) VALUES (lower(hex(randomblob(16))), 'device-test', '2026-W46', 1, 1) ON CONFLICT(device_id, week_key) DO UPDATE SET used = weekly_usage.used + 1, updated_at = excluded.updated_at WHERE weekly_usage.used < 20 RETURNING used;")"
           test -z "$overflow"
           test "$(sqlite3 "$DB_FILE" "SELECT used FROM weekly_usage WHERE device_id='device-test' AND week_key='2026-W46';")" = "20"
+
+      - name: Probar reemplazo conservando historial y referencias
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0001_initial.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-replace', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-old', 'license-replace', 'PATRON', 'install-p', 'continuity-p', x'01', 'fingerprint-p', 1, 'active', 1), ('ventas-old', 'license-replace', 'VENTAS', 'install-v1', 'continuity-v1', x'02', 'fingerprint-v1', 2, 'revoked', 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at) VALUES ('token-hash', 'license-replace', 'patron-old', 1, 2, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO challenges (id, nonce, purpose, installation_id, created_at, expires_at, device_id, fingerprint) VALUES ('challenge-old', 'nonce', 'DEVICE_AUTH', 'install-v1', 2, 9999999999, 'ventas-old', 'fingerprint-v1');"
+          sqlite3 "$DB_FILE" "INSERT INTO correction_requests (id, license_id, ventas_device_id, sale_id, reason, status, created_at) VALUES ('correction-old', 'license-replace', 'ventas-old', 'sale-1', 'test', 'cancelled', 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO correction_grants (id, request_id, license_id, ventas_device_id, sale_id, created_at) VALUES ('grant-old', 'correction-old', 'license-replace', 'ventas-old', 'sale-1', 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at) VALUES ('usage-old', 'ventas-old', '2026-46', 3, 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO replacement_requests (id, license_id, old_device_id, slot_number, reason, status, created_at) VALUES ('replace-old', 'license-replace', 'ventas-old', 2, 'lost', 'approved', 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO audit_log (id, license_id, device_id, actor_type, event_type, created_at) VALUES ('audit-old', 'license-replace', 'ventas-old', 'system', 'device_revoked', 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO work_requests (id, license_id, ventas_device_id, request_type, details_json, created_at, idempotency_key) VALUES ('work-old', 'license-replace', 'ventas-old', 'SUGGESTION', '{}', 2, 'idempotency-old');"
+          sqlite3 "$DB_FILE" "INSERT INTO shift_reports (id, license_id, ventas_device_id, shift_key, report_json, created_at) VALUES ('shift-old', 'license-replace', 'ventas-old', 'shift-1', '{}', 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO payroll_reports (id, license_id, ventas_device_id, period_key, report_json, created_at) VALUES ('payroll-old', 'license-replace', 'ventas-old', 'period-1', '{}', 2);"
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('ventas-new', 'license-replace', 'VENTAS', 'install-v2', 'continuity-v2', x'03', 'fingerprint-v2', 2, 'active', 3);"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-replace' AND slot_number=2;")" = "2"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE id='ventas-old' AND status='revoked';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE id='ventas-new' AND status='active';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-old';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM shift_reports WHERE ventas_device_id='ventas-old';")" = "1"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+          if sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('ventas-duplicate', 'license-replace', 'VENTAS', 'install-v3', 'continuity-v3', x'04', 'fingerprint-v3', 2, 'active', 4);" 2>/dev/null; then
+            echo "ERROR: se permitió un segundo dispositivo activo en el mismo espacio"
+            exit 1
+          fi
