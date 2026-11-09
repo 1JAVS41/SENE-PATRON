@@ -20,6 +20,7 @@ import android.view.View
 import android.animation.ValueAnimator
 import android.view.animation.LinearInterpolator
 import android.widget.EditText
+import android.widget.CheckBox
 import android.widget.Toast
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -335,7 +336,7 @@ class MainActivity : Activity() {
                 if (status == "pending") {
                     gap(requestCard, 7)
                     val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    val approve = primaryButton("APROBAR") { decideTeamRequest(team, requestId, true) }
+                    val approve = primaryButton("APROBAR") { showTeamRequestApproval(team, requestId) }
                     val reject = primaryButton("RECHAZAR") {
                         AlertDialog.Builder(this)
                             .setTitle("Rechazar solicitud")
@@ -447,12 +448,57 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun decideTeamRequest(team: String, requestId: String, approve: Boolean) {
+    private fun showTeamRequestApproval(team: String, requestId: String) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val deduction = CheckBox(this).apply {
+            text = "Autorizar descuento en nómina"
+            isChecked = false
+        }
+        val amount = EditText(this).apply {
+            hint = "Importe a descontar en pesos"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            isEnabled = false
+        }
+        deduction.setOnCheckedChangeListener { _, checked -> amount.isEnabled = checked }
+        content.addView(deduction)
+        content.addView(amount)
+        AlertDialog.Builder(this)
+            .setTitle("Aprobar solicitud")
+            .setMessage("La aprobación no descuenta dinero automáticamente. Solo se aplicará descuento si marcas la opción y confirmas un importe.")
+            .setView(content)
+            .setPositiveButton("APROBAR") { _, _ ->
+                val details = JSONObject()
+                val authorized = deduction.isChecked
+                val decision = JSONObject().put("authorized", authorized)
+                if (authorized) {
+                    val pesos = amount.text.toString().trim().replace(",", ".").toDoubleOrNull()
+                    if (pesos == null || pesos < 0 || pesos > 1_000_000) {
+                        Toast.makeText(this, "Captura un importe válido para el descuento", Toast.LENGTH_LONG).show()
+                        return@setPositiveButton
+                    }
+                    decision.put("amountCents", (pesos * 100.0).toLong())
+                }
+                details.put("deduction", decision)
+                decideTeamRequest(team, requestId, true, details)
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
+    }
+
+    private fun decideTeamRequest(
+        team: String,
+        requestId: String,
+        approve: Boolean,
+        decisionDetails: JSONObject = JSONObject()
+    ) {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         Thread {
             try {
-                SeneApiClient(this, baseUrl).decideRequest(requestId, approve)
+                SeneApiClient(this, baseUrl).decideRequest(requestId, approve, decisionDetails)
                 prefs.edit().remove("requests_$team").putLong("requests_updated_$team", 0L).apply()
                 refreshTeamRequests(team, force = true)
                 runOnUiThread {
