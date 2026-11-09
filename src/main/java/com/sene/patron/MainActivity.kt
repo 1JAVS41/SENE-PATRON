@@ -116,6 +116,18 @@ class MainActivity : Activity() {
         })
         gap(root, 7)
         root.addView(primaryButton("CONFIGURAR CONEXIÓN SEGURA") { showServerConfig() })
+        if (linked) {
+            gap(root, 7)
+            root.addView(primaryButton("PAGAR MENSUALIDAD · $80 MXN") { showRenewalDialog() })
+            val pendingRenewal = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+                .getString("renewal_request_id", null)
+            if (!pendingRenewal.isNullOrBlank()) {
+                gap(root, 7)
+                root.addView(primaryButton("INTRODUCIR CÓDIGO DE RENOVACIÓN") {
+                    showRenewalCodeDialog(pendingRenewal)
+                })
+            }
+        }
         gap(root, 14)
 
         root.addView(primaryButton("¿NECESITAS AYUDA?") { showContactDialog() })
@@ -291,6 +303,86 @@ class MainActivity : Activity() {
                 runOnUiThread { refreshingNotifications = false }
             }
         }.start()
+    }
+
+    private fun showRenewalDialog() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) {
+            showServerConfig()
+            return
+        }
+        val business = prefs.getString("business_name", null).orEmpty().ifBlank { "el nombre exacto de tu empresa" }
+        AlertDialog.Builder(this)
+            .setTitle("PAGAR MENSUALIDAD")
+            .setMessage(
+                "RENOVACIÓN SENE · $80 MXN\n\n" +
+                    "1. Realiza el pago de $80 MXN.\n" +
+                    "2. En el concepto escribe exactamente:\n$business\n" +
+                    "3. Envía la captura del comprobante a los números oficiales de Ayuda por WhatsApp.\n" +
+                    "4. Después pulsa CONSULTAR PAGO y espera el código de autorización.\n\n" +
+                    "La licencia se renueva 30 días cuando introduces el código correcto."
+            )
+            .setPositiveButton("YA PAGUÉ · CONSULTAR PAGO") { _, _ ->
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).requestRenewal()
+                        val requestId = result.optString("requestId")
+                        runOnUiThread {
+                            if (requestId.isNotBlank()) showRenewalCodeDialog(requestId)
+                            else Toast.makeText(this, "No se recibió la solicitud de renovación", Toast.LENGTH_LONG).show()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this, "No se pudo consultar el pago. " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("CERRAR", null)
+            .show()
+    }
+
+    private fun showRenewalCodeDialog(requestId: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) {
+            showServerConfig()
+            return
+        }
+        val field = EditText(this).apply {
+            hint = "Código de autorización"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("ESPERANDO CONFIRMACIÓN")
+            .setMessage("Cuando recibas el código de autorización después de verificar el pago, escríbelo aquí. El código es de un solo uso y no caduca por tiempo.")
+            .setView(field)
+            .setPositiveButton("RENOVAR 30 DÍAS") { _, _ ->
+                val code = field.text?.toString()?.trim().orEmpty()
+                if (code.length != 12) {
+                    Toast.makeText(this, "El código debe tener 12 caracteres", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).redeemRenewal(requestId, code)
+                        runOnUiThread {
+                            Toast.makeText(this, "Licencia renovada por 30 días", Toast.LENGTH_LONG).show()
+                            lastNotificationRefreshAt = 0L
+                            render()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this, "No se pudo renovar. Comprueba el código. " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
     }
 
     private fun showContactDialog() {
