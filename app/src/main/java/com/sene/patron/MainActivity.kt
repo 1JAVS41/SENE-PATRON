@@ -548,6 +548,57 @@ class MainActivity : Activity() {
         root.addView(primaryButton("REPORTES · EQUIPO 1") { showTeamReports("VENTAS_1", base) })
         gap(root, 9)
         root.addView(primaryButton("REPORTES · EQUIPO 2") { showTeamReports("VENTAS_2", base) })
+        gap(root, 12)
+        root.addView(primaryButton("RESUMEN PRELIMINAR DE NÓMINA · EQUIPO 1") { showPayrollCalculation("VENTAS_1", base) })
+        gap(root, 9)
+        root.addView(primaryButton("RESUMEN PRELIMINAR DE NÓMINA · EQUIPO 2") { showPayrollCalculation("VENTAS_2", base) })
+    }
+
+    private fun showPayrollCalculation(slot: String, base: String) {
+        Thread {
+            try {
+                val api = SenePatronApiClient(this, base)
+                val settings = api.payrollSettings().optJSONObject("settings")?.optJSONObject(slot)
+                val reports = api.reportsInbox(slot).optJSONArray("payrollReports") ?: org.json.JSONArray()
+                val latest = if (reports.length() > 0) reports.optJSONObject(0) else null
+                val report = latest?.optJSONObject("report")
+                val requests = report?.optJSONArray("requests") ?: org.json.JSONArray()
+                val salaryCents = settings?.optLong("salaryCents", 0L) ?: 0L
+                var deductions = 0L
+                var approvedDeductions = 0
+                val lines = StringBuilder()
+                for (i in 0 until requests.length()) {
+                    val item = requests.optJSONObject(i) ?: continue
+                    if (item.optString("status") != "approved") continue
+                    val deduction = item.optJSONObject("decisionDetails")?.optJSONObject("deduction") ?: continue
+                    if (!deduction.optBoolean("authorized", false)) continue
+                    val cents = deduction.optLong("amountCents", 0L)
+                    if (cents <= 0L) continue
+                    deductions += cents
+                    approvedDeductions++
+                    lines.append("\n• ").append(item.optString("type"))
+                        .append(": $").append(String.format(java.util.Locale.US, "%.2f", cents / 100.0))
+                }
+                val net = salaryCents - deductions
+                val message = buildString {
+                    append("Equipo: ").append(slot).append("\n")
+                    append("Trabajador: ").append(report?.optString("worker", "No registrado") ?: "Sin reporte")
+                    append("\nFecha de reporte: ").append(latest?.optString("periodKey", "—") ?: "Sin reporte")
+                    append("\nSueldo base configurado: $").append(String.format(java.util.Locale.US, "%.2f", salaryCents / 100.0))
+                    append("\nDescuentos autorizados incluidos: $").append(String.format(java.util.Locale.US, "%.2f", deductions))
+                    append("\nCantidad de descuentos: ").append(approvedDeductions)
+                    append("\nTOTAL PRELIMINAR: $").append(String.format(java.util.Locale.US, "%.2f", net))
+                    if (lines.isNotEmpty()) append("\n\nDetalle:").append(lines)
+                    append("\n\nEste resumen usa únicamente los descuentos expresamente autorizados que llegaron en el reporte. Verifica el periodo y la asistencia antes de confirmar el pago.")
+                }
+                runOnUiThread {
+                    AlertDialog.Builder(this).setTitle("RESUMEN PRELIMINAR · " + slot)
+                        .setMessage(message).setPositiveButton("CERRAR", null).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, "No se pudo calcular el resumen: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun showPayrollSettings(slot: String, base: String) {
