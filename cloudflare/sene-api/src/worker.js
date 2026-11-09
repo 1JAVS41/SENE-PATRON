@@ -202,6 +202,7 @@ const CHALLENGE_TARGETS = {
   PATRON_ACTIVATE: ["POST", "/v1/patron/activate"],
   VENTAS_PAIR: ["POST", "/v1/ventas/pair"],
   DEVICE_AUTH: ["POST", "/v1/device/session"],
+  PATRON_PAIRING_TOKEN: ["POST", "/v1/patron/pairing-tokens"],
 };
 
 async function validateBootstrapIdentity(body) {
@@ -408,6 +409,143 @@ async function activatePatron(request, env) {
   }, 201);
 }
 
+async function createPairingToken(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_PAIRING_TOKEN");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).length !== 1 || body.uses !== 2) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+
+  const patron = await env.DB.prepare(
+    `SELECT d.id, d.license_id, l.status AS license_status, l.expires_at
+       FROM devices d JOIN licenses l ON l.id = d.license_id
+      WHERE d.id = ? AND d.device_type = 'PATRON' AND d.slot_number = 1
+        AND d.status = 'active' LIMIT 1`
+  ).bind(proof.challenge.device_id).first();
+  const now = Math.floor(Date.now() / 1000);
+  if (!patron) return json({ error: "DEVICE_NOT_REGISTERED" }, 401);
+  if (patron.license_status !== "active" || !patron.expires_at || patron.expires_at <= now) {
+    return json({ error: "LICENSE_EXPIRED" }, 403);
+  }
+
+  const token = randomHex(32);
+  const tokenHash = await sha256(token);
+  const expiresAt = now + 86400; // QR valid for 24 hours; activation code remains non-expiring.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO pairing_tokens
+       (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at)
+       VALUES (?, ?, ?, 2, ?, ?)`
+    ).bind(tokenHash, patron.license_id, patron.id, now, expiresAt).run();
+  } catch {
+    return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+  }
+
+  return json({
+    qrPayload: `SENEPAIR1:${token}`,
+    remainingUses: 2,
+    expiresAt
+  }, 201);
+}
+
+async function pairVentas(request, env) {
+  const proof = await verifySignedRequest(request, env, "VENTAS_PAIR");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const identity = await validateBootstrapIdentity(body);
+  const qrPayload = typeof body.qrToken === "string" ? body.qrToken.trim() : "";
+  if (!identity || identity.installationId !== proof.challenge.installation_id ||
+      identity.fingerprint !== String(proof.challenge.fingerprint).toLowerCase() ||
+      !/^[0-9a-f]{64}$/i.test(qrPayload)) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+
+  const tokenHash = await sha256(qrPayload);
+  const deviceId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO devices
+         (id, license_id, device_type, installation_id, continuity_id,
+          public_key, fingerprint, slot_number, status, created_at)
+         SELECT ?, p.license_id, 'VENTAS', ?, ?, ?, ?,
+                CASE
+                  WHEN NOT EXISTS (
+                    SELECT 1 FROM devices d2
+                     WHERE d2.license_id = p.license_id AND d2.slot_number = 2
+                       AND d2.status = 'active'
+                  ) THEN 2 ELSE 3
+                END,
+                'active', ?
+           FROM pairing_tokens p
+           JOIN licenses l ON l.id = p.license_id
+           JOIN devices patron ON patron.id = p.patron_device_id
+          WHERE p.token_hash = ?
+            AND p.remaining_uses > 0 AND p.revoked_at IS NULL AND p.expires_at >= ?
+            AND patron.status = 'active' AND patron.device_type = 'PATRON'
+            AND l.status = 'active' AND l.expires_at > ?
+            AND NOT EXISTS (
+              SELECT 1 FROM devices duplicate
+               WHERE duplicate.license_id = p.license_id
+                 AND duplicate.fingerprint = ?
+            )
+            AND (
+              NOT EXISTS (SELECT 1 FROM devices d3
+                           WHERE d3.license_id = p.license_id
+                             AND d3.slot_number = 2 AND d3.status = 'active')
+              OR NOT EXISTS (SELECT 1 FROM devices d4
+                              WHERE d4.license_id = p.license_id
+                                AND d4.slot_number = 3 AND d4.status = 'active')
+            )`
+      ).bind(
+        deviceId, identity.installationId, body.continuityId.toLowerCase(),
+        identity.publicKey, identity.fingerprint, now,
+        tokenHash, now, now, identity.fingerprint
+      ),
+      env.DB.prepare(
+        `UPDATE pairing_tokens
+            SET remaining_uses = remaining_uses - 1
+          WHERE token_hash = ? AND remaining_uses > 0
+            AND revoked_at IS NULL AND expires_at >= ?
+            AND EXISTS (SELECT 1 FROM devices d
+                         WHERE d.id = ? AND d.license_id = pairing_tokens.license_id)`
+      ).bind(tokenHash, now, deviceId)
+    ]);
+
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+        (results?.[1]?.meta?.changes ?? 0) !== 1) {
+      return json({ error: "PAIRING_TOKEN_INVALID_OR_FULL" }, 409);
+    }
+  } catch {
+    return json({ error: "PAIRING_CONFLICT_OR_DATABASE_ERROR" }, 409);
+  }
+
+  const registered = await env.DB.prepare(
+    "SELECT slot_number, license_id FROM devices WHERE id = ? LIMIT 1"
+  ).bind(deviceId).first();
+  const license = await env.DB.prepare(
+    "SELECT expires_at FROM licenses WHERE id = ? LIMIT 1"
+  ).bind(registered.license_id).first();
+
+  return json({
+    deviceId,
+    slot: registered.slot_number === 2 ? "VENTAS_1" : "VENTAS_2",
+    licenseStatus: "ACTIVE",
+    periodEndsAt: license.expires_at
+  }, 201);
+}
+
 async function deviceSession(request, env) {
   const proof = await verifySignedRequest(request, env, "DEVICE_AUTH");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -471,7 +609,15 @@ async function handle(request, env) {
     return issueChallenge(request, env);
   }
 
-  if (request.method === "POST" && url.pathname === "/v1/patron/activate") {\n    return activatePatron(request, env);\n  }\n\n  if (request.method === "POST" && url.pathname === "/v1/device/session") {
+  if (request.method === "POST" && url.pathname === "/v1/patron/activate") {\n    return activatePatron(request, env);\n  }\n\n  if (request.method === "POST" && url.pathname === "/v1/patron/pairing-tokens") {
+    return createPairingToken(request, env);
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/ventas/pair") {
+    return pairVentas(request, env);
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/device/session") {
     return deviceSession(request, env);
   }
 
