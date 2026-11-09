@@ -78,3 +78,8 @@ Se implementaron `POST /v1/operator/licenses/reissue-activation-code` y `POST /v
 ## Recuperación de PATRÓN perdido
 
 La migración 0009 y el Worker incluyen recuperación privada de PATRÓN. El operador crea un código de un solo uso tras verificar al titular; puede listar pendientes, reemitir o cancelar. El nuevo PATRÓN firma reto bootstrap; el Worker revoca el anterior, invalida QR, registra el nuevo slot 1 y consume el código atómicamente. El cliente Android PATRÓN incluye el método de recuperación. Sigue sin desplegarse ni probarse E2E.
+
+
+## Nómina por equipo
+
+Migración 0010 añade sueldo y fechas de pago por separado para VENTAS_1 y VENTAS_2. PATRÓN puede consultar/guardar el sueldo base, día fijo mensual y/o fechas específicas. El Worker valida en servidor que el reporte de nómina se envíe solo en una fecha configurada para el slot real del equipo, usando America/Mexico_City. Si no está configurado o no es día de pago, rechaza el envío.
