@@ -40,6 +40,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
@@ -51,6 +52,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-test', 'active', 3, 1, 9999999999);"
           sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('device-test', 'license-test', 'VENTAS', 'install-test', 'continuity-test', x'00', 'fingerprint-test', 2, 'active', 1);"
           for expected in $(seq 1 20); do
@@ -60,6 +62,31 @@ jobs:
           overflow="$(sqlite3 "$DB_FILE" "INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at) VALUES (lower(hex(randomblob(16))), 'device-test', '2026-W46', 1, 1) ON CONFLICT(device_id, week_key) DO UPDATE SET used = weekly_usage.used + 1, updated_at = excluded.updated_at WHERE weekly_usage.used < 20 RETURNING used;")"
           test -z "$overflow"
           test "$(sqlite3 "$DB_FILE" "SELECT used FROM weekly_usage WHERE device_id='device-test' AND week_key='2026-W46';")" = "20"
+
+      - name: Probar flujo de autorización de renovación de 30 días
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/000{1..5}_*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-renew', 'ABARROTES TERE', 'expired', 3, 1, 100);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-renew', 'license-renew', 'PATRON', 'install-p', 'continuity-p', x'01', 'fingerprint-p', 1, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO renewal_requests (id, license_id, patron_device_id, business_name, status, created_at) VALUES ('renew-1', 'license-renew', 'patron-renew', 'ABARROTES TERE', 'pending_payment', 200);"
+          if sqlite3 "$DB_FILE" "INSERT INTO renewal_requests (id, license_id, patron_device_id, status, created_at) VALUES ('renew-duplicate', 'license-renew', 'patron-renew', 'pending_payment', 201);" 2>/dev/null; then
+            echo "ERROR: se permitió más de una renovación abierta por licencia"
+            exit 1
+          fi
+          sqlite3 "$DB_FILE" "UPDATE renewal_requests SET status='authorized', code_hash='hash-once', authorized_at=300, payment_reference='folio-123' WHERE id='renew-1' AND status='pending_payment';"
+          sqlite3 "$DB_FILE" "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES ('payment-renew', 'license-renew', 'MONTHLY_RENT', 8000, 'MXN', 'CONFIRMED', 'folio-123', 'renewal:renew-1', 300, 300, 'operator');"
+          sqlite3 "$DB_FILE" "UPDATE renewal_requests SET status='consumed', consumed_at=400 WHERE id='renew-1' AND status='authorized' AND code_hash='hash-once';"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM renewal_requests WHERE id='renew-1';")" = "consumed"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM payments WHERE idempotency_key='renewal:renew-1' AND amount_cents=8000 AND status='CONFIRMED';")" = "1"
+          if sqlite3 "$DB_FILE" "UPDATE renewal_requests SET status='consumed', consumed_at=401 WHERE id='renew-1' AND status='authorized' AND code_hash='hash-once';" 2>/dev/null; then
+            echo "ERROR: se permitió consumir el mismo código dos veces"
+            exit 1
+          fi
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
       - name: Probar reemplazo conservando historial y referencias
         run: |
@@ -81,6 +108,7 @@ jobs:
           sqlite3 "$DB_FILE" "INSERT INTO shift_reports (id, license_id, ventas_device_id, shift_key, report_json, created_at) VALUES ('shift-old', 'license-replace', 'ventas-old', 'shift-1', '{}', 2);"
           sqlite3 "$DB_FILE" "INSERT INTO payroll_reports (id, license_id, ventas_device_id, period_key, report_json, created_at) VALUES ('payroll-old', 'license-replace', 'ventas-old', 'period-1', '{}', 2);"
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
           sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('ventas-new', 'license-replace', 'VENTAS', 'install-v2', 'continuity-v2', x'03', 'fingerprint-v2', 2, 'active', 3);"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-replace' AND slot_number=2;")" = "2"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE id='ventas-old' AND status='revoked';")" = "1"
