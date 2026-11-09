@@ -97,6 +97,16 @@ Condiciones: código válido/no revocado/no usado; reto vigente de propósito `P
 
 El operador confirma por separado la primera mensualidad de $80 MXN. Al confirmar, backend activa licencia por 30 días. Las renovaciones confirmadas agregan 30 días al vencimiento futuro; si ya venció, empiezan desde la confirmación. La confirmación de un pago tiene identificador único para impedir doble extensión.
 
+## 5-A. Alta privada y confirmación del pago inicial — implementación en rama
+
+La rama incluye estas operaciones privadas, protegidas con `OPERATOR_TOKEN` (secret del Worker, nunca APK):
+
+- `POST /v1/operator/licenses/create`: requiere `businessName`; crea licencia pendiente con tres espacios y devuelve una sola vez el código de activación. El importe inicial indicado es $580 MXN.
+- `POST /v1/operator/licenses/confirm-initial-payment`: requiere `licenseId` y `paymentReference`. Registra dos conceptos confirmados e idempotentes: alta $500 MXN y primera renta $80 MXN. Solo después de esta confirmación puede entregarse el código al cliente.
+- `POST /v1/patron/activate`: al registrar PATRÓN, si ambos pagos ya están confirmados, activa la licencia por 30 días desde la hora del servidor. Si falta la primera renta, permanece pendiente.
+
+La confirmación es manual y presupone que el operador verificó el dinero recibido. No hay pasarela de pago automática ni notificación automática de WhatsApp. La interfaz segura de operación y el canal de aviso están pendientes.
+
 ## 6. Vinculación de SENE VENTAS por QR
 
 ### `POST /v1/patron/pairing-tokens`
@@ -253,7 +263,7 @@ El código no tiene caducidad temporal automática. Una solicitud abierta evita 
 | Historial de dispositivos / un activo por slot | Migración 0004 | Prueba de referencias e integridad aprobada | Migración no aplicada |
 | Correcciones de venta | Contrato solamente; falta código | No | No |
 | Recuperación/reemplazo autorizado | Contrato solamente; falta código y migración de solicitud | No | No |
-| Renovación mensual por código manual | Primera implementación en Worker y migración 0005 | Prueba SQL/CI en curso; falta E2E | No |
+| Renovación mensual por código manual | Implementada en Worker y migración 0005 | Prueba SQL/CI aprobada; falta E2E | No |
 | Autenticación robusta de operador | Solo scaffold temporal `ADMIN_TOKEN` | No | No |
 
 ### Infraestructura comprobada en archivos
