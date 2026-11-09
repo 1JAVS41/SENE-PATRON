@@ -18,6 +18,8 @@ import android.view.Gravity
 import android.view.View
 import android.animation.ValueAnimator
 import android.view.animation.LinearInterpolator
+import android.widget.EditText
+import android.widget.Toast
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -33,6 +35,8 @@ class MainActivity : Activity() {
     private val success = Color.rgb(22, 139, 69)
     private val white = Color.WHITE
     private var currentPage = "home"
+    private var lastNotificationRefreshAt = 0L
+    private var refreshingNotifications = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +83,7 @@ class MainActivity : Activity() {
         }
         setContentView(scroll)
         scroll.post { scroll.scrollTo(0, 0) }
+        refreshNotificationsFromServer()
     }
 
     private fun homeScreen(root: LinearLayout) {
@@ -99,6 +104,15 @@ class MainActivity : Activity() {
         status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
         status.addView(text("La operación administrativa de SENE VENTAS permanece en el teléfono. El servidor SENE se utilizará únicamente para solicitudes de corrección y su autorización individual por el patrón.", 12, muted))
         root.addView(status)
+        gap(root, 10)
+
+        val linked = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+            .getString("device_id", null).orEmpty().isNotBlank()
+        root.addView(primaryButton(if (linked) "ACTUALIZAR ESTADO Y NOTIFICACIONES" else "VINCULAR LICENCIA SENE") {
+            if (linked) refreshNotificationsFromServer(force = true) else showActivationDialog()
+        })
+        gap(root, 7)
+        root.addView(primaryButton("CONFIGURAR CONEXIÓN SEGURA") { showServerConfig() })
         gap(root, 14)
 
         root.addView(primaryButton("¿NECESITAS AYUDA?") { showContactDialog() })
@@ -168,6 +182,110 @@ class MainActivity : Activity() {
         gap(root, 10)
         root.addView(text("SENE PATRÓN  ·  Versión 0.5.0", 11, muted)
             .apply { gravity = Gravity.CENTER })
+    }
+
+    private fun showServerConfig() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val field = EditText(this).apply {
+            hint = "https://tu-worker.workers.dev"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setText(prefs.getString("server_base_url", ""))
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("CONEXIÓN SEGURA SENE")
+            .setMessage("Introduce la dirección HTTPS del servidor SENE. No uses una dirección de prueba Hello World.")
+            .setView(field)
+            .setPositiveButton("GUARDAR") { _, _ ->
+                val value = field.text?.toString()?.trim()?.trimEnd('/').orEmpty()
+                val uri = android.net.Uri.parse(value)
+                if (!value.startsWith("https://") || uri.host.isNullOrBlank() || value.any { it.isWhitespace() }) {
+                    Toast.makeText(this, "Dirección HTTPS no válida", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                if (!prefs.edit().putString("server_base_url", value).commit()) {
+                    Toast.makeText(this, "No se pudo guardar la dirección", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                Toast.makeText(this, "Dirección guardada", Toast.LENGTH_SHORT).show()
+                if (prefs.getString("device_id", null).isNullOrBlank()) showActivationDialog()
+                else refreshNotificationsFromServer(force = true)
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
+    }
+
+    private fun showActivationDialog() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) {
+            showServerConfig()
+            return
+        }
+        val field = EditText(this).apply {
+            hint = "Código de activación de 12 caracteres"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("VINCULAR SENE PATRÓN")
+            .setMessage("Introduce el código que recibiste después de confirmar el pago inicial.")
+            .setView(field)
+            .setPositiveButton("VINCULAR") { _, _ ->
+                val code = field.text?.toString()?.trim().orEmpty()
+                if (code.length != 12) {
+                    Toast.makeText(this, "El código debe tener 12 caracteres", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).activate(code)
+                        runOnUiThread {
+                            Toast.makeText(
+                                this,
+                                "SENE PATRÓN vinculado. Estado: " + result.optString("licenseStatus"),
+                                Toast.LENGTH_LONG
+                            ).show()
+                            lastNotificationRefreshAt = 0L
+                            render()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(
+                                this,
+                                "No se pudo vincular. Comprueba el servidor y el código. " +
+                                    (error.message ?: ""),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
+    }
+
+    private fun refreshNotificationsFromServer(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (refreshingNotifications || (!force && now - lastNotificationRefreshAt < 60_000L)) return
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
+        if (prefs.getString("device_id", null).isNullOrBlank()) return
+        refreshingNotifications = true
+        lastNotificationRefreshAt = now
+        Thread {
+            try {
+                SeneApiClient(this, baseUrl).refreshNotifications()
+                runOnUiThread {
+                    refreshingNotifications = false
+                    if (!isFinishing) render()
+                }
+            } catch (_: Exception) {
+                runOnUiThread { refreshingNotifications = false }
+            }
+        }.start()
     }
 
     private fun showContactDialog() {
