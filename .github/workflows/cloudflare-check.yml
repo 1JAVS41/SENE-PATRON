@@ -165,3 +165,25 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT revoked_at FROM pairing_tokens WHERE token_hash='pair-old';")" = "10"
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Probar permiso de corrección de venta de un solo uso
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-correction', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-correction', 'license-correction', 'PATRON', 'ip', 'cp', x'01', 'fp', 1, 'active', 1), ('ventas-correction', 'license-correction', 'VENTAS', 'iv', 'cv', x'02', 'fv', 2, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO correction_requests (id, license_id, ventas_device_id, sale_id, reason, status, created_at, idempotency_key) VALUES ('correction-1', 'license-correction', 'ventas-correction', 'sale-42', 'Error de captura', 'pending', 2, 'idem-1');"
+          sqlite3 "$DB_FILE" "UPDATE correction_requests SET status='approved', decided_at=3 WHERE id='correction-1' AND status='pending';"
+          sqlite3 "$DB_FILE" "INSERT INTO correction_grants (id, request_id, license_id, ventas_device_id, sale_id, uses_allowed, uses_consumed, created_at) SELECT 'grant-1', id, license_id, ventas_device_id, sale_id, 1, 0, 3 FROM correction_requests WHERE id='correction-1' AND status='approved';"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM correction_grants WHERE request_id='correction-1' AND uses_allowed=1 AND uses_consumed=0;")" = "1"
+          sqlite3 "$DB_FILE" "UPDATE correction_grants SET uses_consumed=1, consumed_at=4 WHERE id='grant-1' AND request_id='correction-1' AND license_id='license-correction' AND ventas_device_id='ventas-correction' AND sale_id='sale-42' AND uses_consumed=0;"
+          sqlite3 "$DB_FILE" "UPDATE correction_requests SET status='consumed' WHERE id='correction-1' AND status='approved' AND EXISTS (SELECT 1 FROM correction_grants WHERE id='grant-1' AND uses_consumed=1 AND consumed_at=4);"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM correction_requests WHERE id='correction-1';")" = "consumed"
+          second="$(sqlite3 "$DB_FILE" "UPDATE correction_grants SET uses_consumed=1, consumed_at=5 WHERE id='grant-1' AND uses_consumed=0; SELECT changes();")"
+          test "$second" = "0"
+          test "$(sqlite3 "$DB_FILE" "SELECT consumed_at FROM correction_grants WHERE id='grant-1';")" = "4"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
