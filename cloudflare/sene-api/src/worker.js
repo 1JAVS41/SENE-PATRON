@@ -233,6 +233,8 @@ const CHALLENGE_TARGETS = {
   VENTAS_SHIFT_REPORT: ["POST", "/v1/ventas/shift-reports"],
   VENTAS_PAYROLL_REPORT: ["POST", "/v1/ventas/payroll-reports"],
   PATRON_REPORTS_INBOX: ["POST", "/v1/patron/reports/inbox"],
+  PATRON_RENEWAL_REQUEST: ["POST", "/v1/patron/renewals/request"],
+  PATRON_RENEWAL_REDEEM: ["POST", "/v1/patron/renewals/redeem"],
 };
 
 async function validateBootstrapIdentity(body) {
@@ -577,6 +579,133 @@ async function pairVentas(request, env) {
   }, 201);
 }
 
+
+function constantTimeTextEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const aa = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  let diff = aa.length ^ bb.length;
+  const length = Math.max(aa.length, bb.length);
+  for (let i = 0; i < length; i++) diff |= (aa[i] || 0) ^ (bb[i] || 0);
+  return diff === 0;
+}
+
+async function requireOperator(request, env) {
+  const expected = env.OPERATOR_TOKEN;
+  const supplied = (request.headers.get("authorization") || "").replace(/^Bearer\\s+/i, "");
+  return typeof expected === "string" && expected.length >= 32 &&
+    constantTimeTextEqual(supplied, expected);
+}
+
+async function createRenewalRequest(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_RENEWAL_REQUEST");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+  const ctx = await signedDeviceContext({ ...proof, env }, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const existing = await env.DB.prepare(
+    "SELECT id, status, created_at FROM renewal_requests WHERE license_id = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
+  ).bind(ctx.licenseId).first();
+  if (existing) return json({ requestId: existing.id, status: existing.status, createdAt: existing.created_at, duplicate: true });
+  const license = await env.DB.prepare(
+    "SELECT business_name FROM licenses WHERE id = ? LIMIT 1"
+  ).bind(ctx.licenseId).first();
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO renewal_requests (id, license_id, patron_device_id, business_name, status, created_at) VALUES (?, ?, ?, ?, 'pending_payment', ?)"
+    ).bind(id, ctx.licenseId, ctx.deviceId, license?.business_name || null, now).run();
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT id, status, created_at FROM renewal_requests WHERE license_id = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
+    ).bind(ctx.licenseId).first();
+    if (raced) return json({ requestId: raced.id, status: raced.status, createdAt: raced.created_at, duplicate: true });
+    return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+  }
+  return json({
+    requestId: id, status: "pending_payment", createdAt: now,
+    amountCents: 8000, currency: "MXN",
+    instructions: "Paga $80 MXN, escribe el nombre exacto de tu empresa en el concepto y envía el comprobante a los canales oficiales de Ayuda. Después espera el código de autorización."
+  }, 201);
+}
+
+async function listOperatorRenewals(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const rows = await env.DB.prepare(
+    "SELECT id, license_id, business_name, status, created_at FROM renewal_requests WHERE status = 'pending_payment' ORDER BY created_at ASC LIMIT 100"
+  ).all();
+  return json({ items: rows.results || [] });
+}
+
+async function authorizeRenewal(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  const reference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference) return json({ error: "INVALID_REQUEST" }, 400);
+  const row = await env.DB.prepare(
+    "SELECT r.id, r.license_id, r.status, l.expires_at FROM renewal_requests r JOIN licenses l ON l.id = r.license_id WHERE r.id = ? LIMIT 1"
+  ).bind(requestId).first();
+  if (!row || row.status !== "pending_payment") return json({ error: "RENEWAL_NOT_PENDING" }, 409);
+  const code = makeCode();
+  const codeHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  const paymentId = crypto.randomUUID();
+  const result = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE renewal_requests SET status = 'authorized', code_hash = ?, authorized_at = ?, authorized_by = 'operator', payment_reference = ? WHERE id = ? AND status = 'pending_payment'"
+    ).bind(codeHash, now, reference, requestId),
+    env.DB.prepare(
+      "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) SELECT ?, ?, 'MONTHLY_RENT', 8000, 'MXN', 'CONFIRMED', ?, ?, ?, ?, 'operator' WHERE EXISTS (SELECT 1 FROM renewal_requests WHERE id = ? AND status = 'authorized' AND code_hash = ?)"
+    ).bind(paymentId, row.license_id, reference, "renewal:" + requestId, now, now, requestId, codeHash),
+    env.DB.prepare(
+      "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, 'operator', 'operator', 'renewal_authorized', ?, ? WHERE EXISTS (SELECT 1 FROM renewal_requests WHERE id = ? AND status = 'authorized' AND code_hash = ?)"
+    ).bind(crypto.randomUUID(), row.license_id, JSON.stringify({ requestId, paymentReference: reference }), now, requestId, codeHash)
+  ]);
+  if ((result?.[0]?.meta?.changes ?? 0) !== 1 || (result?.[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "RENEWAL_AUTHORIZATION_CONFLICT" }, 409);
+  }
+  return json({ requestId, authorizationCode: code, expiresAt: null, note: "Código de un solo uso, sin caducidad temporal. Entrégalo al cliente únicamente después de verificar el pago recibido." }, 201);
+}
+
+async function redeemRenewal(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_RENEWAL_REDEEM");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+  const ctx = await signedDeviceContext({ ...proof, env }, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  const code = typeof body.authorizationCode === "string" ? body.authorizationCode.trim().toUpperCase() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !/^[A-HJ-NP-Z2-9]{12}$/.test(code)) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const codeHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  const license = await env.DB.prepare(
+    "SELECT expires_at FROM licenses WHERE id = ? LIMIT 1"
+  ).bind(ctx.licenseId).first();
+  const nextExpiry = Math.max(Number(license?.expires_at || 0), now) + 30 * 86400;
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE renewal_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND license_id = ? AND patron_device_id = ? AND status = 'authorized' AND code_hash = ?"
+    ).bind(now, requestId, ctx.licenseId, ctx.deviceId, codeHash),
+    env.DB.prepare(
+      "UPDATE licenses SET status = 'active', expires_at = ?, activated_at = COALESCE(activated_at, ?) WHERE id = ? AND EXISTS (SELECT 1 FROM renewal_requests WHERE id = ? AND license_id = ? AND status = 'consumed' AND consumed_at = ?)"
+    ).bind(nextExpiry, now, ctx.licenseId, requestId, ctx.licenseId, now)
+  ]);
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "RENEWAL_CODE_INVALID_OR_USED" }, 409);
+  }
+  return json({ requestId, licenseStatus: "ACTIVE", periodEndsAt: nextExpiry, renewedDays: 30 }, 200);
+}
+
 async function deviceSession(request, env) {
   const proof = await verifySignedRequest(request, env, "DEVICE_AUTH");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -860,6 +989,10 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/device/session") {
     return deviceSession(request, env);
   }
+  if (request.method === "POST" && url.pathname === "/v1/patron/renewals/request") return createRenewalRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/renewals/redeem") return redeemRenewal(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/operator/renewals/pending") return listOperatorRenewals(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/renewals/authorize") return authorizeRenewal(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests") return createWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/inbox") return patronRequestsInbox(request, env);
