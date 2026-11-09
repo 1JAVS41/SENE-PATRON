@@ -262,3 +262,6 @@ Ese ID coincide con el recurso D1 que el usuario creó. Esto solo confirma la co
 ### Regla de despliegue
 
 No desplegar ni conectar APK hasta que las filas pendientes de correcciones, recuperación/reemplazo, pagos/renovación y operador tengan implementación, pruebas automatizadas y una verificación E2E controlada. Mantener los datos comerciales en los teléfonos.
+
+
+**Protección de activación:** el Worker exige la confirmación de los dos pagos (alta $500 y primera renta $80) antes de registrar el PATRÓN o consumir el código. Si falta uno, el código permanece utilizable y la licencia pendiente.
