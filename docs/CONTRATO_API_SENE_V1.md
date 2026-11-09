@@ -268,3 +268,18 @@ No desplegar ni conectar APK hasta que las filas pendientes de correcciones, rec
 
 
 **Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
+
+
+## Recuperación de SENE PATRÓN perdido
+
+**Implementación en rama:** existe un flujo privado de recuperación. El operador solo lo inicia después de verificar la identidad del titular y el negocio por los canales oficiales.
+
+- `POST /v1/operator/patron-recovery/create`: requiere `licenseId` y `reason`; exige que exista un PATRÓN activo en la licencia. Devuelve un código aleatorio de un solo uso, sin vencimiento temporal. Solo se almacena su hash.
+- `GET /v1/operator/patron-recovery/pending`: bandeja privada de solicitudes pendientes.
+- `POST /v1/operator/patron-recovery/reissue-code`: requiere `recoveryRequestId`; rota el hash e invalida el código anterior.
+- `POST /v1/operator/patron-recovery/cancel`: cancela una recuperación pendiente.
+- `POST /v1/patron/recover`: nueva instalación PATRÓN envía `recoveryCode` más identidad bootstrap y firma un reto `PATRON_RECOVERY`.
+
+La recuperación exitosa revoca el PATRÓN anterior, invalida los QR de vinculación previos, registra el nuevo PATRÓN en el mismo slot 1 y consume el código en un batch D1. Conserva historial de licencia y de los dos equipos VENTAS. Si la licencia está vencida, el nuevo PATRÓN queda recuperado pero debe renovar antes de usar funciones remotas. El código no se puede reutilizar.
+
+Este flujo está en GitHub, pero no está desplegado ni probado E2E contra Cloudflare.
