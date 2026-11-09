@@ -123,3 +123,16 @@ Límites que siguen vigentes:
 3. Añadir invalidación de pairing tokens pendientes ligados al PATRÓN sustituido.
 4. Probar carreras/concurrencia, reintentos e idempotencia.
 5. Integrar el contrato con ambas aplicaciones y después preparar despliegue controlado.
+
+
+### Actualización: revisión del contrato API y configuración de D1 (2026-11-09)
+
+- Se comprobó el archivo `wrangler.toml`: el nombre del Worker, binding `DB`, nombre D1 `sene-licencias` e ID `22f73e97-e43e-44f1-870b-58fad88e7028` coinciden con el recurso D1 creado por el usuario.
+- Esto valida la configuración guardada en GitHub, no el despliegue del Worker del panel ni el estado de migraciones de la D1 remota.
+- Se revisó el contrato API y se corrigieron descripciones que podían confundirse con funciones ya disponibles. Queda explícito que los endpoints de correcciones de venta, recuperación/reemplazo y gestión privada de pagos/renovaciones no están implementados todavía.
+- La matriz de implementación separa: código existente en rama, pruebas CI ejecutadas y estado de producción. Ninguna de estas pruebas locales/CI equivale a despliegue o prueba E2E en Cloudflare.
+- No se modificó la D1 real ni el Worker del panel.
+
+### Prioridad técnica siguiente
+
+Antes de implementar recuperación, hay que diseñar la autenticación privada del operador y el ciclo de pagos/renovación. El scaffold `ADMIN_TOKEN` no es todavía un sistema de operador de producción. No exponerlo en APK ni crear endpoints de aprobación que permitan a un cliente autorizar su propio reemplazo.
