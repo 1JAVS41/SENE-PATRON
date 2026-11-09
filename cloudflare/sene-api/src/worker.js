@@ -688,6 +688,24 @@ async function authorizeRenewal(request, env) {
   return json({ requestId, authorizationCode: code, expiresAt: null, note: "Código de un solo uso, sin caducidad temporal. Entrégalo al cliente únicamente después de verificar el pago recibido." }, 201);
 }
 
+
+async function cancelRenewal(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  const result = await env.DB.prepare(
+    "UPDATE renewal_requests SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status IN ('pending_payment','authorized')"
+  ).bind(now, requestId).run();
+  if ((result.meta?.changes ?? 0) !== 1) return json({ error: "RENEWAL_NOT_CANCELLABLE" }, 409);
+  await env.DB.prepare(
+    "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, 'operator', 'operator', 'renewal_cancelled', ?, ? FROM renewal_requests WHERE id = ?"
+  ).bind(crypto.randomUUID(), JSON.stringify({ requestId }), now, requestId).run();
+  return json({ requestId, status: "cancelled" });
+}
+
 async function redeemRenewal(request, env) {
   const proof = await verifySignedRequest(request, env, "PATRON_RENEWAL_REDEEM");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -1010,6 +1028,7 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/renewals/redeem") return redeemRenewal(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/renewals/pending") return listOperatorRenewals(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/renewals/authorize") return authorizeRenewal(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/renewals/cancel") return cancelRenewal(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests") return createWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/inbox") return patronRequestsInbox(request, env);
