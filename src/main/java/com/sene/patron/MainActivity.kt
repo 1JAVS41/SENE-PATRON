@@ -262,6 +262,133 @@ class MainActivity : Activity() {
 
 
 
+
+    private fun renderPayrollSettings(root: LinearLayout, team: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val raw = prefs.getString("payroll_settings_$team", null)
+        if (raw.isNullOrBlank()) {
+            root.addView(info("CONFIGURACIÓN DE NÓMINA", "Consultando sueldo y fechas de pago…"))
+            return
+        }
+        try {
+            val payload = JSONObject(raw)
+            val settings = payload.optJSONObject("settings") ?: JSONObject()
+            val key = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+            val item = settings.optJSONObject(key)
+            if (item == null) {
+                root.addView(info("SUELDO SIN CONFIGURAR", "Define el sueldo base y al menos un día fijo mensual o una fecha específica."))
+                return
+            }
+            val salary = item.optLong("salaryCents", 0L) / 100.0
+            val day = item.optInt("paymentDay", 0)
+            val dates = item.optJSONArray("paymentDates") ?: org.json.JSONArray()
+            val dateText = buildString {
+                if (day > 0) append("Día fijo de cada mes: ").append(day)
+                if (dates.length() > 0) {
+                    if (isNotEmpty()) append("\n")
+                    append("Fechas específicas: ")
+                    for (i in 0 until dates.length()) {
+                        if (i > 0) append(", ")
+                        append(dates.optString(i))
+                    }
+                }
+            }
+            root.addView(info("SUELDO BASE", "$" + String.format(java.util.Locale.US, "%.2f MXN", salary)))
+            root.addView(info("FECHAS DE PAGO", dateText))
+        } catch (_: Exception) {
+            root.addView(info("CONFIGURACIÓN NO DISPONIBLE", "No se pudo leer la configuración de nómina."))
+        }
+    }
+
+    private fun refreshPayrollSettings(team: String, force: Boolean = false) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
+        if (prefs.getString("device_id", null).isNullOrBlank()) return
+        val now = System.currentTimeMillis()
+        val last = prefs.getLong("payroll_settings_updated_$team", 0L)
+        if (!force && (now - last < 3_600_000L || prefs.getBoolean("payroll_settings_refreshing_$team", false))) return
+        prefs.edit().putBoolean("payroll_settings_refreshing_$team", true).apply()
+        Thread {
+            try {
+                val result = SeneApiClient(this, baseUrl).getPayrollSettings()
+                prefs.edit().putString("payroll_settings_$team", result.toString())
+                    .putLong("payroll_settings_updated_$team", System.currentTimeMillis())
+                    .putBoolean("payroll_settings_refreshing_$team", false).apply()
+                runOnUiThread { if (!isFinishing && currentPage == "${team}_payroll") render() }
+            } catch (error: Exception) {
+                prefs.edit().putBoolean("payroll_settings_refreshing_$team", false).apply()
+                runOnUiThread {
+                    if (!isFinishing) Toast.makeText(this, "No se pudo consultar nómina: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun showPayrollSettingsDialog(team: String) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val salary = EditText(this).apply {
+            hint = "Sueldo base mensual en pesos"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        val day = EditText(this).apply {
+            hint = "Día fijo mensual (1 a 31), opcional"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        val dates = EditText(this).apply {
+            hint = "Fechas específicas YYYY-MM-DD separadas por coma"
+            minLines = 2
+            maxLines = 3
+        }
+        content.addView(salary)
+        content.addView(day)
+        content.addView(dates)
+        AlertDialog.Builder(this)
+            .setTitle("NÓMINA · ${if (team == "team1") "EQUIPO 1" else "EQUIPO 2"}")
+            .setMessage("Elige un día fijo mensual, fechas específicas o ambos. El servidor solo aceptará el reporte de nómina en una fecha configurada.")
+            .setView(content)
+            .setPositiveButton("GUARDAR") { _, _ ->
+                val salaryValue = salary.text.toString().trim().replace(",", ".").toDoubleOrNull()
+                val dayValue = day.text.toString().trim().takeIf { it.isNotBlank() }?.toIntOrNull()
+                val dateValues = dates.text.toString().split(",", "\\n").map { it.trim() }.filter { it.isNotBlank() }
+                if (salaryValue == null || salaryValue < 0 || salaryValue > 10_000_000 ||
+                    (day.text.isNotBlank() && (dayValue == null || dayValue !in 1..31)) ||
+                    (dayValue == null && dateValues.isEmpty()) ||
+                    dateValues.any { !it.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) }) {
+                    Toast.makeText(this, "Revisa sueldo y fechas. Usa YYYY-MM-DD.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                val dateArray = org.json.JSONArray()
+                dateValues.distinct().forEach { dateArray.put(it) }
+                val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+                val baseUrl = getSharedPreferences("sene_patron_server", MODE_PRIVATE).getString("server_base_url", null)
+                if (baseUrl.isNullOrBlank()) { showServerConfig(); return@setPositiveButton }
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).savePayrollSettings(
+                            slot, Math.round(salaryValue * 100.0), dayValue, dateArray
+                        )
+                        getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
+                            .remove("payroll_settings_$team")
+                            .putLong("payroll_settings_updated_$team", 0L).apply()
+                        runOnUiThread {
+                            Toast.makeText(this, "Sueldo y fechas guardados para este equipo", Toast.LENGTH_LONG).show()
+                            refreshPayrollSettings(team, force = true)
+                            render()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this, "No se pudo guardar nómina: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
+    }
+
     private fun renderTeamReports(root: LinearLayout, team: String) {
         val raw = getSharedPreferences("sene_patron_server", MODE_PRIVATE).getString("reports_$team", null)
         if (raw.isNullOrBlank()) {
@@ -817,6 +944,7 @@ class MainActivity : Activity() {
         gap(root, 12)
         val sections = listOf(
             Triple("Horarios y asistencias", "Turnos, entradas, salidas y registros de asistencia", "schedule"),
+            Triple("Sueldo y día de pago", "Configura el sueldo y las fechas de nómina de este equipo", "payroll"),
             Triple("Autorizaciones de corrección", "Revisa solicitudes puntuales de corrección de ventas", "requests"),
             Triple("Seguridad del dispositivo", "Estado de seguridad, bloqueo y sustitución del teléfono", "security"),
             Triple("Vinculación del equipo", "Identidad, estado de vínculo y datos del dispositivo", "link")
@@ -858,6 +986,7 @@ class MainActivity : Activity() {
         val teamHome = if (teamNumber == "1") "team1" else "team2"
         val title = when (section) {
             "schedule" -> "Horarios y asistencias"
+            "payroll" -> "Sueldo y día de pago"
             "requests" -> "Autorizaciones de corrección"
             "security" -> "Seguridad del dispositivo"
             else -> "Vinculación del equipo"
@@ -868,6 +997,7 @@ class MainActivity : Activity() {
         intro.addView(text(title, 21, ink, true))
         intro.addView(text(when (section) {
             "schedule" -> "Consulta los horarios, entradas, salidas y asistencias registrados por el Equipo $teamNumber."
+            "payroll" -> "Define el sueldo base y el día fijo mensual o las fechas específicas de pago para el Equipo $teamNumber."
             "requests" -> "Revisa solicitudes de corrección de ventas del Equipo $teamNumber. Aceptar autoriza una sola corrección; rechazar la cierra."
             "security" -> "Consulta la seguridad y los eventos del dispositivo asignado al Equipo $teamNumber."
             else -> "Consulta el vínculo y la identidad del dispositivo correspondiente al Equipo $teamNumber."
@@ -882,6 +1012,12 @@ class MainActivity : Activity() {
                 gap(root, 8)
                 root.addView(primaryButton("ACTUALIZAR REPORTES") { refreshTeamReports(teamHome, force = true) })
                 refreshTeamReports(teamHome)
+            }
+            "payroll" -> {
+                renderPayrollSettings(root, teamHome)
+                gap(root, 8)
+                root.addView(primaryButton("CONFIGURAR SUELDO Y FECHAS") { showPayrollSettingsDialog(teamHome) })
+                refreshPayrollSettings(teamHome)
             }
             "requests" -> {
                 renderRequestsInbox(root, teamHome)
