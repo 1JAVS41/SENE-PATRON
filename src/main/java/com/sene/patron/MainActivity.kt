@@ -304,7 +304,7 @@ class MainActivity : Activity() {
         if (prefs.getString("device_id", null).isNullOrBlank()) return
         val now = System.currentTimeMillis()
         val last = prefs.getLong("reports_updated_$team", 0L)
-        if (!force && (now - last < 300_000L || prefs.getBoolean("reports_refreshing_$team", false))) return
+        if (!force && (now - last < 3_600_000L || prefs.getBoolean("reports_refreshing_$team", false))) return
         prefs.edit().putBoolean("reports_refreshing_$team", true).apply()
         Thread {
             try {
@@ -440,7 +440,7 @@ class MainActivity : Activity() {
         if (prefs.getString("device_id", null).isNullOrBlank()) return
         val now = System.currentTimeMillis()
         val last = prefs.getLong("requests_updated_$team", 0L)
-        if (!force && (now - last < 30_000L || prefs.getBoolean("requests_refreshing_$team", false))) return
+        if (!force && (now - last < 600_000L || prefs.getBoolean("requests_refreshing_$team", false))) return
         prefs.edit().putBoolean("requests_refreshing_$team", true).apply()
         Thread {
             try {
@@ -662,7 +662,7 @@ class MainActivity : Activity() {
 
     private fun refreshNotificationsFromServer(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (refreshingNotifications || (!force && now - lastNotificationRefreshAt < 60_000L)) return
+        if (refreshingNotifications || (!force && now - lastNotificationRefreshAt < 43_200_000L)) return
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         if (prefs.getString("device_id", null).isNullOrBlank()) return
