@@ -1461,12 +1461,13 @@ async function patronRequestsInbox(request, env) {
   const rows = await env.DB.prepare(
     "SELECT r.id, r.request_type, r.details_json, r.status, r.created_at, r.decided_at, d.slot_number FROM work_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND (? IS NULL OR d.slot_number = ?) AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
   ).bind(ctx.licenseId, slotNumber, slotNumber, status).all();
+  const correctionSeenAt = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
     "UPDATE correction_requests SET seen_at = ? WHERE status = 'pending' AND seen_at IS NULL AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ? AND status = 'active')"
-  ).bind(Math.floor(Date.now() / 1000), ctx.licenseId, slot).run();
+  ).bind(correctionSeenAt, ctx.licenseId, slotNumber).run();
   const correctionRows = await env.DB.prepare(
     "SELECT r.id, r.sale_id, r.reason, r.status, r.created_at, r.decided_at FROM correction_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND d.slot_number = ? AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
-  ).bind(ctx.licenseId, slot, status).all();
+  ).bind(ctx.licenseId, slotNumber, status).all();
   const counts = await env.DB.prepare(
     "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests r WHERE r.ventas_device_id = d.id AND r.status = 'pending' AND r.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
   ).bind(ctx.licenseId).all();
