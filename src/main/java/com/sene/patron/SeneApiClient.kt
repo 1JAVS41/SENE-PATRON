@@ -70,8 +70,16 @@ class SeneApiClient(context: Context, baseUrl: String) {
     }
 
     fun session(deviceId: String = storedDeviceId()
-        ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject =
-        deviceSigned("DEVICE_AUTH", "/v1/device/session", "{}", deviceId)
+        ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject {
+        val result = deviceSigned("DEVICE_AUTH", "/v1/device/session", "{}", deviceId)
+        check(prefs.edit()
+            .putInt("linked_ventas_count", result.optInt("linkedVentasCount", 0).coerceIn(0, 2))
+            .putString("license_status", result.optString("licenseStatus"))
+            .putLong("period_ends_at", result.optLong("periodEndsAt", 0L))
+            .putLong("server_time", result.optLong("serverTime", 0L))
+            .commit()) { "No se pudo guardar el estado de licencia" }
+        return result
+    }
 
     fun refreshNotifications(): JSONObject {
         val result = deviceSigned("PATRON_NOTIFICATIONS", "/v1/patron/notifications", "{}")
