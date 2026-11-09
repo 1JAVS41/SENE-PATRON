@@ -136,3 +136,34 @@ Límites que siguen vigentes:
 ### Prioridad técnica siguiente
 
 Antes de implementar recuperación, hay que diseñar la autenticación privada del operador y el ciclo de pagos/renovación. El scaffold `ADMIN_TOKEN` no es todavía un sistema de operador de producción. No exponerlo en APK ni crear endpoints de aprobación que permitan a un cliente autorizar su propio reemplazo.
+
+
+### Actualización: activación inicial y renovaciones manuales (2026-11-09)
+
+Se implementó en la rama, sin desplegar:
+- Migración `0005_monthly_renewals.sql`: solicitudes de renovación por licencia, código hash único, estados pendiente/autorizado/consumido/cancelado y un solo proceso abierto por licencia.
+- Alta privada de licencia por nombre de negocio.
+- Confirmación privada del pago inicial por $580 MXN, registrada como alta de $500 y primera renta de $80, con claves de idempotencia.
+- Activación de PATRÓN por 30 días desde el reloj del servidor cuando ambos pagos están confirmados.
+- Solicitud de renovación de $80 MXN desde PATRÓN incluso si la licencia ya venció (si el dispositivo sigue activo y la licencia no está suspendida/revocada).
+- Bandeja privada de renovaciones pendientes, emisión de código manual posterior a la verificación del pago, canje firmado de un solo uso y cancelación/revocación del código.
+- El código de renovación no tiene vencimiento temporal y queda ligado a solicitud, licencia y dispositivo PATRÓN.
+- Los endpoints privados exigen `OPERATOR_TOKEN` con longitud mínima de 32 caracteres como secret del Worker. Nunca se incluye en APK.
+
+Pruebas GitHub Actions:
+- Migraciones 0001–0005 e integridad SQLite: aprobadas.
+- Límite semanal 20/21: aprobado.
+- Renovación con único proceso abierto, pago mensual de $80 y consumo único: aprobado.
+- Pago inicial de $580 y activación de 30 días: aprobado.
+- Reemplazo conservando referencias históricas: pruebas previas aprobadas.
+- Último CI registrado: run `42709305156`, resultado `success`.
+
+Limitaciones que siguen abiertas:
+- No hay integración WhatsApp Business/API ni aviso automático al número oficial de Ayuda.
+- No hay una interfaz privada segura terminada para operar estos endpoints; el token es solo un mecanismo backend temporal, no debe enviarse al teléfono del usuario ni guardarse en una APK.
+- No hay prueba E2E contra Cloudflare Workers/D1.
+- La migración 0005 y las migraciones 0002–0004 aún no se aplican a la D1 real.
+- Worker del panel Cloudflare sigue sin desplegar este código; no se ha modificado el recurso D1 real.
+- APKs Android aún no están conectadas a estas rutas.
+
+No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revisión integral y acordar cómo se operará de forma segura sin exponer secretos.
