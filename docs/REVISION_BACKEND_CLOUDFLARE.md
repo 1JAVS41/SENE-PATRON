@@ -192,3 +192,11 @@ No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revi
 - Se detectó que el endpoint de activación podía consumir el código y registrar el dispositivo PATRÓN después de confirmar solo el alta de $500, aunque la primera renta de $80 aún no estuviera confirmada. Eso podía dejar un PATRÓN registrado con licencia pendiente y código inutilizable.
 - Se corrigió la condición de inserción y consumo: ahora exige que `setup_paid_at` y `first_rent_paid_at` estén confirmados antes de registrar PATRÓN o invalidar el código. La activación de 30 días continúa condicionada a ambos pagos.
 - Se añadió un paso CI SQLite que verifica que, si falta la primera renta, no se registra el dispositivo, no se consume el código y la licencia permanece pendiente.
+
+
+## Recuperación segura de códigos de activación y renovación (2026-11-09)
+
+- Se agregaron rutas privadas para rotar códigos cuando la entrega original se pierde: reemisión de código de activación y de renovación.
+- El código previo queda invalidado; solo se devuelve el código nuevo en la respuesta de la operación privada. No se almacena texto claro.
+- La reemisión de activación exige ambos pagos confirmados y ausencia de PATRÓN activo. La reemisión de renovación exige solicitud autorizada y pago mensual confirmado.
+- Se añadió migración 0007 para registrar el operador que autorizó/reemitió el código de renovación. CI amplió la aplicación de migraciones a 0001–0007 y prueba los guardarraíles de reemisión.
