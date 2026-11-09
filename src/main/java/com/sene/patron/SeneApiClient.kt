@@ -73,6 +73,17 @@ class SeneApiClient(context: Context, baseUrl: String) {
         ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject =
         deviceSigned("DEVICE_AUTH", "/v1/device/session", "{}", deviceId)
 
+    fun refreshNotifications(): JSONObject {
+        val result = deviceSigned("PATRON_NOTIFICATIONS", "/v1/patron/notifications", "{}")
+        val counts = result.optJSONObject("pendingByTeam") ?: JSONObject()
+        check(prefs.edit()
+            .putInt("notifications_team1", counts.optInt("VENTAS_1", 0))
+            .putInt("notifications_team2", counts.optInt("VENTAS_2", 0))
+            .putLong("notifications_updated_at", result.optLong("serverTime", 0L))
+            .commit()) { "No se pudieron guardar los contadores de notificaciones" }
+        return result
+    }
+
     fun requestsInbox(slot: String, all: Boolean = false): JSONObject {
         require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
         val body = JSONObject().put("slot", slot).put("status", if (all) "all" else "pending")
