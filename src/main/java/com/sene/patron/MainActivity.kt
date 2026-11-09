@@ -75,15 +75,39 @@ class MainActivity : Activity() {
             setPadding(dp(18), dp(30), dp(18), dp(88))
         }
         scroll.addView(page)
-        when (currentPage) {
-            "home" -> homeScreen(page)
-            "menu" -> menuScreen(page)
-            "team1", "team2" -> teamScreen(page, currentPage)
-            else -> detailScreen(page, currentPage)
+        val licenseStatus = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+            .getString("license_status", "").orEmpty()
+        if (licenseStatus == "EXPIRED") {
+            expiredScreen(page)
+        } else {
+            when (currentPage) {
+                "home" -> homeScreen(page)
+                "menu" -> menuScreen(page)
+                "team1", "team2" -> teamScreen(page, currentPage)
+                else -> detailScreen(page, currentPage)
+            }
         }
         setContentView(scroll)
         scroll.post { scroll.scrollTo(0, 0) }
         refreshNotificationsFromServer()
+    }
+
+    private fun expiredScreen(root: LinearLayout) {
+        header(root, "Licencia vencida")
+        root.addView(info("RENOVACIÓN NECESARIA",
+            "La licencia venció. Las funciones administrativas quedan bloqueadas hasta confirmar la mensualidad. SENE VENTAS conserva sus operaciones locales y sus datos."))
+        gap(root, 14)
+        root.addView(primaryButton("PAGAR MENSUALIDAD · $80 MXN") { showRenewalDialog() })
+        val requestId = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+            .getString("renewal_request_id", null)
+        if (!requestId.isNullOrBlank()) {
+            gap(root, 8)
+            root.addView(primaryButton("INTRODUCIR CÓDIGO DE RENOVACIÓN") {
+                showRenewalCodeDialog(requestId)
+            })
+        }
+        gap(root, 10)
+        root.addView(primaryButton("¿NECESITAS AYUDA?") { showContactDialog() })
     }
 
     private fun homeScreen(root: LinearLayout) {
@@ -293,14 +317,19 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val api = SeneApiClient(this, baseUrl)
-                api.session()
-                api.refreshNotifications()
+                val session = api.session()
+                if (session.optString("licenseStatus") != "EXPIRED") {
+                    try { api.refreshNotifications() } catch (_: Exception) { }
+                }
                 runOnUiThread {
                     refreshingNotifications = false
                     if (!isFinishing) render()
                 }
             } catch (_: Exception) {
-                runOnUiThread { refreshingNotifications = false }
+                runOnUiThread {
+                    refreshingNotifications = false
+                    if (!isFinishing && prefs.getString("license_status", "") == "EXPIRED") render()
+                }
             }
         }.start()
     }
