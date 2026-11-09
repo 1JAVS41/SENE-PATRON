@@ -75,6 +75,7 @@ class SeneApiClient(context: Context, baseUrl: String) {
         check(prefs.edit()
             .putInt("linked_ventas_count", result.optInt("linkedVentasCount", 0).coerceIn(0, 2))
             .putString("license_status", result.optString("licenseStatus"))
+            .putString("business_name", result.optString("businessName"))
             .putLong("period_ends_at", result.optLong("periodEndsAt", 0L))
             .putLong("server_time", result.optLong("serverTime", 0L))
             .commit()) { "No se pudo guardar el estado de licencia" }
@@ -123,12 +124,24 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return deviceSigned("PATRON_CORRECTION_DECISION", "/v1/patron/corrections/decision", body.toString())
     }
 
-    fun requestRenewal(): JSONObject =
-        deviceSigned("PATRON_RENEWAL_REQUEST", "/v1/patron/renewals/request", "{}")
+    fun requestRenewal(): JSONObject {
+        val result = deviceSigned("PATRON_RENEWAL_REQUEST", "/v1/patron/renewals/request", "{}")
+        val requestId = result.optString("requestId")
+        if (requestId.isNotBlank()) {
+            check(prefs.edit().putString("renewal_request_id", requestId).commit())
+        }
+        return result
+    }
 
     fun redeemRenewal(requestId: String, authorizationCode: String): JSONObject {
         val body = JSONObject().put("requestId", requestId).put("authorizationCode", authorizationCode.trim())
-        return deviceSigned("PATRON_RENEWAL_REDEEM", "/v1/patron/renewals/redeem", body.toString())
+        val result = deviceSigned("PATRON_RENEWAL_REDEEM", "/v1/patron/renewals/redeem", body.toString())
+        check(prefs.edit()
+            .remove("renewal_request_id")
+            .putString("license_status", result.optString("licenseStatus"))
+            .putLong("period_ends_at", result.optLong("periodEndsAt", 0L))
+            .commit())
+        return result
     }
 
     fun requestReplacement(deviceId: String, reason: String): JSONObject {
