@@ -29,7 +29,8 @@ class MainActivity : Activity() {
     private val ink = Color.rgb(23, 33, 61)
     private val muted = Color.rgb(111, 121, 145)
     private val red = Color.rgb(190, 35, 48)
-    private val redDark = Color.rgb(111, 13, 29)
+    private val accent = Color.rgb(255, 181, 71)
+    private val success = Color.rgb(22, 139, 69)
     private val white = Color.WHITE
     private var currentPage = "home"
 
@@ -200,7 +201,7 @@ class MainActivity : Activity() {
         isFocusable = true
         val count = pendingAlertCount(destination)
         addView(horizontal(title, if (count > 0) "● $count ALERTA(S)" else "ABRIR  ›", ink,
-            if (count > 0) Color.rgb(210, 20, 35) else red))
+            if (count > 0) success else red))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
@@ -245,10 +246,11 @@ class MainActivity : Activity() {
     private fun pendingAlertCount(team: String, section: String? = null): Int = 0
 
     private fun notificationCard(number: String) = card().apply {
-        addView(horizontal("NOTIFICACIONES · EQUIPO $number", "●", ink, red))
+        val count = pendingAlertCount(if (number == "1") "team1" else "team2")
+        addView(horizontal("NOTIFICACIONES · EQUIPO $number", if (count > 0) "● $count" else "SIN AVISOS", ink, if (count > 0) success else red))
         gap(this, 4)
         addView(text("Aquí aparecerán exclusivamente los avisos, solicitudes y cambios de este equipo.", 12, muted))
-        addView(text("Las alertas reales aparecerán al conectar el servidor SENE; sin consultas periódicas", 11, red, true))
+        addView(text("La bandeja de este equipo se actualizará al consultar el servidor SENE.", 11, muted))
     }
 
     private fun detailScreen(root: LinearLayout, page: String) {
@@ -303,12 +305,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(13), dp(14), dp(13))
             background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(72, 12, 27), Color.rgb(157, 25, 43), Color.rgb(91, 13, 29)))
+                intArrayOf(Color.rgb(17, 26, 53), Color.rgb(38, 59, 112)))
                 .apply { cornerRadius = dp(21).toFloat() }
             elevation = dp(4).toFloat()
         }
         val logoButton = FrameLayout(this).apply {
-            background = rounded(Color.rgb(120, 18, 35), 15, Color.rgb(218, 92, 105))
+            background = rounded(Color.rgb(52, 74, 130), 15, Color.rgb(90, 117, 180))
             setPadding(dp(4), dp(4), dp(4), dp(4))
             isClickable = true
             isFocusable = true
@@ -321,7 +323,7 @@ class MainActivity : Activity() {
         val logo = ImageView(this).apply {
             setImageBitmap(redLogo())
             scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Logotipo SENE PATRÓN rojo. Tocar para abrir el menú."
+            contentDescription = "Logotipo original SENE. Tocar para abrir el menú."
         }
         logoButton.addView(logo, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         top.addView(logoButton, LinearLayout.LayoutParams(dp(60), dp(60)))
@@ -331,34 +333,17 @@ class MainActivity : Activity() {
             setPadding(dp(12), 0, 0, 0)
         }
         brand.addView(text("SENE / PATRÓN", 19, white, true).apply { letterSpacing = .04f })
-        brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(255, 210, 215), true).apply { letterSpacing = .12f })
+        brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(185, 201, 248), true).apply { letterSpacing = .12f })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(top, LinearLayout.LayoutParams(-1, -2))
-        root.addView(View(this).apply { background = rounded(red, 3) },
+        root.addView(View(this).apply { background = rounded(accent, 3) },
             LinearLayout.LayoutParams(dp(42), dp(5)).apply { topMargin = dp(18); bottomMargin = dp(9) })
         root.addView(text(subtitle, 24, ink, true))
         root.addView(text("Todo bajo control.", 13, muted).apply { setPadding(0, 0, 0, dp(13)) })
     }
 
-    private fun redLogo(): Bitmap {
-        val source = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.logo_sene_pv)
-        val result = source.copy(Bitmap.Config.ARGB_8888, true)
-        for (y in 0 until result.height) {
-            for (x in 0 until result.width) {
-                val pixel = result.getPixel(x, y)
-                val a = Color.alpha(pixel)
-                val r = Color.red(pixel)
-                val g = Color.green(pixel)
-                val b = Color.blue(pixel)
-                if (a > 0 && maxOf(r, g, b) - minOf(r, g, b) > 28) {
-                    val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
-                    val redValue = (82 + luminance * 0.66).toInt().coerceIn(0, 255)
-                    result.setPixel(x, y, Color.argb(a, redValue, 8, 22))
-                }
-            }
-        }
-        return result
-    }
+    private fun redLogo(): Bitmap =
+        android.graphics.BitmapFactory.decodeResource(resources, R.drawable.logo_sene_pv)
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -393,7 +378,7 @@ class MainActivity : Activity() {
             addView(text(right, 10, rightColor, true))
         }
 
-    private fun kicker(value: String) = text(value, 10, red, true)
+    private fun kicker(value: String) = text(value, 10, accent, true)
         .apply { letterSpacing = .09f; setPadding(0, 0, 0, dp(5)) }
 
     private fun text(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
@@ -413,7 +398,7 @@ class MainActivity : Activity() {
         setTextColor(white)
         setPadding(dp(16), dp(15), dp(16), dp(15))
         background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.rgb(190, 35, 48), Color.rgb(116, 15, 31)))
+            intArrayOf(Color.rgb(67, 95, 173), Color.rgb(40, 61, 120)))
             .apply { cornerRadius = dp(14).toFloat() }
         elevation = dp(3).toFloat()
         isClickable = true
