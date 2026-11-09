@@ -112,9 +112,9 @@ class MainActivity : Activity() {
     }
 
     private fun expiredScreen(root: LinearLayout) {
-        header(root, "Licencia vencida")
+        header(root, "Validación de licencia")
         root.addView(info("RENOVACIÓN NECESARIA",
-            "La licencia venció. Las funciones administrativas quedan bloqueadas hasta confirmar la mensualidad. SENE VENTAS conserva sus operaciones locales y sus datos."))
+            "La licencia puede haber vencido o necesita validarse con el servidor. Las funciones administrativas quedan bloqueadas hasta confirmar su vigencia. SENE VENTAS conserva sus operaciones locales y sus datos."))
         gap(root, 14)
         root.addView(primaryButton("PAGAR MENSUALIDAD · $80 MXN") { showRenewalDialog() })
         val requestId = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
