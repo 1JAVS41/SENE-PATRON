@@ -63,7 +63,7 @@ Solicitud:
 ```json
 {"purpose":"PATRON_ACTIVATE","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex","targetMethod":"POST","targetPath":"/v1/patron/activate","bodySha256":"hex del cuerpo exacto que se firmará"}
 ```
-Para sesiones existentes, se omiten los datos de clave/instalación ya registrados, pero se envían `targetMethod`, `targetPath` y `bodySha256`. Valores implementados para emisión inicial de reto: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH`. `DEVICE_RECOVERY` queda pendiente de diseño e implementación.
+Para sesiones existentes, se envían `deviceId`, `targetMethod`, `targetPath` y `bodySha256`; se omiten los datos de clave/instalación porque el servidor recupera la clave pública registrada. Valores implementados para emisión inicial de reto: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH`. `DEVICE_RECOVERY` queda pendiente de diseño e implementación.
 Respuesta:
 ```json
 {"challengeId":"uuid","challenge":"base64url","signingMessage":"base64url","expiresAt":unix}
@@ -122,7 +122,7 @@ El segundo equipo ocupará `VENTAS_2`. No hay tercer equipo VENTAS.
 ## 7. Autenticación y estado de licencia
 
 ### `POST /v1/device/session`
-Dispositivo registrado firma reto `DEVICE_AUTH` para el cuerpo `{}` y envía `X-SENE-Device`, `X-SENE-Challenge` y `X-SENE-Signature` en cabeceras. Devuelve:
+Dispositivo registrado solicita un reto `DEVICE_AUTH` indicando su `deviceId`, firma el `signingMessage` para el cuerpo `{}` y envía `X-SENE-Device`, `X-SENE-Challenge` y `X-SENE-Signature` en cabeceras. El Worker ya valida la firma, el hash exacto del cuerpo, método/ruta, vigencia y consumo único del reto en este endpoint. Devuelve:
 ```json
 {"deviceId":"uuid","role":"VENTAS","slot":"VENTAS_1","licenseStatus":"ACTIVE","serverTime":unix,"periodEndsAt":unix,"weeklyQuota":{"limit":20,"used":3,"remaining":17,"weekKey":"YYYY-WW"}}
 ```
