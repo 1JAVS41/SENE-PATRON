@@ -602,7 +602,7 @@ function constantTimeTextEqual(a, b) {
 
 async function requireOperator(request, env) {
   const expected = env.OPERATOR_TOKEN;
-  const supplied = (request.headers.get("authorization") || "").replace(/^Bearer\\s+/i, "");
+  const supplied = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   return typeof expected === "string" && expected.length >= 32 &&
     constantTimeTextEqual(supplied, expected);
 }
