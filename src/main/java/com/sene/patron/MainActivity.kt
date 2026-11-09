@@ -95,7 +95,10 @@ class MainActivity : Activity() {
         summary.addView(View(this).apply { setBackgroundColor(Color.rgb(235, 226, 229)) },
             LinearLayout.LayoutParams(-1, dp(1)))
         gap(summary, 9)
-        summary.addView(horizontal("Dispositivos SENE VENTAS", "0 de 2 vinculados", ink, red))
+        val serverPrefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val linkedCount = serverPrefs.getInt("linked_ventas_count", -1)
+        val linkedLabel = if (linkedCount >= 0) "$linkedCount de 2 vinculados" else "PENDIENTE DE CONSULTA"
+        summary.addView(horizontal("Dispositivos SENE VENTAS", linkedLabel, ink, if (linkedCount >= 0) success else muted))
         summary.addView(text("La licencia contempla 1 equipo SENE PATRÓN y hasta 2 equipos SENE VENTAS.", 13, muted))
         root.addView(summary)
         gap(root, 12)
@@ -277,7 +280,9 @@ class MainActivity : Activity() {
         lastNotificationRefreshAt = now
         Thread {
             try {
-                SeneApiClient(this, baseUrl).refreshNotifications()
+                val api = SeneApiClient(this, baseUrl)
+                api.session()
+                api.refreshNotifications()
                 runOnUiThread {
                     refreshingNotifications = false
                     if (!isFinishing) render()
