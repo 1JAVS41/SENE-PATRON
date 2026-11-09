@@ -62,3 +62,39 @@ Esas reglas son más detalladas que el resumen inicial de licencia de 30 días. 
 6. Verificar endpoints y pruebas de seguridad antes de distribuir las APK.
 
 **No ejecutar la plantilla Hello World como backend ni conectar las APK a este scaffold.**
+
+
+## Actualización de auditoría: cuota semanal y reemplazo de equipos (2026-11-09)
+
+### Pruebas CI verificadas
+- El commit `49890b35fe0f468c4b623ba5e0df8c2b63aa1d9b` incorpora el consumo atómico de 20 operaciones autenticadas por dispositivo y semana de calendario de `America/Mexico_City`. `DEVICE_AUTH` no consume cuota.
+- El commit `2baa1c1d8fad810a37c415c7d7ffa4700bef2de7` añade una prueba que acepta las operaciones 1 a 20 y rechaza la 21 sin incrementar el contador.
+- GitHub Actions run `42706725029` terminó **success**. Pasaron comprobación de sintaxis, aplicación de migraciones 0001–0003 en SQLite temporal y prueba del límite semanal 20/21.
+- Esto valida sintaxis y comportamiento de la cuota en SQLite temporal; no equivale a una prueba E2E contra Cloudflare Workers/D1.
+
+### Bloqueo crítico descubierto: historial y reemplazo de dispositivos
+La tabla `devices` de `0001_initial.sql` tiene la restricción `UNIQUE (license_id, slot_number)`. Aunque las consultas de vinculación buscan espacios activos, la restricción también impide insertar un equipo nuevo en un espacio si ya existe un registro histórico revocado en ese mismo espacio.
+
+Consecuencias:
+- No se puede conservar el dispositivo anterior como revocado y registrar un reemplazo en el mismo espacio.
+- La activación PATRÓN también busca cualquier registro del espacio 1, no solamente uno activo.
+- `replacement_requests` existe en 0002, pero todavía no hay flujo de servidor que autorice y ejecute el reemplazo.
+- No se debe resolver reutilizando el mismo `device_id` ni sobrescribiendo su clave pública: solicitudes, retos, reportes y autorizaciones históricas referencian el identificador anterior.
+
+### Diseño requerido antes de habilitar reemplazos
+1. Mantener cada instalación/dispositivo como fila histórica independiente e inmutable en identidad.
+2. Permitir varias filas históricas por licencia y espacio, pero garantizar **un solo dispositivo activo por espacio** mediante un índice único parcial sobre `(license_id, slot_number) WHERE status = 'active'`.
+3. Hacer que el reemplazo aprobado revoque el dispositivo anterior y active el nuevo en una misma operación transaccional, validando licencia, espacio, solicitud pendiente y autorización del operador.
+4. Mantener las referencias históricas de `work_requests`, `shift_reports`, `payroll_reports`, `weekly_usage`, `challenges`, `correction_requests`, `correction_grants`, `pairing_tokens` y `audit_log` ligadas al ID original.
+5. Revisar el caso especial del espacio PATRÓN y revocar/invalidar tokens QR pendientes del dispositivo sustituido.
+
+### Migración 0004: no aplicar todavía
+La restricción problemática es una restricción de tabla (no un índice ordinario que pueda eliminarse con `DROP INDEX`). En SQLite, reconstruir `devices` requiere una migración cuidadosamente ensayada por las claves foráneas que apuntan a ella. No se debe improvisar un `ALTER TABLE`, renombrar la tabla ni ejecutar esta migración sobre la D1 real sin probar el procedimiento completo con todas las tablas dependientes y validar `PRAGMA foreign_key_check`.
+
+Hasta que exista esa migración y el endpoint de reemplazo con pruebas de concurrencia, el reemplazo de equipos debe considerarse **no disponible**. No activar ni desplegar el backend para clientes.
+
+### Estado de despliegue
+- Worker del panel Cloudflare: sigue siendo la plantilla Hello World según la última comprobación registrada.
+- D1 real `sene-licencias`: contiene solamente la migración 0001; 0002 y 0003 siguen pendientes.
+- No se desplegó código nuevo ni se modificó la D1 real.
+- Las APK todavía no están integradas con este backend ni verificadas como entregables online.
