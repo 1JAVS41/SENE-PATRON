@@ -423,7 +423,13 @@ async function activatePatron(request, env) {
               SELECT 1 FROM devices d
                WHERE d.id = ? AND d.license_id = licenses.id
             )`
-      ).bind(codeHash, deviceId)
+      ).bind(codeHash, deviceId),
+      env.DB.prepare(
+        `UPDATE licenses
+            SET status = 'active', activated_at = COALESCE(activated_at, ?), expires_at = ?
+          WHERE id = (SELECT license_id FROM devices WHERE id = ?)
+            AND status = 'pending' AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL`
+      ).bind(now, now + 30 * 86400, deviceId)
     ]);
 
     if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
@@ -434,11 +440,14 @@ async function activatePatron(request, env) {
     return json({ error: "ACTIVATION_CONFLICT_OR_DATABASE_ERROR" }, 409);
   }
 
+  const activated = await env.DB.prepare(
+    "SELECT status, expires_at FROM licenses WHERE id = (SELECT license_id FROM devices WHERE id = ?) LIMIT 1"
+  ).bind(deviceId).first();
   return json({
     deviceId,
     slot: "PATRON",
-    licenseStatus: "PENDING_PAYMENT",
-    periodEndsAt: null
+    licenseStatus: activated?.status === "active" ? "ACTIVE" : "PENDING_PAYMENT",
+    periodEndsAt: activated?.expires_at ?? null
   }, 201);
 }
 
@@ -646,6 +655,68 @@ async function createRenewalRequest(request, env) {
     amountCents: 8000, currency: "MXN",
     instructions: "Paga $80 MXN, escribe el nombre exacto de tu empresa en el concepto y envía el comprobante a los canales oficiales de Ayuda. Después espera el código de autorización."
   }, 201);
+}
+
+
+async function createOperatorLicense(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const businessName = typeof body.businessName === "string" ? body.businessName.trim() : "";
+  if (!businessName || businessName.length > 100) return json({ error: "INVALID_BUSINESS_NAME" }, 400);
+  const licenseId = crypto.randomUUID();
+  const activationCode = makeCode();
+  const codeHash = await sha256(activationCode);
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO licenses (id, label, business_name, status, max_devices, activation_code_hash, created_at) VALUES (?, ?, ?, 'pending', 3, ?, ?)"
+    ).bind(licenseId, businessName, businessName, codeHash, now).run();
+  } catch {
+    return json({ error: "LICENSE_CREATE_FAILED" }, 503);
+  }
+  return json({
+    licenseId, businessName, activationCode,
+    initialPaymentCents: 58000, currency: "MXN",
+    package: "1_PATRON_2_VENTAS", maxDevices: 3, validityDays: 30,
+    note: "Código de un solo uso. Entrégalo después de confirmar el pago inicial de $580 MXN."
+  }, 201);
+}
+
+async function confirmInitialPayment(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
+  const reference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : "";
+  if (!/^[0-9a-f-]{36}$/i.test(licenseId) || !reference) return json({ error: "INVALID_REQUEST" }, 400);
+  const license = await env.DB.prepare(
+    "SELECT status, setup_paid_at, first_rent_paid_at FROM licenses WHERE id = ? LIMIT 1"
+  ).bind(licenseId).first();
+  if (!license) return json({ error: "LICENSE_NOT_FOUND" }, 404);
+  if (license.setup_paid_at && license.first_rent_paid_at) {
+    return json({ licenseId, paymentStatus: "CONFIRMED", duplicate: true });
+  }
+  if (license.status !== "pending" || license.setup_paid_at || license.first_rent_paid_at) {
+    return json({ error: "INITIAL_PAYMENT_NOT_CONFIRMABLE" }, 409);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES (?, ?, 'SETUP', 50000, 'MXN', 'CONFIRMED', ?, ?, ?, ?, 'operator')"
+    ).bind(crypto.randomUUID(), licenseId, reference, "initial-setup:" + licenseId, now, now),
+    env.DB.prepare(
+      "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES (?, ?, 'FIRST_RENT', 8000, 'MXN', 'CONFIRMED', ?, ?, ?, ?, 'operator')"
+    ).bind(crypto.randomUUID(), licenseId, reference, "initial-rent:" + licenseId, now, now),
+    env.DB.prepare(
+      "UPDATE licenses SET setup_paid_at = ?, first_rent_paid_at = ? WHERE id = ? AND status = 'pending' AND setup_paid_at IS NULL AND first_rent_paid_at IS NULL"
+    ).bind(now, now, licenseId),
+    env.DB.prepare(
+      "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, 'operator', 'operator', 'initial_payment_confirmed', ?, ?)"
+    ).bind(crypto.randomUUID(), licenseId, JSON.stringify({ paymentReference: reference, totalCents: 58000 }), now)
+  ]);
+  if ((results?.[2]?.meta?.changes ?? 0) !== 1) return json({ error: "INITIAL_PAYMENT_CONFLICT" }, 409);
+  return json({ licenseId, paymentStatus: "CONFIRMED", totalCents: 58000, currency: "MXN", activationCodeCanBeDelivered: true }, 200);
 }
 
 async function listOperatorRenewals(request, env) {
@@ -1026,6 +1097,8 @@ async function handle(request, env) {
   }
   if (request.method === "POST" && url.pathname === "/v1/patron/renewals/request") return createRenewalRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/renewals/redeem") return redeemRenewal(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/licenses/create") return createOperatorLicense(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/licenses/confirm-initial-payment") return confirmInitialPayment(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/renewals/pending") return listOperatorRenewals(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/renewals/authorize") return authorizeRenewal(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/renewals/cancel") return cancelRenewal(request, env);
