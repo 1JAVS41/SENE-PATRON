@@ -1076,13 +1076,12 @@ async function patronDevicesList(request, env) {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
   const rows = await env.DB.prepare(
-    "SELECT id, slot_number, fingerprint, created_at, last_seen_at FROM devices WHERE license_id = ? AND device_type = 'VENTAS' AND status = 'active' ORDER BY slot_number"
+    "SELECT id, slot_number, created_at, last_seen_at FROM devices WHERE license_id = ? AND device_type = 'VENTAS' AND status = 'active' ORDER BY slot_number"
   ).bind(ctx.licenseId).all();
   return json({
     items: (rows.results || []).map((row) => ({
       deviceId: row.id,
       slot: row.slot_number === 2 ? "VENTAS_1" : "VENTAS_2",
-      fingerprint: row.fingerprint,
       createdAt: row.created_at,
       lastSeenAt: row.last_seen_at
     }))
