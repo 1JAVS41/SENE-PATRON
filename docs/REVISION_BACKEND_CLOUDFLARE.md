@@ -213,3 +213,13 @@ No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revi
 - Licencia vencida puede recuperar el dispositivo, pero debe renovar antes de operaciones remotas.
 - El cliente Android PATRÓN ya tiene método firmado `recover(recoveryCode)` y guarda el nuevo deviceId.
 - CI SQLite de recuperación se añadió; pendiente comprobar el run más reciente y E2E en Cloudflare.
+
+
+## Configuración de nómina por equipo (2026-11-09)
+
+- Migración 0010 crea `payroll_settings`, aislada por licencia y slot 2/3.
+- El patrón configura sueldo base, día fijo mensual, fechas específicas o ambos.
+- Worker añade endpoints firmados para consultar/guardar la configuración.
+- El endpoint de reporte de nómina valida en servidor que hoy (America/Mexico_City) sea una fecha configurada para el slot real del dispositivo. Se rechaza si no está configurado o no corresponde el día.
+- Android PATRÓN tiene pantalla de configuración independiente por Equipo 1 y Equipo 2; Android VENTAS añade menú Día de pago, consulta local y envío del reporte al servidor.
+- Pendiente probar flujos E2E y validar el cálculo final de nómina a partir de reglas aprobadas/descuentos; no desplegar todavía.
