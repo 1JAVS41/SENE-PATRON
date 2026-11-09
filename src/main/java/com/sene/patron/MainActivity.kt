@@ -82,7 +82,7 @@ class MainActivity : Activity() {
         scroll.addView(page)
         val licenseStatus = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
             .getString("license_status", "").orEmpty()
-        if (licenseStatus == "EXPIRED") {
+        if (licenseStatus == "expired") {
             expiredScreen(page)
         } else {
             when (currentPage) {
@@ -137,15 +137,15 @@ class MainActivity : Activity() {
         status.addView(horizontal(
             "Administración",
             when (licenseStatus) {
-                "ACTIVE" -> "CONECTADO"
-                "EXPIRED" -> "LICENCIA VENCIDA"
-                "SUSPENDED" -> "SUSPENDIDA"
+                "active" -> "CONECTADO"
+                "expired" -> "LICENCIA VENCIDA"
+                "suspended" -> "SUSPENDIDA"
                 else -> "PENDIENTE DE VINCULACIÓN"
             },
             ink,
             when (licenseStatus) {
-                "ACTIVE" -> success
-                "EXPIRED", "SUSPENDED" -> red
+                "active" -> success
+                "expired", "suspended" -> red
                 else -> muted
             }
         ))
@@ -668,7 +668,7 @@ class MainActivity : Activity() {
             } catch (_: Exception) {
                 runOnUiThread {
                     refreshingNotifications = false
-                    if (!isFinishing && prefs.getString("license_status", "") == "EXPIRED") render()
+                    if (!isFinishing && prefs.getString("license_status", "") == "expired") render()
                 }
             }
         }.start()
