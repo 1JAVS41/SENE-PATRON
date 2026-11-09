@@ -531,7 +531,13 @@ class MainActivity : Activity() {
                         Toast.makeText(this, "Captura una cantidad válida para el descuento", Toast.LENGTH_LONG).show()
                         return@setPositiveButton
                     }
-                    deduction.put("amountCents", Math.round(value * 100.0))
+                    val amountCents = Math.round(value * 100.0)
+                    val requestedCents = item.optJSONObject("details")?.optLong("amountCents", 0L) ?: 0L
+                    if (requestedCents > 0L && amountCents > requestedCents) {
+                        Toast.makeText(this, "El descuento no puede superar la cantidad solicitada", Toast.LENGTH_LONG).show()
+                        return@setPositiveButton
+                    }
+                    deduction.put("amountCents", amountCents)
                 }
                 details.put("deduction", deduction)
                 submitTeamDecision(base, item, correction, decision, slot, details)
