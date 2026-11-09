@@ -468,7 +468,7 @@ async function recoverPatron(request, env) {
   }
   const codeHash = await sha256(code);
   const recovery = await env.DB.prepare(
-    "SELECT r.id, r.license_id, r.old_patron_device_id, l.status AS license_status FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id WHERE r.code_hash = ? AND r.status = 'pending' LIMIT 1"
+    "SELECT r.id, r.license_id, r.old_patron_device_id, l.status AS license_status, l.expires_at FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id WHERE r.code_hash = ? AND r.status = 'pending' LIMIT 1"
   ).bind(codeHash).first();
   if (!recovery || !["active", "expired"].includes(recovery.license_status)) {
     return json({ error: "RECOVERY_CODE_INVALID_OR_USED" }, 409);
@@ -497,13 +497,13 @@ async function recoverPatron(request, env) {
   } catch {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
-  if (results?.some((result) => (result?.meta?.changes ?? 0) !== 1)) {
+  if ([0, 2, 3, 4].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1)) {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
   return json({
     deviceId: newDeviceId,
     slot: "PATRON",
-    licenseStatus: recovery.license_status === "active" ? "ACTIVE" : "EXPIRED",
+    licenseStatus: recovery.license_status !== "active" || !recovery.expires_at || recovery.expires_at <= now ? "EXPIRED" : "ACTIVE",
     periodEndsAt: null,
     recovered: true
   }, 201);
