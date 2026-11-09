@@ -175,6 +175,10 @@ class MainActivity : Activity() {
         root.addView(primaryButton(if (linked) "ACTUALIZAR ESTADO Y NOTIFICACIONES" else "VINCULAR LICENCIA SENE") {
             if (linked) refreshNotificationsFromServer(force = true) else showActivationDialog()
         })
+        if (!linked) {
+            gap(root, 7)
+            root.addView(primaryButton("RECUPERAR PATRÓN PERDIDO") { showPatronRecoveryDialog() })
+        }
         gap(root, 7)
         root.addView(primaryButton("CONFIGURAR CONEXIÓN SEGURA") { showServerConfig() })
         if (linked) {
@@ -762,6 +766,49 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Dirección guardada", Toast.LENGTH_SHORT).show()
                 if (prefs.getString("device_id", null).isNullOrBlank()) showActivationDialog()
                 else refreshNotificationsFromServer(force = true)
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
+    }
+
+
+    private fun showPatronRecoveryDialog() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) {
+            showServerConfig()
+            return
+        }
+        val field = EditText(this).apply {
+            hint = "Código de recuperación de un solo uso"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("RECUPERAR SENE PATRÓN")
+            .setMessage("Usa el código de recuperación emitido por el operador después de verificar al titular. El teléfono anterior será revocado y los dos equipos VENTAS conservarán sus espacios.")
+            .setView(field)
+            .setPositiveButton("RECUPERAR") { _, _ ->
+                val code = field.text?.toString()?.trim().orEmpty()
+                if (code.length != 12) {
+                    Toast.makeText(this, "El código debe tener 12 caracteres", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).recover(code)
+                        runOnUiThread {
+                            lastNotificationRefreshAt = 0L
+                            Toast.makeText(this, "SENE PATRÓN recuperado. Estado: " + result.optString("licenseStatus"), Toast.LENGTH_LONG).show()
+                            render()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this, "No se pudo recuperar: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
             }
             .setNegativeButton("CANCELAR", null)
             .show()
