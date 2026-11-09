@@ -320,6 +320,74 @@ async function issueChallenge(request, env) {
   return json({ challengeId, challenge: nonce, signingMessage, expiresAt }, 201);
 }
 
+
+function mexicoCityIsoWeek(unixSeconds) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City",
+    year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date(unixSeconds * 1000));
+  const get = (type) => Number(parts.find((p) => p.type === type)?.value);
+  const localDate = new Date(Date.UTC(get("year"), get("month") - 1, get("day")));
+  const weekday = localDate.getUTCDay() || 7;
+  localDate.setUTCDate(localDate.getUTCDate() + 4 - weekday);
+  const year = localDate.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const week = Math.ceil((((localDate - yearStart) / 86400000) + 1) / 7);
+  return `${year}-${String(week).padStart(2, "0")}`;
+}
+
+async function deviceSession(request, env) {
+  const proof = await verifySignedRequest(request, env, "DEVICE_AUTH");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+
+  const deviceId = proof.challenge.device_id;
+  const row = await env.DB.prepare(
+    `SELECT d.id AS device_id, d.device_type, d.slot_number, d.status AS device_status,
+            l.id AS license_id, l.status AS license_status, l.expires_at
+       FROM devices d JOIN licenses l ON l.id = d.license_id
+      WHERE d.id = ? LIMIT 1`
+  ).bind(deviceId).first();
+
+  if (!row || row.device_status !== "active") {
+    return json({ error: "DEVICE_NOT_REGISTERED" }, 401);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  let licenseStatus = row.license_status;
+  if (row.expires_at !== null && row.expires_at !== undefined && row.expires_at <= now &&
+      licenseStatus === "active") {
+    licenseStatus = "expired";
+  }
+
+  const weekKey = mexicoCityIsoWeek(now);
+  const usage = await env.DB.prepare(
+    "SELECT used FROM weekly_usage WHERE device_id = ? AND week_key = ? LIMIT 1"
+  ).bind(deviceId, weekKey).first();
+  const used = Math.max(0, Math.min(20, Number(usage?.used ?? 0)));
+
+  await env.DB.prepare(
+    "UPDATE devices SET last_seen_at = ? WHERE id = ? AND status = 'active'"
+  ).bind(now, deviceId).run();
+
+  return json({
+    deviceId,
+    role: row.device_type,
+    slot: row.device_type === "PATRON" ? "PATRON" : `VENTAS_${row.slot_number - 1}`,
+    licenseStatus: licenseStatus === "active" ? "ACTIVE" : licenseStatus.toUpperCase(),
+    serverTime: now,
+    periodEndsAt: row.expires_at ?? null,
+    weeklyQuota: { limit: 20, used, remaining: Math.max(0, 20 - used), weekKey }
+  });
+}
+
 async function handle(request, env) {
   const url = new URL(request.url);
 
@@ -329,6 +397,10 @@ async function handle(request, env) {
 
   if (request.method === "POST" && url.pathname === "/v1/challenges") {
     return issueChallenge(request, env);
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/device/session") {
+    return deviceSession(request, env);
   }
 
   // Temporary operator scaffold only. Do not expose this token in either APK.
