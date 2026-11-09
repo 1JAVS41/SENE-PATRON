@@ -599,7 +599,9 @@ class MainActivity : Activity() {
             try {
                 val api = SenePatronApiClient(this, base)
                 val settings = api.payrollSettings().optJSONObject("settings")?.optJSONObject(slot)
-                val reports = api.reportsInbox(slot).optJSONArray("payrollReports") ?: org.json.JSONArray()
+                val reportInbox = api.reportsInbox(slot)
+                val reports = reportInbox.optJSONArray("payrollReports") ?: org.json.JSONArray()
+                val shiftReports = reportInbox.optJSONArray("shiftReports") ?: org.json.JSONArray()
                 val latest = if (reports.length() > 0) reports.optJSONObject(0) else null
                 val report = latest?.optJSONObject("report")
                 val requests = report?.optJSONArray("requests") ?: org.json.JSONArray()
@@ -624,6 +626,7 @@ class MainActivity : Activity() {
                     append("Equipo: ").append(slot).append("\n")
                     append("Trabajador: ").append(report?.optString("worker", "No registrado") ?: "Sin reporte")
                     append("\nFecha de reporte: ").append(latest?.optString("periodKey", "—") ?: "Sin reporte")
+                    append("\nCierres de turno recibidos: ").append(shiftReports.length())
                     append("\nSueldo base configurado: $").append(String.format(java.util.Locale.US, "%.2f", salaryCents / 100.0))
                     append("\nDescuentos autorizados incluidos: $").append(String.format(java.util.Locale.US, "%.2f", deductions))
                     append("\nCantidad de descuentos: ").append(approvedDeductions)
