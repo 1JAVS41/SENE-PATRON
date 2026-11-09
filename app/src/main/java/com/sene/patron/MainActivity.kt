@@ -29,6 +29,8 @@ class MainActivity : Activity() {
     private val redDark = Color.rgb(16, 91, 151)
     private val white = Color.WHITE
     private var currentPage = "home"
+    private var team1StatusButton: TextView? = null
+    private var team2StatusButton: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -326,28 +328,58 @@ class MainActivity : Activity() {
         }
         root.addView(info("NOTIFICACIONES INDEPENDIENTES", "Cada equipo conserva su propio contador. Rojo significa cero pendientes sin consultar; verde significa que hay una o más notificaciones."))
         gap(root, 9)
-        root.addView(primaryButton("ACTUALIZAR CONTADORES") {
-            Thread {
-                try {
-                    val result = SenePatronApiClient(this, base).notifications(device)
-                    val counts = result.optJSONObject("pendingByTeam") ?: org.json.JSONObject()
-                    runOnUiThread {
-                        AlertDialog.Builder(this).setTitle("NOTIFICACIONES POR EQUIPO")
-                            .setMessage("Equipo 1: " + counts.optInt("VENTAS_1", 0) +
-                                "\nEquipo 2: " + counts.optInt("VENTAS_2", 0))
-                            .setPositiveButton("CERRAR", null).show()
-                    }
-                } catch (e: Exception) {
-                    runOnUiThread { Toast.makeText(this, "No se pudieron actualizar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
-                }
-            }.start()
-        })
+        team1StatusButton = teamStatusButton("VENTAS_1", "EQUIPO 1 · SENE VENTAS", base)
+        team2StatusButton = teamStatusButton("VENTAS_2", "EQUIPO 2 · SENE VENTAS", base)
+        root.addView(team1StatusButton)
         gap(root, 9)
-        root.addView(primaryButton("EQUIPO 1 · SENE VENTAS") { loadTeamInbox("VENTAS_1", base) })
+        root.addView(team2StatusButton)
         gap(root, 9)
-        root.addView(primaryButton("EQUIPO 2 · SENE VENTAS") { loadTeamInbox("VENTAS_2", base) })
+        root.addView(primaryButton("ACTUALIZAR CONTADORES") { refreshNotificationButtons(base) })
+        refreshNotificationButtons(base)
         gap(root, 9)
         root.addView(info("IMPORTANTE", "Al abrir la bandeja de un equipo, el servidor marca como vistas sus notificaciones pendientes de ese equipo. Las solicitudes permanecen en el historial hasta que se aprueban o rechazan."))
+    }
+
+    private fun teamStatusButton(slot: String, label: String, base: String): TextView =
+        TextView(this).apply {
+            text = "$label\n0 notificaciones"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(14), dp(16), dp(14), dp(16))
+            background = rounded(Color.rgb(190, 45, 55), 14)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { loadTeamInbox(slot, base) }
+        }
+
+    private fun updateTeamStatus(button: TextView?, label: String, count: Int) {
+        if (button == null) return
+        button.text = "$label\n$count notificaciones pendientes"
+        button.background = rounded(
+            if (count > 0) Color.rgb(28, 151, 91) else Color.rgb(190, 45, 55),
+            14
+        )
+    }
+
+    private fun refreshNotificationButtons(base: String) {
+        val device = getSharedPreferences("sene_patron_server", MODE_PRIVATE).getString("device_id", null)
+            ?: return
+        Thread {
+            try {
+                val counts = SenePatronApiClient(this, base).notifications(device)
+                    .optJSONObject("pendingByTeam") ?: org.json.JSONObject()
+                val first = counts.optInt("VENTAS_1", 0)
+                val second = counts.optInt("VENTAS_2", 0)
+                runOnUiThread {
+                    updateTeamStatus(team1StatusButton, "EQUIPO 1 · SENE VENTAS", first)
+                    updateTeamStatus(team2StatusButton, "EQUIPO 2 · SENE VENTAS", second)
+                }
+            } catch (e: Exception) {
+                runOnUiThread { Toast.makeText(this, "No se pudieron actualizar los contadores: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun loadTeamInbox(slot: String, base: String) {
@@ -371,9 +403,12 @@ class MainActivity : Activity() {
                     kinds.add("correction"); records.add(item)
                 }
                 val counts = result.optJSONObject("pendingByTeam") ?: org.json.JSONObject()
+                val unseenCount = counts.optInt(slot, 0)
                 val message = if (labels.isEmpty()) "No hay solicitudes pendientes para este equipo." else
-                    "Notificaciones sin consultar: " + counts.optInt(slot, 0) + "\nSelecciona una solicitud para revisar y responder."
+                    "Notificaciones sin consultar: " + unseenCount + "\nSelecciona una solicitud para revisar y responder."
                 runOnUiThread {
+                    if (slot == "VENTAS_1") updateTeamStatus(team1StatusButton, "EQUIPO 1 · SENE VENTAS", unseenCount)
+                    else updateTeamStatus(team2StatusButton, "EQUIPO 2 · SENE VENTAS", unseenCount)
                     val builder = AlertDialog.Builder(this).setTitle(if (slot == "VENTAS_1") "EQUIPO 1 · BANDEJA" else "EQUIPO 2 · BANDEJA")
                     if (labels.isEmpty()) builder.setMessage(message).setPositiveButton("CERRAR", null).show()
                     else builder.setMessage(message).setItems(labels.toTypedArray()) { _, index ->
