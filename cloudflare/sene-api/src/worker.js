@@ -1539,9 +1539,15 @@ async function patronPayrollSettingsSet(request, env) {
   }
   const uniqueDates = [...new Set(paymentDates)].sort();
   const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    "INSERT INTO payroll_settings (license_id, slot_number, salary_cents, payment_day, payment_dates_json, updated_at, updated_by_device_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(license_id, slot_number) DO UPDATE SET salary_cents=excluded.salary_cents, payment_day=excluded.payment_day, payment_dates_json=excluded.payment_dates_json, updated_at=excluded.updated_at, updated_by_device_id=excluded.updated_by_device_id"
-  ).bind(ctx.licenseId, slot, salaryCents, paymentDay, JSON.stringify(uniqueDates), now, ctx.deviceId).run();
+  const settingsJson = JSON.stringify({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", salaryCents, paymentDay, paymentDates: uniqueDates });
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO payroll_settings (license_id, slot_number, salary_cents, payment_day, payment_dates_json, updated_at, updated_by_device_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(license_id, slot_number) DO UPDATE SET salary_cents=excluded.salary_cents, payment_day=excluded.payment_day, payment_dates_json=excluded.payment_dates_json, updated_at=excluded.updated_at, updated_by_device_id=excluded.updated_by_device_id"
+    ).bind(ctx.licenseId, slot, salaryCents, paymentDay, JSON.stringify(uniqueDates), now, ctx.deviceId),
+    env.DB.prepare(
+      "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, ?, 'patron', ?, 'payroll_settings_updated', ?, ?)"
+    ).bind(crypto.randomUUID(), ctx.licenseId, ctx.deviceId, ctx.deviceId, settingsJson, now)
+  ]);
   return json({
     slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
     salaryCents,
