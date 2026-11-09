@@ -50,3 +50,6 @@ Las consultas deben agruparse cuando sea posible para evitar llamadas innecesari
 Se añadió la migración aditiva 0003 y los handlers firmados del Worker para crear solicitudes, consultar bandeja/contadores, aprobar o rechazar, recuperar decisiones y guardar/consultar cierres de turno y reportes de nómina. Las inserciones de solicitudes y reportes son idempotentes por equipo y clave de origen. El contador se calcula por slot y solo incluye solicitudes pendientes.
 
 La migración es local al repositorio: **no debe ejecutarse todavía en la base D1 real**. Falta validar la sintaxis del Worker y las rutas contra D1, agregar pruebas de concurrencia/idempotencia, conectar ambos clientes Android, construir el cierre de turno con entrega local a WhatsApp y cola offline, implementar la pantalla/contadores de SENE PATRÓN y probar todo end-to-end. No se ha desplegado el Worker ni se han modificado las APK.
+
+
+**Contador independiente por equipo:** la respuesta de `POST /v1/patron/requests/inbox` incluye `pendingByTeam` con `VENTAS_1` y `VENTAS_2`. Cada número suma solicitudes operativas pendientes y correcciones de venta pendientes del dispositivo activo en ese slot. Cero se representa sin notificación (botón rojo); uno o más muestra botón verde con el número exacto. Consultar o atender una solicitud actualiza el conteo sin mezclar historiales de equipos.
