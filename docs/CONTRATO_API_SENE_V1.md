@@ -283,3 +283,12 @@ No desplegar ni conectar APK hasta que las filas pendientes de correcciones, rec
 La recuperación exitosa revoca el PATRÓN anterior, invalida los QR de vinculación previos, registra el nuevo PATRÓN en el mismo slot 1 y consume el código en un batch D1. Conserva historial de licencia y de los dos equipos VENTAS. Si la licencia está vencida, el nuevo PATRÓN queda recuperado pero debe renovar antes de usar funciones remotas. El código no se puede reutilizar.
 
 Este flujo está en GitHub, pero no está desplegado ni probado E2E contra Cloudflare.
+
+
+## Nómina por equipo y validación de fecha de pago
+
+- Migración `0010_payroll_settings.sql`: configuración separada por slot VENTAS_1/VENTAS_2, sueldo base en centavos, día fijo mensual y/o fechas específicas.
+- `POST /v1/patron/payroll/settings/get`: PATRÓN consulta ambas configuraciones.
+- `POST /v1/patron/payroll/settings/set`: PATRÓN guarda sueldo y fechas para un solo equipo.
+- `POST /v1/ventas/payroll-reports`: el Worker comprueba la fecha local de `America/Mexico_City` contra la configuración del slot de origen antes de aceptar el reporte. Si no corresponde, devuelve `PAYROLL_NOT_DUE`; si no hay configuración, `PAYROLL_NOT_CONFIGURED`.
+- La identidad del slot procede del dispositivo firmado, nunca del campo enviado por VENTAS.
