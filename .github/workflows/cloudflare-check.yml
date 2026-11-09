@@ -49,6 +49,25 @@ jobs:
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
+      - name: Probar restricciones de recuperación de PATRÓN
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-recovery', 'TIENDA RECUPERACION', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-old', 'license-recovery', 'PATRON', 'install-old', 'continuity-old', x'01', 'fingerprint-old', 1, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_requests (id, license_id, old_patron_device_id, code_hash, reason, status, created_at, created_by) VALUES ('recovery-1', 'license-recovery', 'patron-old', 'hash-one', 'telefono perdido', 'pending', 10, 'operator');"
+          if sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_requests (id, license_id, old_patron_device_id, code_hash, reason, status, created_at, created_by) VALUES ('recovery-duplicate', 'license-recovery', 'patron-old', 'hash-two', 'duplicada', 'pending', 11, 'operator');" 2>/dev/null; then
+            echo "ERROR: se permitió más de una recuperación pendiente por licencia"
+            exit 1
+          fi
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_requests SET status='consumed', consumed_at=20 WHERE id='recovery-1' AND status='pending';"
+          sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_requests (id, license_id, old_patron_device_id, code_hash, reason, status, created_at, created_by) VALUES ('recovery-2', 'license-recovery', 'patron-old', 'hash-two', 'segunda solicitud tras cerrar la anterior', 'pending', 21, 'operator');"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM patron_recovery_requests WHERE license_id='license-recovery' AND status='pending';")" = "1"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar límite semanal atómico de 20 operaciones
         run: |
           set -euo pipefail
