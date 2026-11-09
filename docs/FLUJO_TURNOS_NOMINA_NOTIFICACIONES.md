@@ -31,9 +31,9 @@ Estado: requisitos aprobados para implementación. Este documento no afirma que 
 - No almacenar ni transmitir ventas completas, artículos, inventario, caja, clientes, credenciales WhatsApp, conversaciones ni archivos multimedia.
 - Respuestas y decisiones no modifican automáticamente ventas, inventario ni caja.
 
-## Endpoints previstos
+## Endpoints añadidos al Worker (pendientes de pruebas end-to-end)
 
-Todos los endpoints de negocio deben exigir reto de un solo uso y firma ECDSA P-256 del dispositivo registrado, además de licencia vigente. La lista de rutas y propósitos debe añadirse al allowlist de retos del Worker antes de habilitar clientes.
+Todos los endpoints de negocio exigen reto de un solo uso y firma ECDSA P-256 del dispositivo registrado, además de licencia vigente. Las rutas y propósitos ya se añadieron al allowlist de retos del Worker. La implementación requiere pruebas de sintaxis, migración, concurrencia e integración con Android antes de habilitar clientes.
 
 - `POST /v1/ventas/requests`: crear solicitud inmediata; clave idempotente.
 - `POST /v1/patron/requests/inbox`: consultar solicitudes pendientes y contador por slot.
@@ -47,4 +47,6 @@ Las consultas deben agruparse cuando sea posible para evitar llamadas innecesari
 
 ## Estado de esta entrega
 
-Se añade una migración aditiva para las tablas de solicitudes, cierres de turno y reportes de nómina, junto con este contrato funcional. La migración es local al repositorio: **no debe ejecutarse todavía en la base D1 real**. Los handlers del Worker, la integración Android, las pruebas de concurrencia/idempotencia y las pruebas end-to-end siguen siendo trabajo pendiente.
+Se añadió la migración aditiva 0003 y los handlers firmados del Worker para crear solicitudes, consultar bandeja/contadores, aprobar o rechazar, recuperar decisiones y guardar/consultar cierres de turno y reportes de nómina. Las inserciones de solicitudes y reportes son idempotentes por equipo y clave de origen. El contador se calcula por slot y solo incluye solicitudes pendientes.
+
+La migración es local al repositorio: **no debe ejecutarse todavía en la base D1 real**. Falta validar la sintaxis del Worker y las rutas contra D1, agregar pruebas de concurrencia/idempotencia, conectar ambos clientes Android, construir el cierre de turno con entrega local a WhatsApp y cola offline, implementar la pantalla/contadores de SENE PATRÓN y probar todo end-to-end. No se ha desplegado el Worker ni se han modificado las APK.
