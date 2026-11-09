@@ -28,7 +28,7 @@ VENTAS ya expone en `DeviceIdentitySnapshot`:
 
 El servidor debe validar formato, curva P-256 y que la huella corresponda a la clave. `continuityId` solo ayuda a recuperar una instalación; nunca sustituye la firma de posesión ni permite recuperar el acceso por sí solo.
 
-**Cadena exacta firmada:** el servidor devuelve `challenge` como Base64URL sin padding. La APK decodifica esos bytes y firma esos bytes exactos con `SHA256withECDSA`. La firma enviada es Base64 estándar sin saltos. No volver a codificar ni normalizar el reto.
+**Mensaje exacto firmado:** el servidor devuelve `signingMessage` como Base64URL sin padding. La APK decodifica `signingMessage` y firma esos bytes exactos con `DeviceIdentity.signChallenge(context, decodedSigningMessage)`. No debe firmar el campo `challenge` (ese campo es solo el nonce). La firma Android es ECDSA ASN.1 DER codificada en Base64 estándar sin saltos; el Worker la convierte a P1363 antes de verificarla con WebCrypto.
 
 ## 3. Envolvente común
 
@@ -63,12 +63,12 @@ Solicitud:
 ```json
 {"purpose":"PATRON_ACTIVATE","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex","targetMethod":"POST","targetPath":"/v1/patron/activate","bodySha256":"hex del cuerpo exacto que se firmará"}
 ```
-Para sesiones existentes, se omiten los datos de clave/instalación ya registrados, pero se envían `targetMethod`, `targetPath` y `bodySha256`. Valores de `purpose`: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH`, `DEVICE_RECOVERY`.
+Para sesiones existentes, se omiten los datos de clave/instalación ya registrados, pero se envían `targetMethod`, `targetPath` y `bodySha256`. Valores implementados para emisión inicial de reto: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH`. `DEVICE_RECOVERY` queda pendiente de diseño e implementación.
 Respuesta:
 ```json
 {"challengeId":"uuid","challenge":"base64url","signingMessage":"base64url","expiresAt":unix}
 ```
-El servidor genera el nonce y construye `signingMessage` incluyendo purpose, challengeId, nonce, método, ruta, hash del cuerpo y deviceId o fingerprint provisional. El cliente firma exactamente los bytes de `signingMessage` decodificados desde Base64URL. El endpoint de negocio debe recibir exactamente el cuerpo cuyo hash se incluyó en el reto. El servidor no acepta que el cliente elija el nonce ni el vencimiento.
+El servidor genera el nonce y construye `signingMessage` incluyendo purpose, challengeId, nonce, método, ruta, hash del cuerpo y deviceId o fingerprint provisional. El cliente firma exactamente los bytes de `signingMessage` decodificados desde Base64URL; el campo `challenge` contiene el nonce y no se firma directamente. El endpoint de negocio debe recibir exactamente el cuerpo cuyo hash se incluyó en el reto. El servidor no acepta que el cliente elija el nonce ni el vencimiento.
 
 ## 5. Alta y activación inicial
 
