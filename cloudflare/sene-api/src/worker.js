@@ -439,7 +439,8 @@ async function activatePatron(request, env) {
     ]);
 
     if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
-        (results?.[1]?.meta?.changes ?? 0) !== 1) {
+        (results?.[1]?.meta?.changes ?? 0) !== 1 ||
+        (results?.[2]?.meta?.changes ?? 0) !== 1) {
       return json({ error: "ACTIVATION_CODE_INVALID" }, 409);
     }
   } catch {
@@ -507,7 +508,7 @@ async function recoverPatron(request, env) {
     deviceId: newDeviceId,
     slot: "PATRON",
     licenseStatus: recovery.license_status !== "active" || !recovery.expires_at || recovery.expires_at <= now ? "EXPIRED" : "ACTIVE",
-    periodEndsAt: null,
+    periodEndsAt: recovery.expires_at ?? null,
     recovered: true
   }, 201);
 }
