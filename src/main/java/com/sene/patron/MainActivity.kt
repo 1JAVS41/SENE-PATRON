@@ -25,6 +25,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import org.json.JSONObject
 
 class MainActivity : Activity() {
     private val bg = Color.rgb(244, 245, 250)
