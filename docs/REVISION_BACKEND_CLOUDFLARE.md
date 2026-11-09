@@ -98,3 +98,28 @@ Hasta que exista esa migración y el endpoint de reemplazo con pruebas de concur
 - D1 real `sene-licencias`: contiene solamente la migración 0001; 0002 y 0003 siguen pendientes.
 - No se desplegó código nuevo ni se modificó la D1 real.
 - Las APK todavía no están integradas con este backend ni verificadas como entregables online.
+
+
+### Actualización: migración 0004 ensayada y corrección del diagnóstico (2026-11-09)
+
+La migración `0004_device_history_replacements.sql` ya está creada en la rama `sene-cloudflare-backend`. Reconstruye `devices` conservando sus columnas e identidades, activa la postergación de comprobación de claves foráneas durante la migración y sustituye la unicidad global del espacio por un índice único parcial para dispositivos con estado `active`.
+
+Cambios y verificaciones:
+- GitHub Actions run `42707424950`: migración 0004 creada y aplicada en SQLite temporal; **success**.
+- GitHub Actions run `42707434160`: activación PATRÓN ajustada para ignorar filas históricas revocadas al comprobar el espacio 1; **success**.
+- GitHub Actions run `42707459022`: prueba de reemplazo con referencias históricas, inserción del nuevo equipo en el mismo espacio, rechazo de un segundo equipo activo y `PRAGMA foreign_key_check` / `integrity_check`; **success**.
+- La prueba inserta referencias de prueba desde pairing_tokens, challenges, correction_requests/grants, weekly_usage, replacement_requests, audit_log, work_requests, shift_reports y payroll_reports para comprobar que el historial sigue apuntando al dispositivo antiguo.
+- El índice parcial evita dos dispositivos activos en el mismo espacio, pero permite conservar filas revocadas.
+
+Límites que siguen vigentes:
+- La migración 0004 **no se ha aplicado** a la D1 real.
+- El endpoint y la autorización operativa de reemplazo todavía no están implementados. La tabla `replacement_requests` existe, pero no debe confundirse con un flujo funcional.
+- El Worker y las APK todavía no están conectados/desplegados como sistema completo.
+- Las pruebas son de sintaxis y SQLite temporal; no son pruebas E2E en Cloudflare.
+
+### Siguiente trabajo obligatorio antes del despliegue
+1. Diseñar el contrato de solicitud y autorización de reemplazo: la app PATRÓN no puede autorizar por sí sola un teléfono perdido si ya no tiene credenciales válidas; debe existir recuperación autenticada por el operador privado.
+2. Implementar autorización de operador en servidor sin incluir secretos en APK, aprobación de reemplazo de un solo uso y revocación atómica del equipo anterior.
+3. Añadir invalidación de pairing tokens pendientes ligados al PATRÓN sustituido.
+4. Probar carreras/concurrencia, reintentos e idempotencia.
+5. Integrar el contrato con ambas aplicaciones y después preparar despliegue controlado.
