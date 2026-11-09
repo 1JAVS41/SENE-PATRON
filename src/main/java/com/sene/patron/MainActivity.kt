@@ -100,7 +100,7 @@ class MainActivity : Activity() {
 
     private fun isLicenseExpired(): Boolean {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
-        if (prefs.getString("license_status", "") == "expired") return true
+        if (prefs.getString("license_status", "") in setOf("expired", "suspended")) return true
         val expiry = prefs.getLong("period_ends_at", 0L)
         val serverTime = prefs.getLong("server_time", 0L)
         val elapsedAnchor = prefs.getLong("server_time_elapsed", 0L)
