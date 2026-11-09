@@ -694,6 +694,62 @@ async function createOperatorLicense(request, env) {
   }, 201);
 }
 
+async function reissueActivationCode(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(licenseId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const code = makeCode();
+  const codeHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE licenses SET activation_code_hash = ? WHERE id = ? AND status = 'pending' AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM devices WHERE license_id = ? AND slot_number = 1 AND status = 'active')"
+      ).bind(codeHash, licenseId, licenseId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, 'operator', 'operator', 'activation_code_reissued', ?, ? WHERE EXISTS (SELECT 1 FROM licenses WHERE id = ? AND activation_code_hash = ?)"
+      ).bind(crypto.randomUUID(), licenseId, JSON.stringify({ reason: "operator_reissue" }), now, licenseId, codeHash)
+    ]);
+  } catch {
+    return json({ error: "ACTIVATION_CODE_REISSUE_FAILED" }, 503);
+  }
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "LICENSE_NOT_ELIGIBLE_FOR_CODE_REISSUE" }, 409);
+  }
+  return json({ licenseId, activationCode: code, expiresAt: null, note: "Código anterior invalidado. Código nuevo de un solo uso; entrégalo solo tras verificar los pagos." }, 200);
+}
+
+async function reissueRenewalCode(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const code = makeCode();
+  const codeHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE renewal_requests SET code_hash = ?, authorized_at = ?, authorized_by = 'operator' WHERE id = ? AND status = 'authorized' AND EXISTS (SELECT 1 FROM payments WHERE license_id = renewal_requests.license_id AND payment_type = 'MONTHLY_RENT' AND status = 'CONFIRMED' AND idempotency_key = 'renewal:' || renewal_requests.id)"
+      ).bind(codeHash, now, requestId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, 'operator', 'operator', 'renewal_code_reissued', ?, ? FROM renewal_requests WHERE id = ? AND status = 'authorized' AND code_hash = ?"
+      ).bind(crypto.randomUUID(), JSON.stringify({ requestId }), now, requestId, codeHash)
+    ]);
+  } catch {
+    return json({ error: "RENEWAL_CODE_REISSUE_FAILED" }, 503);
+  }
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "RENEWAL_NOT_ELIGIBLE_FOR_CODE_REISSUE" }, 409);
+  }
+  return json({ requestId, authorizationCode: code, expiresAt: null, note: "Código anterior invalidado. Código nuevo de un solo uso." }, 200);
+}
+
 async function confirmInitialPayment(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
   let body;
@@ -1378,8 +1434,10 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/operator/replacements/reject") return decideOperatorReplacement(request, env, "reject");
   if (request.method === "POST" && url.pathname === "/v1/operator/licenses/create") return createOperatorLicense(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/licenses/confirm-initial-payment") return confirmInitialPayment(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/licenses/reissue-activation-code") return reissueActivationCode(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/renewals/pending") return listOperatorRenewals(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/renewals/authorize") return authorizeRenewal(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/renewals/reissue-code") return reissueRenewalCode(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/renewals/cancel") return cancelRenewal(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests") return createWorkRequest(request, env);
