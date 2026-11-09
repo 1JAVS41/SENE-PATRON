@@ -115,6 +115,24 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return deviceSigned("PATRON_REQUEST_DECISION", "/v1/patron/requests/decision", body.toString())
     }
 
+    fun getPayrollSettings(): JSONObject =
+        deviceSigned("PATRON_PAYROLL_SETTINGS_GET", "/v1/patron/payroll/settings/get", "{}")
+
+    fun savePayrollSettings(
+        slot: String,
+        salaryCents: Long,
+        paymentDay: Int?,
+        paymentDates: org.json.JSONArray
+    ): JSONObject {
+        require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
+        val body = JSONObject()
+            .put("slot", slot)
+            .put("salaryCents", salaryCents)
+            .put("paymentDay", paymentDay ?: JSONObject.NULL)
+            .put("paymentDates", paymentDates)
+        return deviceSigned("PATRON_PAYROLL_SETTINGS_SET", "/v1/patron/payroll/settings/set", body.toString())
+    }
+
     fun reportsInbox(slot: String): JSONObject {
         require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
         return deviceSigned("PATRON_REPORTS_INBOX", "/v1/patron/reports/inbox", JSONObject().put("slot", slot).toString())
