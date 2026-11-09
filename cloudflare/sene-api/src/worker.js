@@ -1649,6 +1649,7 @@ async function saveReport(request, env, purpose, table, keyField, keyName) {
     const mexicoDate = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit"
     }).format(new Date());
+    if (key !== mexicoDate) return json({ error: "INVALID_PAYROLL_PERIOD" }, 400);
     const dayOfMonth = Number(mexicoDate.slice(8, 10));
     let paymentDates = [];
     try { paymentDates = JSON.parse(settings.payment_dates_json || "[]"); } catch { return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503); }
