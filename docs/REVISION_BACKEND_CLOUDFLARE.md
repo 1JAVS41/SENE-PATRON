@@ -167,3 +167,12 @@ Limitaciones que siguen abiertas:
 - APKs Android aún no están conectadas a estas rutas.
 
 No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revisión integral y acordar cómo se operará de forma segura sin exponer secretos.
+
+
+## Actualización: sustitución de equipo VENTAS (2026-11-09)
+
+- Worker implementa solicitud firmada por PATRÓN, bandeja privada de operador, aprobación y rechazo.
+- La aprobación revoca el dispositivo anterior, invalida los QR previos de la licencia, libera el mismo espacio y conserva referencias históricas. La vinculación del reemplazo se hace mediante QR nuevo emitido por PATRÓN.
+- Migración `0006_device_replacement_flow.sql` impone una sola solicitud pendiente por equipo y por slot.
+- CI incluye prueba SQLite de duplicados, revocación, invalidación QR y reutilización del slot.
+- Pendiente: recuperación segura de un PATRÓN perdido; interfaz privada de operador; E2E en Cloudflare; migraciones aún no aplicadas a D1 real. No desplegar.
