@@ -405,6 +405,7 @@ async function activatePatron(request, env) {
             AND NOT EXISTS (
               SELECT 1 FROM devices d
                WHERE d.license_id = l.id AND d.slot_number = 1
+                 AND d.status = 'active'
             )`
       ).bind(
         deviceId, identity.installationId, body.continuityId.toLowerCase(),
