@@ -223,6 +223,20 @@ Solo operador autenticado. Revoca dispositivo anterior, invalida sesiones/QR rel
 - Implementar y probar backend antes de cambiar ambas APK o publicar el Worker.
 
 
+## 12-A. Renovación mensual — endpoints implementados en rama (no desplegados)
+
+La rama incorpora una primera implementación del flujo manual de renovación:
+
+- `POST /v1/patron/renewals/request`: PATRÓN autenticado crea o recupera una única solicitud abierta de renovación para su licencia. Permite que el dispositivo PATRÓN solicite la renovación aunque la licencia esté vencida, siempre que el dispositivo siga activo y la licencia no esté suspendida/revocada.
+- `GET /v1/operator/renewals/pending`: consulta privada de solicitudes pendientes. Requiere `Authorization: Bearer <OPERATOR_TOKEN>`; el secreto debe configurarse únicamente como secret del Worker y nunca en APK.
+- `POST /v1/operator/renewals/authorize`: acción privada después de verificar manualmente el pago recibido. Recibe `requestId` y `paymentReference`, registra un pago confirmado de $80 MXN, genera un código de 12 caracteres de un solo uso y devuelve el código una sola vez al operador.
+- `POST /v1/patron/renewals/redeem`: PATRÓN presenta `requestId` y `authorizationCode` mediante challenge y firma del dispositivo. Consume el código ligado a licencia, solicitud y dispositivo, y extiende 30 días desde el mayor valor entre la fecha actual del servidor y el vencimiento anterior.
+- `POST /v1/operator/renewals/cancel`: operador cancela una solicitud pendiente o revoca un código emitido aún no consumido. La cancelación queda auditada.
+
+El código no tiene caducidad temporal automática. Una solicitud abierta evita duplicados por licencia; una renovación cancelada ya no se puede canjear. Las llamadas firmadas de PATRÓN consumen la cuota semanal conforme a la regla general.
+
+**Limitación pendiente:** todavía no existe integración con WhatsApp Business/API ni notificación automática al número oficial. Por ahora el operador tendría que consultar la bandeja privada. Tampoco existe aún una interfaz privada de operador terminada. La API no se ha desplegado y las APK no la llaman.
+
 ## 13. Matriz de implementación verificada (2026-11-09)
 
 | Función | Código Worker en rama | Prueba CI | Producción |
@@ -239,7 +253,7 @@ Solo operador autenticado. Revoca dispositivo anterior, invalida sesiones/QR rel
 | Historial de dispositivos / un activo por slot | Migración 0004 | Prueba de referencias e integridad aprobada | Migración no aplicada |
 | Correcciones de venta | Contrato solamente; falta código | No | No |
 | Recuperación/reemplazo autorizado | Contrato solamente; falta código y migración de solicitud | No | No |
-| Pagos, activación comercial y renovaciones | Parcial/no completo | No E2E | No |
+| Renovación mensual por código manual | Primera implementación en Worker y migración 0005 | Prueba SQL/CI en curso; falta E2E | No |
 | Autenticación robusta de operador | Solo scaffold temporal `ADMIN_TOKEN` | No | No |
 
 ### Infraestructura comprobada en archivos
