@@ -42,6 +42,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0006_device_replacement_flow.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0007_renewal_operator_audit.sql
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
@@ -129,6 +130,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0006_device_replacement_flow.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0007_renewal_operator_audit.sql
           sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('ventas-new', 'license-replace', 'VENTAS', 'install-v2', 'continuity-v2', x'03', 'fingerprint-v2', 2, 'active', 3);"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-replace' AND slot_number=2;")" = "2"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE id='ventas-old' AND status='revoked';")" = "1"
