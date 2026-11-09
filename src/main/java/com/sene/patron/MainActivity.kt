@@ -241,6 +241,104 @@ class MainActivity : Activity() {
             .apply { gravity = Gravity.CENTER })
     }
 
+
+    private fun renderRequestsInbox(root: LinearLayout, team: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val raw = prefs.getString("requests_$team", null)
+        if (raw.isNullOrBlank()) {
+            root.addView(info("BANDEJA DE SOLICITUDES", "Consultando solicitudes pendientes de este equipo…"))
+            return
+        }
+        try {
+            val payload = JSONObject(raw)
+            val items = payload.optJSONArray("items") ?: org.json.JSONArray()
+            if (items.length() == 0) {
+                root.addView(info("SIN SOLICITUDES", "No hay solicitudes registradas para este equipo."))
+                return
+            }
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                val requestId = item.optString("requestId")
+                val type = item.optString("type", "Solicitud")
+                val details = item.optJSONObject("details") ?: JSONObject()
+                val status = item.optString("status", "pending")
+                val requestCard = card()
+                requestCard.addView(kicker(type.replace('_', ' ')))
+                requestCard.addView(text(details.toString(2), 13, ink))
+                requestCard.addView(text("Estado: $status", 11, muted))
+                if (status == "pending") {
+                    gap(requestCard, 7)
+                    val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                    val approve = button("APROBAR", success) { decideTeamRequest(team, requestId, true) }
+                    val reject = button("RECHAZAR", red) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Rechazar solicitud")
+                            .setMessage("¿Confirmas que deseas rechazar esta solicitud?")
+                            .setPositiveButton("RECHAZAR") { _, _ -> decideTeamRequest(team, requestId, false) }
+                            .setNegativeButton("CANCELAR", null)
+                            .show()
+                    }
+                    actions.addView(approve, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginEnd = dp(6) })
+                    actions.addView(reject, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(6) })
+                    requestCard.addView(actions)
+                }
+                root.addView(requestCard)
+                if (index != items.length() - 1) gap(root, 8)
+            }
+        } catch (_: Exception) {
+            root.addView(info("NO SE PUDO LEER LA BANDEJA", "Actualiza la conexión e inténtalo de nuevo."))
+        }
+    }
+
+    private fun refreshTeamRequests(team: String, force: Boolean = false) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
+        if (prefs.getString("device_id", null).isNullOrBlank()) return
+        val now = System.currentTimeMillis()
+        val last = prefs.getLong("requests_updated_$team", 0L)
+        if (!force && (now - last < 30_000L || prefs.getBoolean("requests_refreshing_$team", false))) return
+        prefs.edit().putBoolean("requests_refreshing_$team", true).apply()
+        Thread {
+            try {
+                val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+                val api = SeneApiClient(this, baseUrl)
+                val result = api.requestsInbox(slot, all = true)
+                prefs.edit()
+                    .putString("requests_$team", result.toString())
+                    .putLong("requests_updated_$team", System.currentTimeMillis())
+                    .putBoolean("requests_refreshing_$team", false)
+                    .apply()
+                api.refreshNotifications()
+                runOnUiThread { if (!isFinishing && currentPage == "${team}_requests") render() }
+            } catch (error: Exception) {
+                prefs.edit().putBoolean("requests_refreshing_$team", false).apply()
+                runOnUiThread {
+                    if (!isFinishing) Toast.makeText(this, "No se pudo consultar la bandeja: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun decideTeamRequest(team: String, requestId: String, approve: Boolean) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
+        Thread {
+            try {
+                SeneApiClient(this, baseUrl).decideRequest(requestId, approve)
+                prefs.edit().remove("requests_$team").putLong("requests_updated_$team", 0L).apply()
+                refreshTeamRequests(team, force = true)
+                runOnUiThread {
+                    Toast.makeText(this, if (approve) "Solicitud aprobada" else "Solicitud rechazada", Toast.LENGTH_SHORT).show()
+                    if (!isFinishing) render()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "No se pudo guardar la decisión: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
     private fun showServerConfig() {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val field = EditText(this).apply {
@@ -543,8 +641,10 @@ class MainActivity : Activity() {
         when (section) {
             "schedule" -> root.addView(info("REGISTROS · EQUIPO $teamNumber",
                 "Los horarios y asistencias de este equipo aparecerán aquí, separados por trabajador y fecha."))
-            "requests" -> root.addView(info("BANDEJA DE CORRECCIONES · EQUIPO $teamNumber",
-                "Solo aparecerán solicitudes explícitas del trabajador. Cada solicitud identifica una venta concreta. El patrón puede aceptar o rechazar; una aceptación genera permiso de un solo uso para esa venta."))
+            "requests" -> {
+                renderRequestsInbox(root, teamHome)
+                refreshTeamRequests(teamHome)
+            }
             "security" -> {
                 root.addView(info("ESTADO DEL DISPOSITIVO · EQUIPO $teamNumber",
                     "Los avisos de seguridad, bloqueos e incidencias se mostrarán solo para este equipo."))
