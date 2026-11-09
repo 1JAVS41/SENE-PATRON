@@ -292,7 +292,7 @@ class MainActivity : Activity() {
 
 
     private fun renderCorrectionInbox(root: LinearLayout, team: String) {
-        val raw = getSharedPreferences("sene_patron_server", MODE_PRIVATE).getString("corrections_$team", null)
+        val raw = getSharedPreferences("sene_patron_server", MODE_PRIVATE).getString("requests_$team", null)
         root.addView(kicker("CORRECCIONES DE VENTA"))
         if (raw.isNullOrBlank()) {
             root.addView(info("CORRECCIONES", "Consultando solicitudes de corrección…"))
@@ -300,7 +300,7 @@ class MainActivity : Activity() {
         }
         try {
             val payload = JSONObject(raw)
-            val items = payload.optJSONArray("items") ?: org.json.JSONArray()
+            val items = payload.optJSONArray("corrections") ?: org.json.JSONArray()
             if (items.length() == 0) {
                 root.addView(info("SIN CORRECCIONES", "No hay solicitudes de corrección de venta para este equipo."))
                 return
@@ -333,39 +333,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun refreshTeamCorrections(team: String, force: Boolean = false) {
-        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
-        val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
-        if (prefs.getString("device_id", null).isNullOrBlank()) return
-        val now = System.currentTimeMillis()
-        val last = prefs.getLong("corrections_updated_$team", 0L)
-        if (!force && (now - last < 30_000L || prefs.getBoolean("corrections_refreshing_$team", false))) return
-        prefs.edit().putBoolean("corrections_refreshing_$team", true).apply()
-        Thread {
-            try {
-                val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
-                val result = SeneApiClient(this, baseUrl).correctionInbox(slot, all = true)
-                prefs.edit().putString("corrections_$team", result.toString())
-                    .putLong("corrections_updated_$team", System.currentTimeMillis())
-                    .putBoolean("corrections_refreshing_$team", false).apply()
-                runOnUiThread { if (!isFinishing && currentPage == "${team}_requests") render() }
-            } catch (error: Exception) {
-                prefs.edit().putBoolean("corrections_refreshing_$team", false).apply()
-                runOnUiThread {
-                    if (!isFinishing) Toast.makeText(this, "No se pudieron consultar correcciones: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
-                }
-            }
-        }.start()
-    }
-
     private fun decideTeamCorrection(team: String, requestId: String, approve: Boolean) {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         Thread {
             try {
                 SeneApiClient(this, baseUrl).decideCorrection(requestId, approve)
-                prefs.edit().remove("corrections_$team").putLong("corrections_updated_$team", 0L).apply()
-                refreshTeamCorrections(team, force = true)
+                prefs.edit().remove("requests_$team").putLong("requests_updated_$team", 0L).apply()
+                refreshTeamRequests(team, force = true)
                 runOnUiThread {
                     Toast.makeText(this, if (approve) "Permiso de un uso autorizado" else "Corrección rechazada", Toast.LENGTH_SHORT).show()
                     if (!isFinishing) render()
@@ -733,7 +708,6 @@ class MainActivity : Activity() {
                 renderRequestsInbox(root, teamHome)
                 renderCorrectionInbox(root, teamHome)
                 refreshTeamRequests(teamHome)
-                refreshTeamCorrections(teamHome)
             }
             "security" -> {
                 root.addView(info("ESTADO DEL DISPOSITIVO · EQUIPO $teamNumber",
