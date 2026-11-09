@@ -134,6 +134,8 @@ No entrega ventas, inventario, caja ni gastos.
 
 ## 8. Solicitudes de corrección de venta
 
+**Estado real:** los endpoints de corrección descritos en esta sección son contrato pendiente; no aparecen implementados en el router actual del Worker. No conectar la APK suponiendo que existen.
+
 ### `POST /v1/ventas/corrections`
 Solo VENTAS autenticado. Cuerpo:
 ```json
@@ -175,6 +177,8 @@ Una repetición devuelve `409 GRANT_ALREADY_CONSUMED`. La APK solo habilita una 
 
 ## 9. Sustitución por pérdida
 
+**Estado real:** los endpoints descritos aquí son propuesta, no están implementados. La migración 0004 únicamente permite conservar historial y reutilizar un espacio tras revocar el dispositivo; no ejecuta por sí sola una sustitución autorizada.
+
 ### `POST /v1/patron/devices/{deviceId}/replacement-request`
 PATRÓN autenticado. Cuerpo: `{"reason":"Equipo perdido"}`. Marca solicitud pendiente; no libera el slot todavía.
 
@@ -182,6 +186,8 @@ PATRÓN autenticado. Cuerpo: `{"reason":"Equipo perdido"}`. Marca solicitud pend
 Solo operador autenticado. Revoca dispositivo anterior, invalida sesiones/QR relacionados y libera el mismo slot en una transacción. La siguiente vinculación requiere nuevo QR del PATRÓN. Mantiene el máximo de tres espacios y registra auditoría. Nunca permite al cliente liberar un slot por sí mismo.
 
 ## 10. Estado, cuota y renovaciones
+
+**Estado real:** la cuota atómica de 20 operaciones por semana y dispositivo sí está implementada y probada en SQLite temporal. La gestión privada de pagos/renovaciones, suspensión y revocación operativa todavía no está completa. No se debe tratar este contrato como API desplegada.
 
 - El backend calcula expiración; la APK no la puede extender.
 - Al vencer: estado `PAST_DUE`; se niegan operaciones remotas. La APK conserva todas sus funciones y datos locales no dependientes de autorización remota.
@@ -215,3 +221,37 @@ Solo operador autenticado. Revoca dispositivo anterior, invalida sesiones/QR rel
 - Definir qué endpoints consumen la cuota semanal y si las consultas de bandeja se agrupan para evitar consumo excesivo.
 - Implementar pruebas automatizadas de concurrencia para cupos QR, decisiones y consumo de grant.
 - Implementar y probar backend antes de cambiar ambas APK o publicar el Worker.
+
+
+## 13. Matriz de implementación verificada (2026-11-09)
+
+| Función | Código Worker en rama | Prueba CI | Producción |
+|---|---|---|---|
+| Health | Implementado | Sintaxis | No desplegado |
+| Emisión y verificación de challenges | Implementado para purposes declarados | Sintaxis/SQLite | No desplegado |
+| Sesión de dispositivo | Implementado | Sintaxis | No desplegado |
+| Activación inicial PATRÓN | Parcial; depende de pago/código cargados por operador | Sintaxis | No desplegado |
+| QR PATRÓN y vinculación VENTAS | Implementado en Worker | Sintaxis | No desplegado |
+| Solicitudes de trabajador y bandeja PATRÓN | Implementado en Worker | Sintaxis/SQLite | No desplegado |
+| Decisiones de solicitudes | Implementado en Worker | Sintaxis/SQLite | No desplegado |
+| Reportes de cierre y nómina | Implementado en Worker | Sintaxis/SQLite | No desplegado |
+| Cuota 20 por semana | Implementado con UPSERT condicional atómico | Prueba 20/21 aprobada | No desplegado |
+| Historial de dispositivos / un activo por slot | Migración 0004 | Prueba de referencias e integridad aprobada | Migración no aplicada |
+| Correcciones de venta | Contrato solamente; falta código | No | No |
+| Recuperación/reemplazo autorizado | Contrato solamente; falta código y migración de solicitud | No | No |
+| Pagos, activación comercial y renovaciones | Parcial/no completo | No E2E | No |
+| Autenticación robusta de operador | Solo scaffold temporal `ADMIN_TOKEN` | No | No |
+
+### Infraestructura comprobada en archivos
+
+El `wrangler.toml` de la rama apunta a:
+- Worker: `sene-licensing-api`
+- Binding: `DB`
+- D1: `sene-licencias`
+- ID D1: `22f73e97-e43e-44f1-870b-58fad88e7028`
+
+Ese ID coincide con el recurso D1 que el usuario creó. Esto solo confirma la configuración versionada; no prueba que el Worker del panel Cloudflare haya sido actualizado ni que las migraciones se hayan aplicado en la D1 real.
+
+### Regla de despliegue
+
+No desplegar ni conectar APK hasta que las filas pendientes de correcciones, recuperación/reemplazo, pagos/renovación y operador tengan implementación, pruebas automatizadas y una verificación E2E controlada. Mantener los datos comerciales en los teléfonos.
