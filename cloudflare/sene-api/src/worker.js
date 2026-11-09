@@ -1385,6 +1385,26 @@ async function deviceSession(request, env) {
     "UPDATE devices SET last_seen_at = ? WHERE id = ? AND status = 'active'"
   ).bind(now, deviceId).run();
 
+  let payroll = null;
+  if (row.device_type === "VENTAS" && [2, 3].includes(Number(row.slot_number))) {
+    const settings = await env.DB.prepare(
+      "SELECT payment_day, payment_dates_json FROM payroll_settings WHERE license_id = ? AND slot_number = ? LIMIT 1"
+    ).bind(row.license_id, Number(row.slot_number)).first();
+    const mexicoDate = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(new Date(now * 1000));
+    let paymentDates = [];
+    try { paymentDates = JSON.parse(settings?.payment_dates_json || "[]"); } catch { paymentDates = []; }
+    const paymentDay = settings?.payment_day === null || settings?.payment_day === undefined
+      ? null : Number(settings.payment_day);
+    const configured = Boolean(settings) && (paymentDay !== null || (Array.isArray(paymentDates) && paymentDates.length > 0));
+    const dueToday = configured && (
+      (paymentDay !== null && paymentDay === Number(mexicoDate.slice(8, 10))) ||
+      (Array.isArray(paymentDates) && paymentDates.includes(mexicoDate))
+    );
+    payroll = { configured, dueToday, mexicoDate, paymentDay, paymentDates: Array.isArray(paymentDates) ? paymentDates : [] };
+  }
+
   return json({
     deviceId,
     role: row.device_type,
@@ -1394,7 +1414,8 @@ async function deviceSession(request, env) {
     serverTime: now,
     periodEndsAt: row.expires_at ?? null,
     linkedVentasCount: Number(row.linked_ventas_count || 0),
-    weeklyQuota: { limit: 20, used, remaining: Math.max(0, 20 - used), weekKey }
+    weeklyQuota: { limit: 20, used, remaining: Math.max(0, 20 - used), weekKey },
+    payroll
   });
 }
 
