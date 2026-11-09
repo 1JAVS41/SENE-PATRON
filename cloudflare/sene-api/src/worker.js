@@ -206,6 +206,7 @@ const CHALLENGE_TARGETS = {
   PATRON_PAIRING_TOKEN: ["POST", "/v1/patron/pairing-tokens"],
   VENTAS_REQUEST: ["POST", "/v1/ventas/requests"],
   PATRON_REQUESTS_INBOX: ["POST", "/v1/patron/requests/inbox"],
+  PATRON_NOTIFICATIONS: ["POST", "/v1/patron/notifications"],
   PATRON_REQUEST_DECISION: ["POST", "/v1/patron/requests/decision"],
   VENTAS_REQUEST_UPDATES: ["POST", "/v1/ventas/requests/updates"],
   VENTAS_SHIFT_REPORT: ["POST", "/v1/ventas/shift-reports"],
@@ -1472,6 +1473,28 @@ async function patronRequestsInbox(request, env) {
   });
 }
 
+async function patronNotifications(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_NOTIFICATIONS");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const rows = await env.DB.prepare(
+    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests w WHERE w.ventas_device_id = d.id AND w.status = 'pending' AND w.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS unseen_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
+  ).bind(ctx.licenseId).all();
+  const pendingByTeam = { VENTAS_1: 0, VENTAS_2: 0 };
+  for (const row of (rows.results || [])) {
+    if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.unseen_count);
+    if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.unseen_count);
+  }
+  return json({ pendingByTeam, serverTime: Math.floor(Date.now() / 1000) });
+}
+
 async function decideWorkRequest(request, env) {
   const checked = await verifyBusinessProof(request, env, "PATRON_REQUEST_DECISION");
   if (checked.response) return checked.response;
@@ -1627,6 +1650,7 @@ async function handle(request, env) {
 
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests") return createWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/inbox") return patronRequestsInbox(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/notifications") return patronNotifications(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/decision") return decideWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests/updates") return ventasRequestUpdates(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/shift-reports") return saveReport(request, env, "VENTAS_SHIFT_REPORT", "shift_reports", "shiftKey", "shift_key");
