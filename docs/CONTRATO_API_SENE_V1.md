@@ -63,7 +63,7 @@ Solicitud:
 ```json
 {"purpose":"PATRON_ACTIVATE","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex","targetMethod":"POST","targetPath":"/v1/patron/activate","bodySha256":"hex del cuerpo exacto que se firmará"}
 ```
-Para sesiones existentes, se envían `deviceId`, `targetMethod`, `targetPath` y `bodySha256`; se omiten los datos de clave/instalación porque el servidor recupera la clave pública registrada. Valores implementados para emisión inicial de reto: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH` y `PATRON_PAIRING_TOKEN`. `DEVICE_RECOVERY` queda pendiente de diseño e implementación.
+Para sesiones existentes, se envían `deviceId`, `targetMethod`, `targetPath` y `bodySha256`; se omiten los datos de clave/instalación porque el servidor recupera la clave pública registrada. Valores implementados para emisión inicial de reto: `PATRON_ACTIVATE`, `VENTAS_PAIR`, `DEVICE_AUTH` y `PATRON_PAIRING_TOKEN`. `PATRON_REPLACEMENT_REQUEST` está implementado para solicitar la sustitución de un dispositivo VENTAS; el alta bootstrap de un PATRÓN perdido sigue pendiente.
 Respuesta:
 ```json
 {"challengeId":"uuid","challenge":"base64url","signingMessage":"base64url","expiresAt":unix}
@@ -187,13 +187,17 @@ Una repetición devuelve `409 GRANT_ALREADY_CONSUMED`. La APK solo habilita una 
 
 ## 9. Sustitución por pérdida
 
-**Estado real:** los endpoints descritos aquí son propuesta, no están implementados. La migración 0004 únicamente permite conservar historial y reutilizar un espacio tras revocar el dispositivo; no ejecuta por sí sola una sustitución autorizada.
+**Estado real:** el flujo de sustitución de equipos VENTAS está implementado en la rama y tiene pruebas CI SQLite. La migración 0004 conserva el historial; la 0006 impide solicitudes pendientes duplicadas. El flujo no está desplegado ni probado E2E.
 
-### `POST /v1/patron/devices/{deviceId}/replacement-request`
-PATRÓN autenticado. Cuerpo: `{"reason":"Equipo perdido"}`. Marca solicitud pendiente; no libera el slot todavía.
+### `POST /v1/patron/devices/replacement-request`
+PATRÓN autenticado. Cuerpo: `{"deviceId":"uuid del equipo VENTAS perdido","reason":"Equipo perdido"}`. Solo admite Equipo 1 o Equipo 2 de la misma licencia. Crea una solicitud pendiente; el equipo anterior sigue activo hasta la decisión privada.
 
-### Operador privado — `POST /v1/admin/replacements/{requestId}/approve`
-Solo operador autenticado. Revoca dispositivo anterior, invalida sesiones/QR relacionados y libera el mismo slot en una transacción. La siguiente vinculación requiere nuevo QR del PATRÓN. Mantiene el máximo de tres espacios y registra auditoría. Nunca permite al cliente liberar un slot por sí mismo.
+### Operador privado
+- `GET /v1/operator/replacements/pending`: lista solicitudes pendientes con empresa, equipo y motivo.
+- `POST /v1/operator/replacements/approve`: cuerpo `{"requestId":"uuid"}`. Revoca el dispositivo perdido, aprueba la solicitud, invalida los QR previos de la licencia y registra auditoría en una operación D1 atómica. El espacio queda libre; el PATRÓN debe generar un QR nuevo y el reemplazo se vincula como VENTAS normal.
+- `POST /v1/operator/replacements/reject`: cuerpo `{"requestId":"uuid"}`. Rechaza la solicitud sin revocar el dispositivo.
+
+La API no permite liberar un espacio desde VENTAS. El reemplazo conserva solicitudes/reportes históricos ligados al ID del equipo revocado. La recuperación de un PATRÓN perdido sigue pendiente porque no existe un segundo dispositivo de administración para autorizarla.
 
 ## 10. Estado, cuota y renovaciones
 
@@ -262,7 +266,8 @@ El código no tiene caducidad temporal automática. Una solicitud abierta evita 
 | Cuota 20 por semana | Implementado con UPSERT condicional atómico | Prueba 20/21 aprobada | No desplegado |
 | Historial de dispositivos / un activo por slot | Migración 0004 | Prueba de referencias e integridad aprobada | Migración no aplicada |
 | Correcciones de venta | Contrato solamente; falta código | No | No |
-| Recuperación/reemplazo autorizado | Contrato solamente; falta código y migración de solicitud | No | No |
+| Reemplazo autorizado de VENTAS | Implementado: solicitud PATRÓN, aprobación/rechazo privada, revocación e invalidación QR | CI SQLite añadido | No desplegado / falta E2E |
+| Recuperación de PATRÓN perdido | Pendiente; requiere recuperación de identidad/bootstrap segura | No | No |
 | Renovación mensual por código manual | Implementada en Worker y migración 0005 | Prueba SQL/CI aprobada; falta E2E | No |
 | Autenticación robusta de operador | Solo scaffold temporal `ADMIN_TOKEN` | No | No |
 
