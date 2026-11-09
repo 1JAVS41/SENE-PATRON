@@ -207,6 +207,8 @@ const CHALLENGE_TARGETS = {
   VENTAS_REQUEST: ["POST", "/v1/ventas/requests"],
   PATRON_REQUESTS_INBOX: ["POST", "/v1/patron/requests/inbox"],
   PATRON_NOTIFICATIONS: ["POST", "/v1/patron/notifications"],
+  PATRON_PAYROLL_SETTINGS_GET: ["POST", "/v1/patron/payroll/settings/get"],
+  PATRON_PAYROLL_SETTINGS_SET: ["POST", "/v1/patron/payroll/settings/set"],
   PATRON_REQUEST_DECISION: ["POST", "/v1/patron/requests/decision"],
   VENTAS_REQUEST_UPDATES: ["POST", "/v1/ventas/requests/updates"],
   VENTAS_SHIFT_REPORT: ["POST", "/v1/ventas/shift-reports"],
@@ -1486,6 +1488,68 @@ async function patronRequestsInbox(request, env) {
   });
 }
 
+async function patronPayrollSettingsGet(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_PAYROLL_SETTINGS_GET");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const rows = await env.DB.prepare(
+    "SELECT slot_number, salary_cents, payment_day, payment_dates_json, updated_at FROM payroll_settings WHERE license_id = ? ORDER BY slot_number"
+  ).bind(ctx.licenseId).all();
+  const settings = { VENTAS_1: null, VENTAS_2: null };
+  for (const row of (rows.results || [])) {
+    settings[row.slot_number === 2 ? "VENTAS_1" : "VENTAS_2"] = {
+      salaryCents: Number(row.salary_cents),
+      paymentDay: row.payment_day === null ? null : Number(row.payment_day),
+      paymentDates: JSON.parse(row.payment_dates_json || "[]"),
+      updatedAt: Number(row.updated_at)
+    };
+  }
+  return json({ settings, serverTime: Math.floor(Date.now() / 1000) });
+}
+
+async function patronPayrollSettingsSet(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_PAYROLL_SETTINGS_SET");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const slot = body.slot === "VENTAS_1" ? 2 : body.slot === "VENTAS_2" ? 3 : null;
+  const salaryCents = body.salaryCents;
+  const paymentDay = body.paymentDay === null || body.paymentDay === undefined ? null : body.paymentDay;
+  const paymentDates = body.paymentDates;
+  if (!slot || !Number.isSafeInteger(salaryCents) || salaryCents < 0 || salaryCents > 1000000000 ||
+      (paymentDay !== null && (!Number.isInteger(paymentDay) || paymentDay < 1 || paymentDay > 31)) ||
+      !Array.isArray(paymentDates) || paymentDates.length > 60 ||
+      paymentDates.some((date) => typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        !Number.isFinite(Date.parse(date + "T00:00:00Z")))) {
+    return json({ error: "INVALID_PAYROLL_SETTINGS" }, 400);
+  }
+  if (paymentDay === null && paymentDates.length === 0) {
+    return json({ error: "PAYMENT_DATE_REQUIRED" }, 400);
+  }
+  const uniqueDates = [...new Set(paymentDates)].sort();
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO payroll_settings (license_id, slot_number, salary_cents, payment_day, payment_dates_json, updated_at, updated_by_device_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(license_id, slot_number) DO UPDATE SET salary_cents=excluded.salary_cents, payment_day=excluded.payment_day, payment_dates_json=excluded.payment_dates_json, updated_at=excluded.updated_at, updated_by_device_id=excluded.updated_by_device_id"
+  ).bind(ctx.licenseId, slot, salaryCents, paymentDay, JSON.stringify(uniqueDates), now, ctx.deviceId).run();
+  return json({
+    slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
+    salaryCents,
+    paymentDay,
+    paymentDates: uniqueDates,
+    updatedAt: now
+  });
+}
+
 async function patronNotifications(request, env) {
   const checked = await verifyBusinessProof(request, env, "PATRON_NOTIFICATIONS");
   if (checked.response) return checked.response;
@@ -1663,6 +1727,8 @@ async function handle(request, env) {
 
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests") return createWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/inbox") return patronRequestsInbox(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/payroll/settings/get") return patronPayrollSettingsGet(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/payroll/settings/set") return patronPayrollSettingsSet(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/notifications") return patronNotifications(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/decision") return decideWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests/updates") return ventasRequestUpdates(request, env);
