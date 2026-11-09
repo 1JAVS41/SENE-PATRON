@@ -330,7 +330,7 @@ class MainActivity : Activity() {
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
         val salary = EditText(this).apply {
-            hint = "Sueldo base mensual en pesos"
+            hint = "Sueldo base por periodo en pesos"
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
         }
         val day = EditText(this).apply {
@@ -441,7 +441,7 @@ class MainActivity : Activity() {
                 payrollCard.addView(text("Trabajador: " + payrollData.optString("worker", "Sin nombre"), 12, muted))
                 payrollCard.addView(text("Solicitudes incluidas: ${requests.length()} · Aprobadas: $approvedCount", 12, muted))
                 if (salaryCents > 0L) {
-                    payrollCard.addView(text("Sueldo base: " + String.format(java.util.Locale.US, "$%.2f MXN", salaryCents / 100.0), 13, ink, true))
+                    payrollCard.addView(text("Sueldo base del periodo: " + String.format(java.util.Locale.US, "$%.2f MXN", salaryCents / 100.0), 13, ink, true))
                     payrollCard.addView(text("Descuentos autorizados: " + String.format(java.util.Locale.US, "$%.2f MXN", authorizedDeductions / 100.0), 13, muted))
                     payrollCard.addView(text("Pago estimado: " + String.format(java.util.Locale.US, "$%.2f MXN", netCents / 100.0), 16, success, true))
                 } else {
