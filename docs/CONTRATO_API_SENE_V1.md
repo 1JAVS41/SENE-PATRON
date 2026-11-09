@@ -88,7 +88,9 @@ Cuerpo:
 ```json
 {"activationCode":"código","installationId":"uuid","continuityId":"hex","publicKeyBase64":"...","fingerprint":"hex"}
 ```
-Condiciones: código válido/no revocado/no usado; reto vigente de propósito `PATRON_ACTIVATE`; firma válida; pago de instalación confirmado; no hay PATRON vinculado. El código se consume en la misma transacción que registra el PATRÓN. No inicia los 30 días hasta confirmar la primera renta mensual y completar el alta comercial según la política de pagos. Respuesta:
+Condiciones: código válido/no revocado/no usado; reto vigente de propósito `PATRON_ACTIVATE`; firma válida; pago de instalación confirmado; no hay PATRON vinculado. El código se consume en la misma transacción que registra el PATRÓN. No inicia los 30 días hasta confirmar la primera renta mensual y completar el alta comercial según la política de pagos.
+
+**Implementación en Worker (parcial):** el handler verifica firma, identidad, hash del código y `setup_paid_at`; inserta el slot PATRON y consume el código en un `DB.batch`. La licencia queda `pending` y la respuesta `PENDING_PAYMENT`. La confirmación privada del pago de instalación y la primera renta todavía deben implementarse; por ello este endpoint no puede completar una activación comercial hasta que el flujo privado registre `setup_paid_at`. Respuesta:
 ```json
 {"deviceId":"uuid","slot":"PATRON","licenseStatus":"PENDING_PAYMENT","periodEndsAt":null}
 ```
