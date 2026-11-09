@@ -67,7 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..5}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-renew', 'ABARROTES TERE', 'expired', 3, 1, 100);"
@@ -90,7 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..5}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, label, business_name, status, max_devices, activation_code_hash, created_at) VALUES ('license-initial', 'TIENDA TEST', 'TIENDA TEST', 'pending', 3, 'activation-hash', 100);"
@@ -126,6 +126,7 @@ jobs:
           sqlite3 "$DB_FILE" "INSERT INTO payroll_reports (id, license_id, ventas_device_id, period_key, report_json, created_at) VALUES ('payroll-old', 'license-replace', 'ventas-old', 'period-1', '{}', 2);"
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0006_device_replacement_flow.sql
           sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('ventas-new', 'license-replace', 'VENTAS', 'install-v2', 'continuity-v2', x'03', 'fingerprint-v2', 2, 'active', 3);"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-replace' AND slot_number=2;")" = "2"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE id='ventas-old' AND status='revoked';")" = "1"
@@ -138,3 +139,29 @@ jobs:
             echo "ERROR: se permitió un segundo dispositivo activo en el mismo espacio"
             exit 1
           fi
+
+      - name: Probar autorización de reemplazo y liberación segura del espacio
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-recovery', 'TIENDA RECOVERY', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-recovery', 'license-recovery', 'PATRON', 'ip', 'cp', x'01', 'fp', 1, 'active', 1), ('ventas-lost', 'license-recovery', 'VENTAS', 'iv', 'cv', x'02', 'fv', 2, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at) VALUES ('pair-old', 'license-recovery', 'patron-recovery', 2, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO replacement_requests (id, license_id, old_device_id, slot_number, reason, status, created_at) VALUES ('replacement-1', 'license-recovery', 'ventas-lost', 2, 'Equipo perdido', 'pending', 2);"
+          if sqlite3 "$DB_FILE" "INSERT INTO replacement_requests (id, license_id, old_device_id, slot_number, reason, status, created_at) VALUES ('replacement-duplicate', 'license-recovery', 'ventas-lost', 2, 'Duplicada', 'pending', 3);" 2>/dev/null; then
+            echo "ERROR: se permitió una solicitud pendiente duplicada"
+            exit 1
+          fi
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='ventas-lost' AND status='active';"
+          sqlite3 "$DB_FILE" "UPDATE replacement_requests SET status='approved', decided_at=10, decided_by='operator' WHERE id='replacement-1' AND status='pending' AND EXISTS (SELECT 1 FROM devices WHERE id='ventas-lost' AND status='revoked');"
+          sqlite3 "$DB_FILE" "UPDATE pairing_tokens SET revoked_at=10 WHERE license_id='license-recovery' AND revoked_at IS NULL;"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('ventas-replacement', 'license-recovery', 'VENTAS', 'iv2', 'cv2', x'03', 'fv2', 2, 'active', 11);"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='ventas-lost';")" = "revoked"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM replacement_requests WHERE id='replacement-1';")" = "approved"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='ventas-replacement';")" = "active"
+          test "$(sqlite3 "$DB_FILE" "SELECT revoked_at FROM pairing_tokens WHERE token_hash='pair-old';")" = "10"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
