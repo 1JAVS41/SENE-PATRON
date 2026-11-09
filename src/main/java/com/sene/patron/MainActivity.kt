@@ -722,8 +722,8 @@ class MainActivity : Activity() {
         val team = if (destination.startsWith("team1_")) "team1" else "team2"
         val section = destination.substringAfter("_")
         val count = pendingAlertCount(team, section)
-        addView(horizontal(title, if (count > 0) "● $count NUEVA(S)" else "›", ink,
-            if (count > 0) Color.rgb(210, 20, 35) else red))
+        addView(horizontal(title, when { count > 0 -> "● $count NUEVA(S)"; count == 0 -> "›"; else -> "SIN CONEXIÓN" }, ink,
+            when { count > 0 -> success; count == 0 -> red; else -> muted }))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
