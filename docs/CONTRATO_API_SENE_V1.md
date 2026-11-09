@@ -272,3 +272,6 @@ No desplegar ni conectar APK hasta que las filas pendientes de correcciones, rec
 - `POST /v1/operator/licenses/reissue-activation-code`: cuerpo `{"licenseId":"uuid"}`. Solo permite reemitir si alta y primera renta están confirmadas, la licencia sigue pendiente y no existe PATRÓN activo. Invalida el hash anterior y devuelve el código nuevo una sola vez.
 - `POST /v1/operator/renewals/reissue-code`: cuerpo `{"requestId":"uuid"}`. Solo permite rotar el código de una renovación autorizada con pago mensual confirmado. Invalida el código anterior y devuelve el nuevo una sola vez.
 - Ningún código se almacena en texto claro. Ambas acciones requieren autenticación privada de operador y quedan auditadas. No hay recuperación del código antiguo; se emite uno nuevo.
+
+
+**Contador independiente por equipo:** la respuesta de `POST /v1/patron/requests/inbox` incluye `pendingByTeam` con `VENTAS_1` y `VENTAS_2`. Cada número suma solicitudes operativas pendientes y correcciones de venta pendientes del dispositivo activo en ese slot. Cero se representa sin notificación (botón rojo); uno o más muestra botón verde con el número exacto. Consultar o atender una solicitud actualiza el conteo sin mezclar historiales de equipos.
