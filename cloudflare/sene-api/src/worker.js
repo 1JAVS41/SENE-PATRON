@@ -820,7 +820,9 @@ async function authorizeRenewal(request, env) {
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
   const paymentId = crypto.randomUUID();
-  const result = await env.DB.batch([
+  let result;
+  try {
+    result = await env.DB.batch([
     env.DB.prepare(
       "UPDATE renewal_requests SET status = 'authorized', code_hash = ?, authorized_at = ?, authorized_by = 'operator', payment_reference = ? WHERE id = ? AND status = 'pending_payment'"
     ).bind(codeHash, now, reference, requestId),
@@ -830,8 +832,13 @@ async function authorizeRenewal(request, env) {
     env.DB.prepare(
       "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, 'operator', 'operator', 'renewal_authorized', ?, ? WHERE EXISTS (SELECT 1 FROM renewal_requests WHERE id = ? AND status = 'authorized' AND code_hash = ?)"
     ).bind(crypto.randomUUID(), row.license_id, JSON.stringify({ requestId, paymentReference: reference }), now, requestId, codeHash)
-  ]);
-  if ((result?.[0]?.meta?.changes ?? 0) !== 1 || (result?.[1]?.meta?.changes ?? 0) !== 1) {
+    ]);
+  } catch {
+    return json({ error: "RENEWAL_AUTHORIZATION_CONFLICT" }, 409);
+  }
+  if ((result?.[0]?.meta?.changes ?? 0) !== 1 ||
+      (result?.[1]?.meta?.changes ?? 0) !== 1 ||
+      (result?.[2]?.meta?.changes ?? 0) !== 1) {
     return json({ error: "RENEWAL_AUTHORIZATION_CONFLICT" }, 409);
   }
   return json({ requestId, authorizationCode: code, expiresAt: null, note: "Código de un solo uso, sin caducidad temporal. Entrégalo al cliente únicamente después de verificar el pago recibido." }, 201);
