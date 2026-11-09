@@ -128,9 +128,9 @@ El segundo equipo ocupará `VENTAS_2`. No hay tercer equipo VENTAS.
 ### `POST /v1/device/session`
 Dispositivo registrado solicita un reto `DEVICE_AUTH` indicando su `deviceId`, firma el `signingMessage` para el cuerpo `{}` y envía `X-SENE-Device`, `X-SENE-Challenge` y `X-SENE-Signature` en cabeceras. El Worker ya valida la firma, el hash exacto del cuerpo, método/ruta, vigencia y consumo único del reto en este endpoint. Devuelve:
 ```json
-{"deviceId":"uuid","role":"VENTAS","slot":"VENTAS_1","licenseStatus":"ACTIVE","serverTime":unix,"periodEndsAt":unix,"weeklyQuota":{"limit":20,"used":3,"remaining":17,"weekKey":"YYYY-WW"}}
+{"deviceId":"uuid","role":"VENTAS","slot":"VENTAS_1","licenseStatus":"ACTIVE","serverTime":unix,"periodEndsAt":unix,"weeklyQuota":{"limit":20,"used":3,"remaining":17,"weekKey":"YYYY-WW"},"payroll":{"configured":true,"dueToday":false,"mexicoDate":"YYYY-MM-DD","paymentDay":15,"paymentDates":[]}}
 ```
-No entrega ventas, inventario, caja ni gastos.
+El campo `payroll` solo se devuelve para VENTAS y permite que la APK habilite el envío de nómina únicamente cuando el servidor confirma que es fecha de pago. Para PATRÓN es `null`. No entrega ventas, inventario, caja ni gastos.
 
 ## 8. Solicitudes de corrección de venta
 
@@ -153,6 +153,11 @@ Solo PATRÓN autenticado. Cuerpo `{"requestId":"uuid","decision":"approve"}` o `
 Solo el dispositivo VENTAS de la solicitud. Cuerpo `{"requestId":"uuid","grantId":"uuid","saleId":"id"}`. Verifica licencia vigente, dispositivo, venta y permiso aprobado no consumido; marca grant y solicitud consumidos en batch. Una repetición devuelve conflicto. La APK solo habilita una corrección tras respuesta positiva.
 
 
+## 8-A. Consulta de dispositivos vinculados
+
+### `POST /v1/patron/devices/list`
+PATRÓN autenticado, propósito `PATRON_DEVICES_LIST`, cuerpo `{}`. Devuelve únicamente los dispositivos VENTAS activos de la licencia del PATRÓN: identificador, slot, fecha de alta y última conexión. No expone claves públicas ni huellas. Se utiliza para que el titular pueda solicitar la sustitución del equipo correcto.
+
 ## 9. Sustitución por pérdida
 
 **Estado real:** el flujo de sustitución de equipos VENTAS está implementado en la rama y tiene pruebas CI SQLite. La migración 0004 conserva el historial; la 0006 impide solicitudes pendientes duplicadas. El flujo no está desplegado ni probado E2E.
@@ -165,7 +170,7 @@ PATRÓN autenticado. Cuerpo: `{"deviceId":"uuid del equipo VENTAS perdido","reas
 - `POST /v1/operator/replacements/approve`: cuerpo `{"requestId":"uuid"}`. Revoca el dispositivo perdido, aprueba la solicitud, invalida los QR previos de la licencia y registra auditoría en una operación D1 atómica. El espacio queda libre; el PATRÓN debe generar un QR nuevo y el reemplazo se vincula como VENTAS normal.
 - `POST /v1/operator/replacements/reject`: cuerpo `{"requestId":"uuid"}`. Rechaza la solicitud sin revocar el dispositivo.
 
-La API no permite liberar un espacio desde VENTAS. El reemplazo conserva solicitudes/reportes históricos ligados al ID del equipo revocado. La recuperación de un PATRÓN perdido sigue pendiente porque no existe un segundo dispositivo de administración para autorizarla.
+La API no permite liberar un espacio desde VENTAS. El reemplazo conserva solicitudes/reportes históricos ligados al ID del equipo revocado. La recuperación segura de PATRÓN perdido está implementada mediante código privado de un solo uso, firma bootstrap y reemplazo atómico del dispositivo anterior; falta la prueba E2E en Cloudflare.
 
 ## 10. Estado, cuota y renovaciones
 
