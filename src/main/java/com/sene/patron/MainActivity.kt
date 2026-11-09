@@ -479,7 +479,7 @@ class MainActivity : Activity() {
                         Toast.makeText(this, "Captura un importe válido para el descuento", Toast.LENGTH_LONG).show()
                         return@setPositiveButton
                     }
-                    decision.put("amountCents", (pesos * 100.0).toLong())
+                    decision.put("amountCents", Math.round(pesos * 100.0))
                 }
                 details.put("deduction", decision)
                 decideTeamRequest(team, requestId, true, details)
