@@ -184,6 +184,29 @@ async function verifySignedRequest(request, env, expectedPurpose) {
     return { ok: false, status: 409, error: "CHALLENGE_ALREADY_USED" };
   }
 
+  // Count every authenticated remote business operation once per device and
+  // Mexico City ISO week. Session checks and bootstrap registration are free.
+  // The conditional UPSERT is atomic, so concurrent requests cannot exceed 20.
+  if (challenge.device_id && challenge.purpose !== "DEVICE_AUTH") {
+    const weekKey = mexicoCityIsoWeek(now);
+    let quota;
+    try {
+      quota = await env.DB.prepare(
+        `INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at)
+         VALUES (?, ?, ?, 1, ?)
+         ON CONFLICT(device_id, week_key) DO UPDATE
+           SET used = weekly_usage.used + 1, updated_at = excluded.updated_at
+         WHERE weekly_usage.used < 20
+         RETURNING used`
+      ).bind(crypto.randomUUID(), challenge.device_id, weekKey, now).first();
+    } catch {
+      return { ok: false, status: 503, error: "QUOTA_CHECK_UNAVAILABLE" };
+    }
+    if (!quota) {
+      return { ok: false, status: 429, error: "WEEKLY_QUOTA_EXCEEDED" };
+    }
+  }
+
   return { ok: true, bodyBytes, bodyText: new TextDecoder().decode(bodyBytes), challenge };
 }
 
