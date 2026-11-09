@@ -18,8 +18,8 @@ class MainActivity : Activity() {
     private val bg = Color.rgb(244, 245, 250)
     private val ink = Color.rgb(23, 33, 61)
     private val muted = Color.rgb(111, 121, 145)
-    private val red = Color.rgb(190, 35, 48)
-    private val redDark = Color.rgb(111, 13, 29)
+    private val red = Color.rgb(24, 119, 190)
+    private val redDark = Color.rgb(16, 91, 151)
     private val white = Color.WHITE
     private var currentPage = "home"
 
@@ -72,7 +72,7 @@ class MainActivity : Activity() {
         summary.addView(kicker("ESTADO DE TU LICENCIA"))
         summary.addView(horizontal("SENE PATRÓN", "EQUIPO PRINCIPAL", ink, red))
         gap(summary, 9)
-        summary.addView(View(this).apply { setBackgroundColor(Color.rgb(235, 226, 229)) },
+        summary.addView(View(this).apply { setBackgroundColor(Color.rgb(220, 235, 244)) },
             LinearLayout.LayoutParams(-1, dp(1)))
         gap(summary, 9)
         summary.addView(horizontal("Dispositivos SENE VENTAS", "0 de 2 vinculados", ink, red))
@@ -82,7 +82,7 @@ class MainActivity : Activity() {
 
         val status = card()
         status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
-        status.addView(text("La interfaz está lista para revisión. La conexión con Firebase aún está pendiente; por ahora no se autorizan equipos ni se modifican datos reales.", 12, muted))
+        status.addView(text("La interfaz está lista para revisión. La conexión segura con el servidor SENE aún está pendiente; por ahora no se autorizan equipos ni se modifican datos reales.", 12, muted))
         root.addView(status)
         gap(root, 16)
         root.addView(text("Toca el logotipo para abrir el menú de administración.", 12, muted)
@@ -157,7 +157,7 @@ class MainActivity : Activity() {
         }
         gap(root, 12)
         root.addView(info("MODO DE PREPARACIÓN",
-            "Esta versión muestra la interfaz y navegación. Todavía no realiza cambios en Firebase ni autoriza dispositivos."))
+            "Esta versión muestra la interfaz y navegación. Todavía no se conecta al servidor SENE ni autoriza dispositivos."))
         gap(root, 12)
         root.addView(primaryButton("VOLVER AL MENÚ") { currentPage = "menu"; render() })
     }
@@ -168,12 +168,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(13), dp(14), dp(13))
             background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(72, 12, 27), Color.rgb(157, 25, 43), Color.rgb(91, 13, 29)))
+                intArrayOf(Color.rgb(15, 76, 137), Color.rgb(18, 137, 164), Color.rgb(17, 91, 148)))
                 .apply { cornerRadius = dp(21).toFloat() }
             elevation = dp(4).toFloat()
         }
         val logoButton = FrameLayout(this).apply {
-            background = rounded(Color.rgb(120, 18, 35), 15, Color.rgb(218, 92, 105))
+            background = rounded(Color.rgb(20, 102, 158), 15, Color.rgb(78, 190, 165))
             setPadding(dp(4), dp(4), dp(4), dp(4))
             isClickable = true
             isFocusable = true
@@ -184,9 +184,9 @@ class MainActivity : Activity() {
             }
         }
         val logo = ImageView(this).apply {
-            setImageBitmap(redLogo())
+            setImageBitmap(originalLogo())
             scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "Logotipo SENE PATRÓN rojo. Tocar para abrir el menú."
+            contentDescription = "Logotipo original SENE azul y verde. Tocar para abrir el menú."
         }
         logoButton.addView(logo, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         top.addView(logoButton, LinearLayout.LayoutParams(dp(60), dp(60)))
@@ -196,7 +196,7 @@ class MainActivity : Activity() {
             setPadding(dp(12), 0, 0, 0)
         }
         brand.addView(text("SENE / PATRÓN", 19, white, true).apply { letterSpacing = .04f })
-        brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(255, 210, 215), true).apply { letterSpacing = .12f })
+        brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(203, 239, 235), true).apply { letterSpacing = .12f })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(top, LinearLayout.LayoutParams(-1, -2))
         root.addView(View(this).apply { background = rounded(red, 3) },
@@ -205,26 +205,9 @@ class MainActivity : Activity() {
         root.addView(text("Todo bajo control.", 13, muted).apply { setPadding(0, 0, 0, dp(13)) })
     }
 
-    // Conserva el diseño original del logotipo y transforma sus colores azul/verde a rojo.
-    private fun redLogo(): Bitmap {
-        val source = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.logo_sene_pv)
-        val result = source.copy(Bitmap.Config.ARGB_8888, true)
-        for (y in 0 until result.height) {
-            for (x in 0 until result.width) {
-                val pixel = result.getPixel(x, y)
-                val a = Color.alpha(pixel)
-                val r = Color.red(pixel)
-                val g = Color.green(pixel)
-                val b = Color.blue(pixel)
-                if (a > 0 && maxOf(r, g, b) - minOf(r, g, b) > 28) {
-                    val luminance = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
-                    val redValue = (82 + luminance * 0.66).toInt().coerceIn(0, 255)
-                    result.setPixel(x, y, Color.argb(a, redValue, 8, 22))
-                }
-            }
-        }
-        return result
-    }
+    // Muestra el logotipo original sin recolorear para conservar la identidad azul/verde de SENE.
+    private fun originalLogo(): Bitmap =
+        android.graphics.BitmapFactory.decodeResource(resources, R.drawable.logo_sene_pv)
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -279,7 +262,7 @@ class MainActivity : Activity() {
         setTextColor(white)
         setPadding(dp(16), dp(15), dp(16), dp(15))
         background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.rgb(190, 35, 48), Color.rgb(116, 15, 31)))
+            intArrayOf(Color.rgb(24, 119, 190), Color.rgb(18, 151, 133)))
             .apply { cornerRadius = dp(14).toFloat() }
         elevation = dp(3).toFloat()
         isClickable = true
