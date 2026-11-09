@@ -187,3 +187,18 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT consumed_at FROM correction_grants WHERE id='grant-1';")" = "4"
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Impedir consumo del código si falta confirmar la primera renta
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, activation_code_hash, created_at, setup_paid_at) VALUES ('license-unpaid-rent', 'TIENDA PENDIENTE', 'pending', 3, 'activation-hash', 1, 2);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT 'patron-blocked', l.id, 'PATRON', 'install', 'continuity', x'01', 'fingerprint', 1, 'active', 3 FROM licenses l WHERE l.activation_code_hash='activation-hash' AND l.setup_paid_at IS NOT NULL AND l.first_rent_paid_at IS NOT NULL AND l.status='pending';"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE id='patron-blocked';")" = "0"
+          test "$(sqlite3 "$DB_FILE" "SELECT activation_code_hash FROM licenses WHERE id='license-unpaid-rent';")" = "activation-hash"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM licenses WHERE id='license-unpaid-rent';")" = "pending"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
