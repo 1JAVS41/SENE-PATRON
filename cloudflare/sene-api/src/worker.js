@@ -207,6 +207,7 @@ const CHALLENGE_TARGETS = {
   VENTAS_REQUEST: ["POST", "/v1/ventas/requests"],
   PATRON_REQUESTS_INBOX: ["POST", "/v1/patron/requests/inbox"],
   PATRON_NOTIFICATIONS: ["POST", "/v1/patron/notifications"],
+  PATRON_DEVICES_LIST: ["POST", "/v1/patron/devices/list"],
   PATRON_PAYROLL_SETTINGS_GET: ["POST", "/v1/patron/payroll/settings/get"],
   PATRON_PAYROLL_SETTINGS_SET: ["POST", "/v1/patron/payroll/settings/set"],
   PATRON_REQUEST_DECISION: ["POST", "/v1/patron/requests/decision"],
@@ -1063,6 +1064,31 @@ async function redeemRenewal(request, env) {
 }
 
 
+async function patronDevicesList(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_DEVICES_LIST");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const rows = await env.DB.prepare(
+    "SELECT id, slot_number, fingerprint, created_at, last_seen_at FROM devices WHERE license_id = ? AND device_type = 'VENTAS' AND status = 'active' ORDER BY slot_number"
+  ).bind(ctx.licenseId).all();
+  return json({
+    items: (rows.results || []).map((row) => ({
+      deviceId: row.id,
+      slot: row.slot_number === 2 ? "VENTAS_1" : "VENTAS_2",
+      fingerprint: row.fingerprint,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at
+    }))
+  });
+}
+
 async function createReplacementRequest(request, env) {
   const checked = await verifyBusinessProof(request, env, "PATRON_REPLACEMENT_REQUEST");
   if (checked.response) return checked.response;
@@ -1759,6 +1785,7 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/payroll/settings/get") return patronPayrollSettingsGet(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/payroll/settings/set") return patronPayrollSettingsSet(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/notifications") return patronNotifications(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/devices/list") return patronDevicesList(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/decision") return decideWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests/updates") return ventasRequestUpdates(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/shift-reports") return saveReport(request, env, "VENTAS_SHIFT_REPORT", "shift_reports", "shiftKey", "shift_key");
