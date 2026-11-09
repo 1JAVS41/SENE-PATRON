@@ -15,6 +15,7 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.animation.ValueAnimator
@@ -82,7 +83,7 @@ class MainActivity : Activity() {
         scroll.addView(page)
         val licenseStatus = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
             .getString("license_status", "").orEmpty()
-        if (licenseStatus == "expired") {
+        if (isLicenseExpired()) {
             expiredScreen(page)
         } else {
             when (currentPage) {
@@ -95,6 +96,19 @@ class MainActivity : Activity() {
         setContentView(scroll)
         scroll.post { scroll.scrollTo(0, 0) }
         refreshNotificationsFromServer()
+    }
+
+    private fun isLicenseExpired(): Boolean {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        if (prefs.getString("license_status", "") == "expired") return true
+        val expiry = prefs.getLong("period_ends_at", 0L)
+        val serverTime = prefs.getLong("server_time", 0L)
+        val elapsedAnchor = prefs.getLong("server_time_elapsed", 0L)
+        if (expiry <= 0L || serverTime <= 0L || elapsedAnchor <= 0L) return false
+        val elapsedNow = SystemClock.elapsedRealtime()
+        if (elapsedNow < elapsedAnchor) return true
+        val estimatedServerNow = serverTime + (elapsedNow - elapsedAnchor) / 1000L
+        return estimatedServerNow >= expiry
     }
 
     private fun expiredScreen(root: LinearLayout) {
@@ -668,7 +682,7 @@ class MainActivity : Activity() {
             } catch (_: Exception) {
                 runOnUiThread {
                     refreshingNotifications = false
-                    if (!isFinishing && prefs.getString("license_status", "") == "expired") render()
+                    if (!isFinishing) render()
                 }
             }
         }.start()
