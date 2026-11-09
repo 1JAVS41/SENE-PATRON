@@ -371,7 +371,6 @@ class MainActivity : Activity() {
                     .putLong("requests_updated_$team", System.currentTimeMillis())
                     .putBoolean("requests_refreshing_$team", false)
                     .apply()
-                api.refreshNotifications()
                 runOnUiThread { if (!isFinishing && currentPage == "${team}_requests") render() }
             } catch (error: Exception) {
                 prefs.edit().putBoolean("requests_refreshing_$team", false).apply()
