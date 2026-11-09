@@ -336,6 +336,78 @@ function mexicoCityIsoWeek(unixSeconds) {
   return `${year}-${String(week).padStart(2, "0")}`;
 }
 
+async function activatePatron(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_ACTIVATE");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+
+  const activationCode = typeof body.activationCode === "string"
+    ? body.activationCode.trim().toUpperCase() : "";
+  const identity = await validateBootstrapIdentity(body);
+  if (!identity || !/^[A-HJ-NP-Z2-9]{12}$/.test(activationCode) ||
+      identity.installationId !== proof.challenge.installation_id ||
+      identity.fingerprint !== String(proof.challenge.fingerprint).toLowerCase()) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+
+  const codeHash = await sha256(activationCode);
+  const deviceId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+
+  // The insert and one-time code consumption run in one D1 batch transaction.
+  // A unique slot/fingerprint constraint prevents two concurrent activations.
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO devices
+         (id, license_id, device_type, installation_id, continuity_id,
+          public_key, fingerprint, slot_number, status, created_at)
+         SELECT ?, l.id, 'PATRON', ?, ?, ?, ?, 1, 'active', ?
+           FROM licenses l
+          WHERE l.activation_code_hash = ?
+            AND l.setup_paid_at IS NOT NULL
+            AND l.status = 'pending'
+            AND NOT EXISTS (
+              SELECT 1 FROM devices d
+               WHERE d.license_id = l.id AND d.slot_number = 1
+            )`
+      ).bind(
+        deviceId, identity.installationId, body.continuityId.toLowerCase(),
+        identity.publicKey, identity.fingerprint, now, codeHash
+      ),
+      env.DB.prepare(
+        `UPDATE licenses
+            SET activation_code_hash = NULL
+          WHERE activation_code_hash = ?
+            AND setup_paid_at IS NOT NULL
+            AND status = 'pending'
+            AND EXISTS (
+              SELECT 1 FROM devices d
+               WHERE d.id = ? AND d.license_id = licenses.id
+            )`
+      ).bind(codeHash, deviceId)
+    ]);
+
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+        (results?.[1]?.meta?.changes ?? 0) !== 1) {
+      return json({ error: "ACTIVATION_CODE_INVALID" }, 409);
+    }
+  } catch {
+    return json({ error: "ACTIVATION_CONFLICT_OR_DATABASE_ERROR" }, 409);
+  }
+
+  return json({
+    deviceId,
+    slot: "PATRON",
+    licenseStatus: "PENDING_PAYMENT",
+    periodEndsAt: null
+  }, 201);
+}
+
 async function deviceSession(request, env) {
   const proof = await verifySignedRequest(request, env, "DEVICE_AUTH");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -399,7 +471,7 @@ async function handle(request, env) {
     return issueChallenge(request, env);
   }
 
-  if (request.method === "POST" && url.pathname === "/v1/device/session") {
+  if (request.method === "POST" && url.pathname === "/v1/patron/activate") {\n    return activatePatron(request, env);\n  }\n\n  if (request.method === "POST" && url.pathname === "/v1/device/session") {
     return deviceSession(request, env);
   }
 
