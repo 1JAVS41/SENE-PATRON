@@ -2,7 +2,7 @@
 
 ## SENE PATRÓN
 - Se añadió `PatronDeviceIdentity.kt`: identidad P-256 propia, clave privada en Android Keystore, ID de instalación, continuityId y fingerprint.
-- Se añadió `SeneApiClient.kt`: HTTPS obligatorio, challenge firmado y métodos para activar PATRÓN, consultar sesión, emitir QR, consultar solicitudes, decidir solicitudes, consultar reportes, consultar/decidir correcciones, solicitar/canjear renovación y solicitar reemplazo.
+- Se añadió `SeneApiClient.kt`: HTTPS obligatorio, challenge firmado y métodos para activar PATRÓN, consultar sesión, emitir QR, consultar solicitudes, decidir solicitudes, consultar reportes, consultar/decidir correcciones, solicitar/canjear renovación y solicitar reemplazo y recuperar un PATRÓN perdido.
 - Tras activar correctamente, el cliente guarda el deviceId remoto en preferencias locales.
 - Se retiraron el plugin Google Services y las dependencias Firebase que no se utilizaban en este módulo. La integración se prepara para Cloudflare Workers + D1.
 - La interfaz principal todavía no invoca el cliente: faltan la configuración del endpoint HTTPS definitivo, pantallas de activación/vinculación y la conexión de botones/equipos a las respuestas del servidor.
