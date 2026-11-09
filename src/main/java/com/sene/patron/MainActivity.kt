@@ -242,6 +242,68 @@ class MainActivity : Activity() {
     }
 
 
+
+    private fun renderTeamReports(root: LinearLayout, team: String) {
+        val raw = getSharedPreferences("sene_patron_server", MODE_PRIVATE).getString("reports_$team", null)
+        if (raw.isNullOrBlank()) {
+            root.addView(info("REPORTES DEL EQUIPO", "Consultando reportes de cierres de turno y días de pago…"))
+            return
+        }
+        try {
+            val payload = JSONObject(raw)
+            val shifts = payload.optJSONArray("shiftReports") ?: org.json.JSONArray()
+            val payroll = payload.optJSONArray("payrollReports") ?: org.json.JSONArray()
+            root.addView(kicker("CIERRES DE TURNO"))
+            if (shifts.length() == 0) root.addView(info("SIN CIERRES", "Este equipo todavía no ha enviado reportes de cierre de turno."))
+            for (i in 0 until shifts.length()) {
+                val report = shifts.getJSONObject(i)
+                val card = card()
+                card.addView(text("Cierre · " + report.optString("shiftKey"), 15, ink, true))
+                card.addView(text((report.optJSONObject("report") ?: JSONObject()).toString(2), 12, muted))
+                root.addView(card)
+                if (i != shifts.length() - 1) gap(root, 7)
+            }
+            gap(root, 12)
+            root.addView(kicker("DÍAS DE PAGO"))
+            if (payroll.length() == 0) root.addView(info("SIN REPORTES DE NÓMINA", "Este equipo todavía no ha enviado un reporte de día de pago."))
+            for (i in 0 until payroll.length()) {
+                val report = payroll.getJSONObject(i)
+                val card = card()
+                card.addView(text("Nómina · " + report.optString("periodKey"), 15, ink, true))
+                card.addView(text((report.optJSONObject("report") ?: JSONObject()).toString(2), 12, muted))
+                root.addView(card)
+                if (i != payroll.length() - 1) gap(root, 7)
+            }
+        } catch (_: Exception) {
+            root.addView(info("NO SE PUDIERON LEER REPORTES", "Actualiza la conexión e inténtalo de nuevo."))
+        }
+    }
+
+    private fun refreshTeamReports(team: String, force: Boolean = false) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
+        if (prefs.getString("device_id", null).isNullOrBlank()) return
+        val now = System.currentTimeMillis()
+        val last = prefs.getLong("reports_updated_$team", 0L)
+        if (!force && (now - last < 300_000L || prefs.getBoolean("reports_refreshing_$team", false))) return
+        prefs.edit().putBoolean("reports_refreshing_$team", true).apply()
+        Thread {
+            try {
+                val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+                val result = SeneApiClient(this, baseUrl).reportsInbox(slot)
+                prefs.edit().putString("reports_$team", result.toString())
+                    .putLong("reports_updated_$team", System.currentTimeMillis())
+                    .putBoolean("reports_refreshing_$team", false).apply()
+                runOnUiThread { if (!isFinishing && currentPage == "${team}_schedule") render() }
+            } catch (error: Exception) {
+                prefs.edit().putBoolean("reports_refreshing_$team", false).apply()
+                runOnUiThread {
+                    if (!isFinishing) Toast.makeText(this, "No se pudieron consultar reportes: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
     private fun renderRequestsInbox(root: LinearLayout, team: String) {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val raw = prefs.getString("requests_$team", null)
@@ -701,8 +763,10 @@ class MainActivity : Activity() {
         root.addView(notificationCard(teamNumber))
         gap(root, 11)
         when (section) {
-            "schedule" -> root.addView(info("REGISTROS · EQUIPO $teamNumber",
-                "Los horarios y asistencias de este equipo aparecerán aquí, separados por trabajador y fecha."))
+            "schedule" -> {
+                renderTeamReports(root, teamHome)
+                refreshTeamReports(teamHome)
+            }
             "requests" -> {
                 renderRequestsInbox(root, teamHome)
                 renderCorrectionInbox(root, teamHome)
@@ -720,7 +784,7 @@ class MainActivity : Activity() {
         }
         gap(root, 11)
         root.addView(info("FUNCIONAMIENTO LOCAL Y SERVIDOR SENE",
-            "SENE VENTAS conserva localmente ventas, inventario, caja, gastos y administración; los reportes se envían por WhatsApp. El servidor SENE se reserva para solicitudes de corrección y la respuesta del patrón. No se sincronizan ventas ni inventarios."))
+            "SENE VENTAS conserva localmente ventas, inventario, caja y gastos. Los cierres de turno se envían al servidor y al WhatsApp configurado; los reportes de día de pago se envían al servidor para el cálculo del patrón. No se sincronizan ventas ni inventarios."))
         gap(root, 12)
         root.addView(primaryButton("VOLVER A EQUIPO $teamNumber") { currentPage = teamHome; render() })
     }
