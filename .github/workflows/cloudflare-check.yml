@@ -41,6 +41,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0006_device_replacement_flow.sql
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
@@ -53,6 +54,7 @@ jobs:
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
           sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
+          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0006_device_replacement_flow.sql
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-test', 'active', 3, 1, 9999999999);"
           sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('device-test', 'license-test', 'VENTAS', 'install-test', 'continuity-test', x'00', 'fingerprint-test', 2, 'active', 1);"
           for expected in $(seq 1 20); do
