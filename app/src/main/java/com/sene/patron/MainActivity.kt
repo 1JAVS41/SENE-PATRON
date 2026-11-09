@@ -32,6 +32,8 @@ class MainActivity : Activity() {
     private var currentPage = "home"
     private var team1StatusButton: TextView? = null
     private var team2StatusButton: TextView? = null
+    private var linkedDevicesText: TextView? = null
+    private var homeLicenseText: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,15 +88,20 @@ class MainActivity : Activity() {
         summary.addView(View(this).apply { setBackgroundColor(Color.rgb(220, 235, 244)) },
             LinearLayout.LayoutParams(-1, dp(1)))
         gap(summary, 9)
-        summary.addView(horizontal("Dispositivos SENE VENTAS", "0 de 2 vinculados", ink, red))
+        val linkedLine = horizontal("Dispositivos SENE VENTAS", "Sin consultar", ink, red)
+        linkedDevicesText = linkedLine.getChildAt(1) as TextView
+        summary.addView(linkedLine)
         summary.addView(text("La licencia contempla 1 equipo SENE PATRÓN y hasta 2 equipos SENE VENTAS.", 13, muted))
         root.addView(summary)
         gap(root, 12)
 
         val status = card()
-        status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
-        status.addView(text("La interfaz está lista para revisión. La conexión segura con el servidor SENE aún está pendiente; por ahora no se autorizan equipos ni se modifican datos reales.", 12, muted))
+        val statusLine = horizontal("Administración", "SIN CONSULTAR", ink, red)
+        homeLicenseText = statusLine.getChildAt(1) as TextView
+        status.addView(statusLine)
+        status.addView(text("El estado se consulta directamente con el servidor SENE. Las operaciones remotas requieren conexión y licencia vigente.", 12, muted))
         root.addView(status)
+        refreshHomeStatus()
         gap(root, 12)
         root.addView(primaryButton("CONECTAR / ACTIVAR LICENCIA") { currentPage = "connection"; render() })
         gap(root, 16)
@@ -103,6 +110,33 @@ class MainActivity : Activity() {
         gap(root, 10)
         root.addView(text("SENE PATRÓN  ·  Versión 0.5.0", 11, muted)
             .apply { gravity = Gravity.CENTER })
+    }
+
+    private fun refreshHomeStatus() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val base = prefs.getString("server_base_url", null)
+        val device = prefs.getString("device_id", null)
+        if (base.isNullOrBlank() || device.isNullOrBlank()) {
+            linkedDevicesText?.text = "No activado"
+            homeLicenseText?.text = "PENDIENTE DE ACTIVACIÓN"
+            return
+        }
+        Thread {
+            try {
+                val state = SenePatronApiClient(this, base).session(device)
+                val count = state.optInt("linkedVentasCount", 0).coerceIn(0, 2)
+                val license = state.optString("licenseStatus", "UNKNOWN")
+                runOnUiThread {
+                    linkedDevicesText?.text = "$count de 2 vinculados"
+                    homeLicenseText?.text = license
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    linkedDevicesText?.text = "Sin conexión"
+                    homeLicenseText?.text = "NO DISPONIBLE"
+                }
+            }
+        }.start()
     }
 
     private fun menuScreen(root: LinearLayout) {
