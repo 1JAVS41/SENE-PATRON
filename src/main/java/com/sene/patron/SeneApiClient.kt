@@ -78,6 +78,7 @@ class SeneApiClient(context: Context, baseUrl: String) {
             .putString("business_name", result.optString("businessName"))
             .putLong("period_ends_at", result.optLong("periodEndsAt", 0L))
             .putLong("server_time", result.optLong("serverTime", 0L))
+            .putLong("server_time_elapsed", android.os.SystemClock.elapsedRealtime())
             .commit()) { "No se pudo guardar el estado de licencia" }
         return result
     }
