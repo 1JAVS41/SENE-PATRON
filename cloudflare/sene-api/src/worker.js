@@ -184,29 +184,6 @@ async function verifySignedRequest(request, env, expectedPurpose) {
     return { ok: false, status: 409, error: "CHALLENGE_ALREADY_USED" };
   }
 
-  // Count every authenticated remote business operation once per device and
-  // Mexico City ISO week. Session checks and bootstrap registration are free.
-  // The conditional UPSERT is atomic, so concurrent requests cannot exceed 20.
-  if (challenge.device_id && challenge.purpose !== "DEVICE_AUTH") {
-    const weekKey = mexicoCityIsoWeek(now);
-    let quota;
-    try {
-      quota = await env.DB.prepare(
-        `INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at)
-         VALUES (?, ?, ?, 1, ?)
-         ON CONFLICT(device_id, week_key) DO UPDATE
-           SET used = weekly_usage.used + 1, updated_at = excluded.updated_at
-         WHERE weekly_usage.used < 20
-         RETURNING used`
-      ).bind(crypto.randomUUID(), challenge.device_id, weekKey, now).first();
-    } catch {
-      return { ok: false, status: 503, error: "QUOTA_CHECK_UNAVAILABLE" };
-    }
-    if (!quota) {
-      return { ok: false, status: 429, error: "WEEKLY_QUOTA_EXCEEDED" };
-    }
-  }
-
   return { ok: true, bodyBytes, bodyText: new TextDecoder().decode(bodyBytes), challenge };
 }
 
@@ -374,6 +351,24 @@ function mexicoCityIsoWeek(unixSeconds) {
   return `${year}-${String(week).padStart(2, "0")}`;
 }
 
+async function consumeWeeklyQuota(env, deviceId) {
+  const now = Math.floor(Date.now() / 1000);
+  const weekKey = mexicoCityIsoWeek(now);
+  try {
+    const quota = await env.DB.prepare(
+      `INSERT INTO weekly_usage (id, device_id, week_key, used, updated_at)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(device_id, week_key) DO UPDATE
+         SET used = weekly_usage.used + 1, updated_at = excluded.updated_at
+       WHERE weekly_usage.used < 20
+       RETURNING used`
+    ).bind(crypto.randomUUID(), deviceId, weekKey, now).first();
+    return quota ? null : { error: "WEEKLY_QUOTA_EXCEEDED", status: 429 };
+  } catch {
+    return { error: "QUOTA_CHECK_UNAVAILABLE", status: 503 };
+  }
+}
+
 async function activatePatron(request, env) {
   const proof = await verifySignedRequest(request, env, "PATRON_ACTIVATE");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -480,6 +475,8 @@ async function createPairingToken(request, env) {
   if (patron.license_status !== "active" || !patron.expires_at || patron.expires_at <= now) {
     return json({ error: "LICENSE_EXPIRED" }, 403);
   }
+  const quotaError = await consumeWeeklyQuota(env, patron.id);
+  if (quotaError) return json({ error: quotaError.error }, quotaError.status);
 
   const token = randomHex(32);
   const tokenHash = await sha256(token);
@@ -622,6 +619,8 @@ async function renewalPatronContext(proof, env) {
   if (!["active", "expired"].includes(row.license_status)) {
     return { error: "LICENSE_NOT_RENEWABLE", status: 403 };
   }
+  const quotaError = await consumeWeeklyQuota(env, deviceId);
+  if (quotaError) return quotaError;
   return { deviceId, licenseId: row.license_id, deviceType: row.device_type, slotNumber: row.slot_number };
 }
 
@@ -808,7 +807,7 @@ async function cancelRenewal(request, env) {
 async function redeemRenewal(request, env) {
   const proof = await verifySignedRequest(request, env, "PATRON_RENEWAL_REDEEM");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
-  const ctx = await signedDeviceContext({ ...proof, env }, "PATRON");
+  const ctx = await renewalPatronContext(proof, env);
   if (ctx.error) return json({ error: ctx.error }, ctx.status);
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
@@ -1156,6 +1155,8 @@ async function signedDeviceContext(proof, expectedType) {
   if (row.license_status !== "active" || !row.expires_at || row.expires_at <= now) {
     return { error: "LICENSE_EXPIRED", status: 403 };
   }
+  const quotaError = await consumeWeeklyQuota(proof.env, deviceId);
+  if (quotaError) return quotaError;
   return { deviceId, licenseId: row.license_id, deviceType: row.device_type, slotNumber: row.slot_number };
 }
 
