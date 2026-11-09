@@ -18,6 +18,24 @@ El Worker incluye actualmente:
 - Correcciones de venta: solicitud idempotente, bandeja por equipo, aprobación/rechazo y permiso ligado a una venta, dispositivo y licencia, consumible una sola vez.
 - Alta y operaciones privadas de operador protegidas por secreto del Worker. El secreto nunca debe incluirse en las APK.
 
+## Integración Android actual en la rama
+
+SENE PATRÓN ya contiene una primera integración Android real, aún no validada E2E:
+
+- Identidad P-256 en Android Keystore con clave privada no exportable.
+- Cliente HTTPS firmado con retos de dos minutos y hash del cuerpo exacto.
+- Activación inicial y recuperación de PATRÓN con códigos de un solo uso.
+- Consulta de sesión/licencia, creación de QR de dos usos y vinculación de VENTAS.
+- Consulta de dispositivos vinculados y solicitud de reemplazo.
+- Bandejas separadas por Equipo 1 y Equipo 2, aprobación/rechazo de solicitudes y correcciones.
+- Contadores independientes de notificaciones: rojo con 0 y verde con el número exacto cuando hay pendientes.
+- Configuración separada de sueldo/día de pago y consulta de reportes de cierre y nómina por equipo.
+- Solicitud y canje de renovación mensual.
+
+SENE VENTAS ya incluye cliente HTTPS firmado, vinculación QR, solicitudes de trabajador, recepción de respuestas, cola local de cierres de turno y envío de reportes de nómina. La integración sigue pendiente de E2E y de ajustes de disponibilidad de envío en la fecha de pago.
+
+**Importante:** la interfaz Android y el cliente firmado no hacen que el servicio esté operativo por sí solos. La API aún no está desplegada en Cloudflare y la D1 real todavía no tiene las migraciones 0002–0010. No introducir la URL de Hello World como servidor productivo ni activar equipos hasta completar el entorno de pruebas.
+
 ## Estado de despliegue
 
 **El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0006 todavía no se aplican allí.
@@ -49,12 +67,12 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 ## Pendientes antes de producción
 
-1. Diseñar y probar recuperación segura de un PATRÓN perdido.
+1. Probar E2E la recuperación segura de un PATRÓN perdido (el flujo y cliente Android ya existen en la rama).
 2. Sustituir el mecanismo temporal de secreto de operador por un proceso privado de operación seguro; nunca incluir secretos en APK.
 3. Completar idempotencia/recuperación segura del código de alta si la respuesta privada se pierde.
 4. Revisar exhaustivamente transacciones, límites, reintentos, concurrencia y errores D1.
 5. Ejecutar E2E en un Worker y D1 de pruebas, incluidos retos vencidos/replay, pairing concurrente, pagos duplicados, cuota, reemplazos y correcciones.
-6. Integrar cliente HTTP y firma Android en SENE PATRÓN y SENE VENTAS sin alterar funciones comerciales.
+6. Completar la integración visual/funcional de los módulos restantes de ambas APK y probarlos en teléfonos reales.
 7. Compilar y probar ambas APK en dispositivos reales, con y sin Internet.
 8. Integrar notificaciones WhatsApp Business API solo si se habilita un proveedor oficial; actualmente no están automatizadas.
 
