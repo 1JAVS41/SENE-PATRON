@@ -659,28 +659,46 @@ class MainActivity : Activity() {
                         if (current != null) setText(String.format(java.util.Locale.US, "%.2f", current.optLong("salaryCents") / 100.0))
                     }
                     val day = EditText(this).apply {
-                        hint = "Día de pago mensual (1 a 31)"
+                        hint = "Día fijo mensual (1 a 31, opcional)"
                         inputType = InputType.TYPE_CLASS_NUMBER
                         setSingleLine(true)
                         if (current != null && !current.isNull("paymentDay")) setText(current.optString("paymentDay"))
                     }
+                    val extraDates = current?.optJSONArray("paymentDates") ?: org.json.JSONArray()
+                    val dates = EditText(this).apply {
+                        hint = "Fechas específicas: AAAA-MM-DD, separadas por coma"
+                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                        minLines = 2
+                        if (extraDates.length() > 0) {
+                            val values = ArrayList<String>()
+                            for (i in 0 until extraDates.length()) values.add(extraDates.optString(i))
+                            setText(values.joinToString(", "))
+                        }
+                    }
                     form.addView(text("Sueldo base mensual", 13, ink, true))
                     form.addView(salary)
-                    form.addView(text("Día fijo de pago", 13, ink, true))
+                    form.addView(text("Día fijo mensual (opcional)", 13, ink, true))
                     form.addView(day)
-                    val extraDates = current?.optJSONArray("paymentDates") ?: org.json.JSONArray()
+                    form.addView(text("O fechas específicas (opcional)", 13, ink, true))
+                    form.addView(dates)
                     AlertDialog.Builder(this).setTitle(if (slot == "VENTAS_1") "NÓMINA · EQUIPO 1" else "NÓMINA · EQUIPO 2")
                         .setView(form)
                         .setMessage("Fechas adicionales configuradas: " + extraDates.length())
                         .setPositiveButton("GUARDAR") { _, _ ->
                             val amount = salary.text.toString().trim().replace(",", ".").toDoubleOrNull()
-                            val paymentDay = day.text.toString().trim().toIntOrNull()
-                            if (amount == null || amount <= 0 || amount > 10000000 || (paymentDay == null || paymentDay !in 1..31)) {
-                                Toast.makeText(this, "Captura un sueldo válido y un día de pago del 1 al 31", Toast.LENGTH_LONG).show()
+                            val dayText = day.text.toString().trim()
+                            val paymentDay = if (dayText.isBlank()) null else dayText.toIntOrNull()
+                            val selectedDates = dates.text.toString().split(",").map { it.trim() }.filter { it.isNotBlank() }
+                            val dateArray = org.json.JSONArray()
+                            selectedDates.forEach { dateArray.put(it) }
+                            val invalidDay = dayText.isNotBlank() && (paymentDay == null || paymentDay !in 1..31)
+                            if (amount == null || amount <= 0 || amount > 10000000 || invalidDay ||
+                                (paymentDay == null && selectedDates.isEmpty())) {
+                                Toast.makeText(this, "Captura sueldo y un día mensual válido o al menos una fecha específica", Toast.LENGTH_LONG).show()
                             } else {
                                 Thread {
                                     try {
-                                        api.savePayrollSettings(slot, Math.round(amount * 100.0), paymentDay)
+                                        api.savePayrollSettings(slot, Math.round(amount * 100.0), paymentDay, dateArray)
                                         runOnUiThread { Toast.makeText(this, "Configuración guardada para " + slot, Toast.LENGTH_LONG).show() }
                                     } catch (e: Exception) {
                                         runOnUiThread { Toast.makeText(this, "No se pudo guardar: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
