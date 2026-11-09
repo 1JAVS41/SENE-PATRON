@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - sene-patron-development
+      - sene-cloudflare-backend
   workflow_dispatch:
 
 permissions:
@@ -16,7 +17,7 @@ jobs:
       - name: Descargar código
         uses: actions/checkout@v4
 
-      - name: Generar icono desde el logotipo rojo del encabezado
+      - name: Generar icono desde el logotipo de SENE PATRÓN
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pil
