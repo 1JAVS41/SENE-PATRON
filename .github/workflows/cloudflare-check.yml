@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..7}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-renew', 'ABARROTES TERE', 'expired', 3, 1, 100);"
@@ -92,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..7}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, label, business_name, status, max_devices, activation_code_hash, created_at) VALUES ('license-initial', 'TIENDA TEST', 'TIENDA TEST', 'pending', 3, 'activation-hash', 100);"
@@ -146,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..7}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-recovery', 'TIENDA RECOVERY', 'active', 3, 1, 9999999999);"
@@ -172,7 +172,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..7}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, status, max_devices, created_at, expires_at) VALUES ('license-correction', 'active', 3, 1, 9999999999);"
@@ -194,7 +194,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..7}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, activation_code_hash, created_at, setup_paid_at) VALUES ('license-unpaid-rent', 'TIENDA PENDIENTE', 'pending', 3, 'activation-hash', 1, 2);"
@@ -209,7 +209,7 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/000{1..6}_*.sql; do
+          for migration in cloudflare/sene-api/migrations/000{1..7}_*.sql; do
             sqlite3 "$DB_FILE" < "$migration"
           done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, activation_code_hash, created_at, setup_paid_at, first_rent_paid_at) VALUES ('license-reissue', 'TIENDA CODIGO', 'pending', 3, 'old-activation-hash', 1, 2, 2);"
@@ -219,7 +219,8 @@ jobs:
           sqlite3 "$DB_FILE" "UPDATE licenses SET activation_code_hash='must-not-change' WHERE id='license-not-paid' AND status='pending' AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL;"
           test "$(sqlite3 "$DB_FILE" "SELECT activation_code_hash FROM licenses WHERE id='license-not-paid';")" = "hash-not-paid"
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-renew-reissue', 'TIENDA RENOVAR', 'active', 3, 1, 9999999999);"
-          sqlite3 "$DB_FILE" "INSERT INTO renewal_requests (id, license_id, patron_device_id, business_name, status, code_hash, created_at, authorized_at, authorized_by, payment_reference) VALUES ('renew-reissue', 'license-renew-reissue', 'patron-any', 'TIENDA RENOVAR', 'authorized', 'old-renewal-hash', 2, 3, 'operator', 'folio-1');"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-renew-reissue', 'license-renew-reissue', 'PATRON', 'install', 'continuity', x'01', 'fingerprint', 1, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO renewal_requests (id, license_id, patron_device_id, business_name, status, code_hash, created_at, authorized_at, authorized_by, payment_reference) VALUES ('renew-reissue', 'license-renew-reissue', 'patron-renew-reissue', 'TIENDA RENOVAR', 'authorized', 'old-renewal-hash', 2, 3, 'operator', 'folio-1');"
           sqlite3 "$DB_FILE" "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES ('payment-renew-reissue', 'license-renew-reissue', 'MONTHLY_RENT', 8000, 'MXN', 'CONFIRMED', 'folio-1', 'renewal:renew-reissue', 3, 3, 'operator');"
           sqlite3 "$DB_FILE" "UPDATE renewal_requests SET code_hash='new-renewal-hash', authorized_at=4, authorized_by='operator' WHERE id='renew-reissue' AND status='authorized' AND EXISTS (SELECT 1 FROM payments WHERE license_id=renewal_requests.license_id AND payment_type='MONTHLY_RENT' AND status='CONFIRMED' AND idempotency_key='renewal:' || renewal_requests.id);"
           test "$(sqlite3 "$DB_FILE" "SELECT code_hash FROM renewal_requests WHERE id='renew-reissue';")" = "new-renewal-hash"
