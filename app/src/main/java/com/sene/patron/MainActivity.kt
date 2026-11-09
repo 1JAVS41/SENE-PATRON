@@ -470,7 +470,7 @@ class MainActivity : Activity() {
                         .setPositiveButton("GUARDAR") { _, _ ->
                             val amount = salary.text.toString().trim().replace(",", ".").toDoubleOrNull()
                             val paymentDay = day.text.toString().trim().toIntOrNull()
-                            if (amount == null || amount <= 0 || amount > 10000000 || paymentDay !in 1..31) {
+                            if (amount == null || amount <= 0 || amount > 10000000 || (paymentDay == null || paymentDay !in 1..31)) {
                                 Toast.makeText(this, "Captura un sueldo válido y un día de pago del 1 al 31", Toast.LENGTH_LONG).show()
                             } else {
                                 Thread {
