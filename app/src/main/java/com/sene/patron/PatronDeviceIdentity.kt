@@ -67,18 +67,25 @@ object PatronDeviceIdentity {
         return Base64.encodeToString(signer.sign(), Base64.NO_WRAP)
     }
 
-    fun verifyChallenge(snapshot: PatronIdentitySnapshot, challenge: ByteArray, signatureBase64: String): Boolean =
-        try {
-            if (challenge.size !in 16..4096 || signatureBase64.isBlank()) return false
-            val encoded = Base64.decode(snapshot.publicKeyBase64, Base64.NO_WRAP)
-            if (!sha256Hex(encoded).equals(snapshot.fingerprint, true)) return false
-            val publicKey = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(encoded))
-            Signature.getInstance("SHA256withECDSA").run {
-                initVerify(publicKey)
-                update(challenge)
-                verify(Base64.decode(signatureBase64, Base64.NO_WRAP))
+    fun verifyChallenge(snapshot: PatronIdentitySnapshot, challenge: ByteArray, signatureBase64: String): Boolean {
+        return try {
+            if (challenge.size !in 16..4096 || signatureBase64.isBlank()) {
+                false
+            } else {
+                val encoded = Base64.decode(snapshot.publicKeyBase64, Base64.NO_WRAP)
+                if (!sha256Hex(encoded).equals(snapshot.fingerprint, true)) {
+                    false
+                } else {
+                    val publicKey = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(encoded))
+                    Signature.getInstance("SHA256withECDSA").run {
+                        initVerify(publicKey)
+                        update(challenge)
+                        verify(Base64.decode(signatureBase64, Base64.NO_WRAP))
+                    }
+                }
             }
         } catch (_: Exception) { false }
+    }
 
     private fun loadOrCreate(context: Context): KeyPair {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
