@@ -200,3 +200,6 @@ No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revi
 - El código previo queda invalidado; solo se devuelve el código nuevo en la respuesta de la operación privada. No se almacena texto claro.
 - La reemisión de activación exige ambos pagos confirmados y ausencia de PATRÓN activo. La reemisión de renovación exige solicitud autorizada y pago mensual confirmado.
 - Se añadió migración 0007 para registrar el operador que autorizó/reemitió el código de renovación. CI amplió la aplicación de migraciones a 0001–0007 y prueba los guardarraíles de reemisión.
+
+
+**Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
