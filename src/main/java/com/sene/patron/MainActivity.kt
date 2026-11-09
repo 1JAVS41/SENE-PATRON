@@ -413,11 +413,42 @@ class MainActivity : Activity() {
             root.addView(kicker("DÍAS DE PAGO"))
             if (payroll.length() == 0) root.addView(info("SIN REPORTES DE NÓMINA", "Este equipo todavía no ha enviado un reporte de día de pago."))
             for (i in 0 until payroll.length()) {
-                val report = payroll.getJSONObject(i)
-                val card = card()
-                card.addView(text("Nómina · " + report.optString("periodKey"), 15, ink, true))
-                card.addView(text((report.optJSONObject("report") ?: JSONObject()).toString(2), 12, muted))
-                root.addView(card)
+                val payrollItem = payroll.getJSONObject(i)
+                val payrollData = payrollItem.optJSONObject("report") ?: JSONObject()
+                val settingsRaw = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+                    .getString("payroll_settings_$team", null)
+                var salaryCents = 0L
+                if (!settingsRaw.isNullOrBlank()) {
+                    val settingsPayload = JSONObject(settingsRaw).optJSONObject("settings") ?: JSONObject()
+                    val settingKey = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+                    salaryCents = settingsPayload.optJSONObject(settingKey)?.optLong("salaryCents", 0L) ?: 0L
+                }
+                val requests = payrollData.optJSONArray("requests") ?: org.json.JSONArray()
+                var authorizedDeductions = 0L
+                var approvedCount = 0
+                for (requestIndex in 0 until requests.length()) {
+                    val request = requests.optJSONObject(requestIndex) ?: continue
+                    if (request.optString("status") != "approved") continue
+                    approvedCount++
+                    val deduction = request.optJSONObject("decisionDetails")?.optJSONObject("deduction")
+                    if (deduction?.optBoolean("authorized", false) == true) {
+                        authorizedDeductions += deduction.optLong("amountCents", 0L).coerceAtLeast(0L)
+                    }
+                }
+                val netCents = (salaryCents - authorizedDeductions).coerceAtLeast(0L)
+                val payrollCard = card()
+                payrollCard.addView(text("Nómina · " + payrollItem.optString("periodKey"), 15, ink, true))
+                payrollCard.addView(text("Trabajador: " + payrollData.optString("worker", "Sin nombre"), 12, muted))
+                payrollCard.addView(text("Solicitudes incluidas: ${requests.length()} · Aprobadas: $approvedCount", 12, muted))
+                if (salaryCents > 0L) {
+                    payrollCard.addView(text("Sueldo base: " + String.format(java.util.Locale.US, "$%.2f MXN", salaryCents / 100.0), 13, ink, true))
+                    payrollCard.addView(text("Descuentos autorizados: " + String.format(java.util.Locale.US, "$%.2f MXN", authorizedDeductions / 100.0), 13, muted))
+                    payrollCard.addView(text("Pago estimado: " + String.format(java.util.Locale.US, "$%.2f MXN", netCents / 100.0), 16, success, true))
+                } else {
+                    payrollCard.addView(text("Configura el sueldo base para calcular el pago estimado.", 12, red, true))
+                }
+                payrollCard.addView(text("Detalle de solicitudes: " + requests.toString(), 11, muted))
+                root.addView(payrollCard)
                 if (i != payroll.length() - 1) gap(root, 7)
             }
         } catch (_: Exception) {
