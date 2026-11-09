@@ -128,8 +128,26 @@ class MainActivity : Activity() {
         gap(root, 12)
 
         val status = card()
-        status.addView(horizontal("Administración", "EN PREPARACIÓN", ink, red))
-        status.addView(text("La operación administrativa de SENE VENTAS permanece en el teléfono. El servidor SENE se utilizará únicamente para solicitudes de corrección y su autorización individual por el patrón.", 12, muted))
+        val licenseStatus = serverPrefs.getString("license_status", "").orEmpty()
+        status.addView(horizontal(
+            "Administración",
+            when (licenseStatus) {
+                "ACTIVE" -> "CONECTADO"
+                "EXPIRED" -> "LICENCIA VENCIDA"
+                "SUSPENDED" -> "SUSPENDIDA"
+                else -> "PENDIENTE DE VINCULACIÓN"
+            },
+            ink,
+            when (licenseStatus) {
+                "ACTIVE" -> success
+                "EXPIRED", "SUSPENDED" -> red
+                else -> muted
+            }
+        ))
+        status.addView(text(
+            "El servidor administra licencias, solicitudes, reportes, notificaciones y permisos. Ventas, inventario, caja y gastos permanecen locales en SENE VENTAS.",
+            12, muted
+        ))
         root.addView(status)
         gap(root, 10)
 
