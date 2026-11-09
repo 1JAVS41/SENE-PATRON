@@ -19,6 +19,7 @@ class SeneApiException(val httpStatus: Int, val responseBody: String) :
 class SeneApiClient(context: Context, baseUrl: String) {
     private val app = context.applicationContext
     private val root = baseUrl.trim().trimEnd('/')
+    private val prefs = app.getSharedPreferences("sene_patron_server", Context.MODE_PRIVATE)
 
     init {
         require(root.startsWith("https://")) { "La dirección del servidor SENE debe usar HTTPS" }
@@ -32,15 +33,26 @@ class SeneApiClient(context: Context, baseUrl: String) {
             .put("continuityId", identity.continuityId)
             .put("publicKeyBase64", identity.publicKeyBase64)
             .put("fingerprint", identity.fingerprint)
-        return bootstrapSigned("PATRON_ACTIVATE", "/v1/patron/activate", body.toString(), identity)
+        val result = bootstrapSigned("PATRON_ACTIVATE", "/v1/patron/activate", body.toString(), identity)
+        val registeredId = result.optString("deviceId")
+        if (registeredId.isNotBlank()) {
+            check(prefs.edit().putString("device_id", registeredId).commit()) {
+                "No se pudo guardar la vinculación de SENE PATRÓN"
+            }
+        }
+        return result
     }
 
-    fun createPairingToken(deviceId: String): JSONObject {
+    fun storedDeviceId(): String? = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
+
+    fun createPairingToken(deviceId: String = storedDeviceId()
+        ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject {
         val body = JSONObject().put("uses", 2)
         return deviceSigned("PATRON_PAIRING_TOKEN", "/v1/patron/pairing-tokens", body.toString(), deviceId)
     }
 
-    fun session(deviceId: String): JSONObject =
+    fun session(deviceId: String = storedDeviceId()
+        ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject =
         deviceSigned("DEVICE_AUTH", "/v1/device/session", "{}", deviceId)
 
     private fun bootstrapSigned(
