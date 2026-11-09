@@ -701,20 +701,31 @@ async function confirmInitialPayment(request, env) {
     return json({ error: "INITIAL_PAYMENT_NOT_CONFIRMABLE" }, 409);
   }
   const now = Math.floor(Date.now() / 1000);
-  const results = await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES (?, ?, 'SETUP', 50000, 'MXN', 'CONFIRMED', ?, ?, ?, ?, 'operator')"
-    ).bind(crypto.randomUUID(), licenseId, reference, "initial-setup:" + licenseId, now, now),
-    env.DB.prepare(
-      "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES (?, ?, 'FIRST_RENT', 8000, 'MXN', 'CONFIRMED', ?, ?, ?, ?, 'operator')"
-    ).bind(crypto.randomUUID(), licenseId, reference, "initial-rent:" + licenseId, now, now),
-    env.DB.prepare(
-      "UPDATE licenses SET setup_paid_at = ?, first_rent_paid_at = ? WHERE id = ? AND status = 'pending' AND setup_paid_at IS NULL AND first_rent_paid_at IS NULL"
-    ).bind(now, now, licenseId),
-    env.DB.prepare(
-      "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, 'operator', 'operator', 'initial_payment_confirmed', ?, ?)"
-    ).bind(crypto.randomUUID(), licenseId, JSON.stringify({ paymentReference: reference, totalCents: 58000 }), now)
-  ]);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES (?, ?, 'SETUP', 50000, 'MXN', 'CONFIRMED', ?, ?, ?, ?, 'operator')"
+      ).bind(crypto.randomUUID(), licenseId, reference, "initial-setup:" + licenseId, now, now),
+      env.DB.prepare(
+        "INSERT INTO payments (id, license_id, payment_type, amount_cents, currency, status, reference, idempotency_key, created_at, confirmed_at, confirmed_by) VALUES (?, ?, 'FIRST_RENT', 8000, 'MXN', 'CONFIRMED', ?, ?, ?, ?, 'operator')"
+      ).bind(crypto.randomUUID(), licenseId, reference, "initial-rent:" + licenseId, now, now),
+      env.DB.prepare(
+        "UPDATE licenses SET setup_paid_at = ?, first_rent_paid_at = ? WHERE id = ? AND status = 'pending' AND setup_paid_at IS NULL AND first_rent_paid_at IS NULL"
+      ).bind(now, now, licenseId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, 'operator', 'operator', 'initial_payment_confirmed', ?, ?)"
+      ).bind(crypto.randomUUID(), licenseId, JSON.stringify({ paymentReference: reference, totalCents: 58000 }), now)
+    ]);
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT setup_paid_at, first_rent_paid_at FROM licenses WHERE id = ? LIMIT 1"
+    ).bind(licenseId).first();
+    if (raced?.setup_paid_at && raced?.first_rent_paid_at) {
+      return json({ licenseId, paymentStatus: "CONFIRMED", duplicate: true });
+    }
+    return json({ error: "INITIAL_PAYMENT_CONFLICT" }, 409);
+  }
   if ((results?.[2]?.meta?.changes ?? 0) !== 1) return json({ error: "INITIAL_PAYMENT_CONFLICT" }, 409);
   return json({ licenseId, paymentStatus: "CONFIRMED", totalCents: 58000, currency: "MXN", activationCodeCanBeDelivered: true }, 200);
 }
