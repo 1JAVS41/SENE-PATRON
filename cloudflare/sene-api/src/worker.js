@@ -403,6 +403,7 @@ async function activatePatron(request, env) {
            FROM licenses l
           WHERE l.activation_code_hash = ?
             AND l.setup_paid_at IS NOT NULL
+            AND l.first_rent_paid_at IS NOT NULL
             AND l.status = 'pending'
             AND NOT EXISTS (
               SELECT 1 FROM devices d
@@ -418,6 +419,7 @@ async function activatePatron(request, env) {
             SET activation_code_hash = NULL
           WHERE activation_code_hash = ?
             AND setup_paid_at IS NOT NULL
+            AND first_rent_paid_at IS NOT NULL
             AND status = 'pending'
             AND EXISTS (
               SELECT 1 FROM devices d
