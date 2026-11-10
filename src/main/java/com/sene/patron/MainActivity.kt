@@ -169,10 +169,15 @@ class MainActivity : Activity() {
         root.addView(teamMenuCard("EQUIPO 2", "Avisos, personal, pagos y teléfono", "team2"))
         gap(root, 15)
 
+        val registrationRequest = prefs.getString("registration_request_id", null)
         root.addView(primaryButton(
-            if (linked) "CONEXIÓN Y PAGOS" else "ACTIVAR SENE PATRÓN"
+            if (linked) "CONEXIÓN Y PAGOS"
+            else if (!registrationRequest.isNullOrBlank()) "INTRODUCIR CÓDIGO DE ACTIVACIÓN"
+            else "VINCULAR SENE PATRÓN"
         ) {
-            if (linked) showOwnerOptions() else showServerConfig()
+            if (linked) showOwnerOptions()
+            else if (!registrationRequest.isNullOrBlank()) showActivationDialog()
+            else showRegistrationDialog()
         })
         gap(root, 8)
         root.addView(primaryButton("AYUDA") { showContactDialog() })
@@ -722,7 +727,7 @@ class MainActivity : Activity() {
                     return@setPositiveButton
                 }
                 Toast.makeText(this, "Dirección guardada", Toast.LENGTH_SHORT).show()
-                if (prefs.getString("device_id", null).isNullOrBlank()) showActivationDialog()
+                if (prefs.getString("device_id", null).isNullOrBlank()) showRegistrationDialog()
                 else refreshNotificationsFromServer(force = true)
             }
             .setNegativeButton("CANCELAR", null)
@@ -764,6 +769,79 @@ class MainActivity : Activity() {
                     } catch (error: Exception) {
                         runOnUiThread {
                             Toast.makeText(this, "No se pudo recuperar: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
+    }
+
+    private fun showRegistrationDialog() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) {
+            showServerConfig()
+            return
+        }
+        val existingRequest = prefs.getString("registration_request_id", null)
+        if (!existingRequest.isNullOrBlank()) {
+            showActivationDialog()
+            return
+        }
+        val field = EditText(this).apply {
+            hint = "Nombre exacto de tu empresa"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("REGISTRO INICIAL · $580 MXN")
+            .setMessage(
+                "Para registrar SENE PATRÓN y sus dos equipos SENE VENTAS:\\n\\n" +
+                "1. Realiza un pago total de $580 MXN ($500 de alta + $80 de primera mensualidad), usando los datos oficiales de pago proporcionados por SENE.\\n" +
+                "2. En el concepto escribe ÚNICAMENTE el nombre exacto de tu empresa.\\n" +
+                "3. Envía el comprobante a uno de los dos números oficiales del botón AYUDA por WhatsApp.\\n" +
+                "4. Después de enviar el comprobante, pulsa YA REALICÉ EL PAGO.\\n\\n" +
+                "El servidor crea una sola solicitud. El código de activación se entrega a través de los números oficiales de AYUDA únicamente después de verificar el pago. No se activa la licencia antes de introducir el código."
+            )
+            .setView(field)
+            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+                val businessName = field.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
+                if (businessName.isBlank() || businessName.length > 100) {
+                    Toast.makeText(this, "Escribe el nombre exacto de tu empresa", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).requestRegistration(businessName)
+                        val requestId = result.optString("requestId")
+                        runOnUiThread {
+                            if (requestId.isBlank()) {
+                                Toast.makeText(this, "No se recibió el folio de registro", Toast.LENGTH_LONG).show()
+                            } else {
+                                AlertDialog.Builder(this)
+                                    .setTitle("SOLICITUD DE REGISTRO RECIBIDA")
+                                    .setMessage(
+                                        "Empresa: " + result.optString("businessName", businessName) +
+                                        "\\nImporte: $580 MXN\\nConcepto: " +
+                                        result.optString("businessName", businessName) +
+                                        "\\n\\nLa solicitud quedó registrada. Conserva el comprobante y espera el código enviado por los canales oficiales de AYUDA. Cuando lo recibas, vuelve a VINCULAR SENE PATRÓN para introducirlo."
+                                    )
+                                    .setPositiveButton("CERRAR", null)
+                                    .show()
+                            }
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            val message = when {
+                                error.message?.contains("BUSINESS_NAME_ALREADY_REGISTERED") == true ->
+                                    "Ese nombre de empresa ya está registrado."
+                                error.message?.contains("BUSINESS_NAME_REGISTRATION_PENDING") == true ->
+                                    "Ya existe una solicitud pendiente para ese nombre. Contacta AYUDA para continuar."
+                                else -> "No se pudo registrar la solicitud. " + (error.message ?: "")
+                            }
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                         }
                     }
                 }.start()
