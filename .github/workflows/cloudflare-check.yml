@@ -369,31 +369,20 @@ jobs:
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
-      - name: Probar registro maestro de contactos oficiales de AYUDA
+      - name: Probar registro maestro y auditoría inmutable de contactos oficiales AYUDA
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          for migration in cloudflare/sene-api/migrations/*.sql; do
-            sqlite3 "$DB_FILE" < "$migration"
-          done
-          # El primer registro maestro es único y debe conservar correo y ambos teléfonos.
+          for migration in cloudflare/sene-api/migrations/*.sql; do sqlite3 "$DB_FILE" < "$migration"; done
           sqlite3 "$DB_FILE" "INSERT INTO official_support_contacts (id, official_email, help_phone_1, help_phone_2, revision, registered_at, updated_at, updated_by) VALUES (1, 'ayuda@example.invalid', '+5211111111111', '+5222222222222', 1, 100, 100, 'operator-bootstrap');"
-          sqlite3 "$DB_FILE" "INSERT INTO official_support_contacts_audit (revision, action, official_email, help_phone_1, help_phone_2, actor, created_at) VALUES (1, 'INITIAL_REGISTRATION', 'ayuda@example.invalid', '+5211111111111', '+5222222222222', 'operator-bootstrap', 100);"
-          test "$(sqlite3 "$DB_FILE" "SELECT revision || ':' || official_email || ':' || help_phone_1 || ':' || help_phone_2 FROM official_support_contacts WHERE id=1;")" = "1:ayuda@example.invalid:+5211111111111:+5222222222222"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM official_support_contacts_audit WHERE revision=1 AND action='INITIAL_REGISTRATION';")" = "1"
-          # No se permite un segundo registro maestro ni dos números iguales.
-          if sqlite3 "$DB_FILE" "INSERT INTO official_support_contacts (id, official_email, help_phone_1, help_phone_2, registered_at, updated_at, updated_by) VALUES (1, 'otra@example.invalid', '+5233333333333', '+5244444444444', 101, 101, 'attacker');" 2>/dev/null; then
-            echo "ERROR: se permitió reemplazar el registro maestro con un segundo INSERT"
-            exit 1
-          fi
-          if sqlite3 "$DB_FILE" "INSERT INTO official_support_contacts (id, official_email, help_phone_1, help_phone_2, registered_at, updated_at, updated_by) VALUES (2, 'otra@example.invalid', '+5255555555555', '+5255555555555', 101, 101, 'attacker');" 2>/dev/null; then
-            echo "ERROR: se permitieron números oficiales duplicados"
-            exit 1
-          fi
-          # La fila maestra no puede borrarse mediante SQL ordinario.
-          if sqlite3 "$DB_FILE" "DELETE FROM official_support_contacts WHERE id=1;" 2>/dev/null; then
-            echo "ERROR: se permitió borrar el registro maestro"
-            exit 1
-          fi
-          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM official_support_contacts WHERE id=1;")" = "1"
+          if sqlite3 "$DB_FILE" "INSERT INTO official_support_contacts (id, official_email, help_phone_1, help_phone_2, registered_at, updated_at, updated_by) VALUES (1, 'otra@example.invalid', '+5233333333333', '+5244444444444', 101, 101, 'attacker');" 2>/dev/null; then exit 1; fi
+          if sqlite3 "$DB_FILE" "INSERT INTO official_support_contacts (id, official_email, help_phone_1, help_phone_2, registered_at, updated_at, updated_by) VALUES (2, 'otra@example.invalid', '+5255555555555', '+5255555555555', 101, 101, 'attacker');" 2>/dev/null; then exit 1; fi
+          sqlite3 "$DB_FILE" "UPDATE official_support_contacts SET official_email='cambio@example.invalid', revision=2, updated_at=200, updated_by='operator-approved' WHERE id=1 AND revision=1;"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM official_support_contacts_audit;")" = "2"
+          test "$(sqlite3 "$DB_FILE" "SELECT action FROM official_support_contacts_audit WHERE revision=2;")" = "AUTHORIZED_UPDATE"
+          if sqlite3 "$DB_FILE" "UPDATE official_support_contacts_audit SET actor='tampered' WHERE revision=1;" 2>/dev/null; then exit 1; fi
+          if sqlite3 "$DB_FILE" "DELETE FROM official_support_contacts_audit WHERE revision=1;" 2>/dev/null; then exit 1; fi
+          if sqlite3 "$DB_FILE" "DELETE FROM official_support_contacts WHERE id=1;" 2>/dev/null; then exit 1; fi
+          if sqlite3 "$DB_FILE" "UPDATE official_support_contacts SET official_email='bad@example.invalid', revision=4, updated_at=300, updated_by='bad' WHERE id=1;" 2>/dev/null; then exit 1; fi
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
