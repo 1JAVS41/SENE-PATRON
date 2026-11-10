@@ -134,7 +134,7 @@ El campo `payroll` solo se devuelve para VENTAS y permite que la APK habilite el
 
 ## 8. Solicitudes de corrección de venta
 
-**Estado real:** los cuatro endpoints están implementados en el Worker de la rama. Se añadió prueba CI SQLite de autorización y consumo único. Aún falta E2E en Cloudflare y conexión Android; no están desplegados.
+**Estado real:** los cuatro endpoints están implementados en el Worker de la rama. VENTAS ya asigna un `saleId` local estable a cada ticket nuevo, permite elegir una venta y enviar el motivo con clave de idempotencia; las solicitudes quedan en cola local si no hay conexión. `POST /v1/ventas/requests/updates` devuelve ahora también las decisiones de corrección para que VENTAS actualice su historial. PATRÓN dispone de bandeja y decisión por equipo. Aún falta E2E en Cloudflare y la operación local que ejecutará el trabajador después de recibir autorización; por seguridad la APK todavía no consume el grant ni modifica ticket, caja o inventario. El Worker sigue sin desplegarse.
 
 ### `POST /v1/ventas/corrections`
 Solo VENTAS autenticado. Cuerpo:
