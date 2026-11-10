@@ -331,3 +331,19 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM payroll_settings WHERE license_id='license-payroll';")" = "2"
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Probar ciclo de nómina con decisiones autoritativas
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-payroll-cycle', 'TIENDA CICLO', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-cycle', 'license-payroll-cycle', 'PATRON', 'ip', 'cp', x'01', 'fp', 1, 'active', 1), ('ventas-cycle', 'license-payroll-cycle', 'VENTAS', 'iv', 'cv', x'02', 'fv', 2, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO payroll_reports (id, license_id, ventas_device_id, period_key, report_json, created_at) VALUES ('payroll-cycle-old', 'license-payroll-cycle', 'ventas-cycle', '2026-10-15', '{}', 1000), ('payroll-cycle-new', 'license-payroll-cycle', 'ventas-cycle', '2026-11-15', '{}', 2000);"
+          sqlite3 "$DB_FILE" "INSERT INTO work_requests (id, license_id, ventas_device_id, request_type, details_json, status, created_at, idempotency_key, decided_at, decision_json) VALUES ('request-old-done', 'license-payroll-cycle', 'ventas-cycle', 'LOAN', '{}', 'approved', 100, 'idem-old-done', 500, '{"deduction":{"authorized":true,"amountCents":1000}}'), ('request-new-created', 'license-payroll-cycle', 'ventas-cycle', 'CONSUMPTION', '{}', 'approved', 1500, 'idem-new-created', 1600, '{"deduction":{"authorized":true,"amountCents":2000}}'), ('request-new-decided', 'license-payroll-cycle', 'ventas-cycle', 'ABSENCE_PERMISSION', '{}', 'approved', 900, 'idem-new-decided', 1800, '{"deduction":{"authorized":true,"amountCents":3000}}'), ('request-pending-old', 'license-payroll-cycle', 'ventas-cycle', 'VACATION', '{}', 'pending', 50, 'idem-pending-old', NULL, NULL), ('request-created-after', 'license-payroll-cycle', 'ventas-cycle', 'LOAN', '{}', 'approved', 2100, 'idem-created-after', 2200, '{}'), ('request-decided-after', 'license-payroll-cycle', 'ventas-cycle', 'LOAN', '{}', 'approved', 100, 'idem-decided-after', 2100, '{}');"
+          RESULT="$(sqlite3 "$DB_FILE" "SELECT group_concat(id, ',') FROM (SELECT id FROM work_requests WHERE license_id='license-payroll-cycle' AND ventas_device_id IN (SELECT id FROM devices WHERE license_id='license-payroll-cycle' AND slot_number=2) AND ((created_at > 1000 AND created_at <= 2000) OR (decided_at > 1000 AND decided_at <= 2000) OR (status='pending' AND created_at <= 2000)) ORDER BY COALESCE(decided_at, created_at) DESC LIMIT 500);")"
+          test "$RESULT" = "request-pending-old,request-new-decided,request-new-created"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
