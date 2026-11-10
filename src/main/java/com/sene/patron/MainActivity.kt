@@ -761,12 +761,14 @@ class MainActivity : Activity() {
             showActivationDialog()
             return
         }
-        val field = EditText(this).apply {
-            hint = "Nombre exacto de tu empresa"
-            setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            setPadding(dp(16), dp(13), dp(16), dp(13))
+        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        fun field(hintText: String, type: Int): EditText = EditText(this).apply {
+            hint = hintText; setSingleLine(true); inputType = type
+            setPadding(dp(12), dp(10), dp(12), dp(10)); form.addView(this)
         }
+        val field = field("Nombre exacto de tu empresa", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+        val emailField = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        val phoneField = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
         AlertDialog.Builder(this)
             .setTitle("REGISTRO INICIAL · $580 MXN")
             .setMessage(
@@ -777,7 +779,7 @@ class MainActivity : Activity() {
                 "4. Después de enviar el comprobante, pulsa YA REALICÉ EL PAGO.\n\n" +
                 "El servidor crea una sola solicitud. El código de activación se entrega a través de los números oficiales de AYUDA únicamente después de verificar el pago. No se activa la licencia antes de introducir el código."
             )
-            .setView(field)
+            .setView(form)
             .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
                 val businessName = field.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
                 if (businessName.isBlank() || businessName.length > 100) {
@@ -786,7 +788,7 @@ class MainActivity : Activity() {
                 }
                 Thread {
                     try {
-                        val result = SeneApiClient(this, baseUrl).requestRegistration(businessName)
+                        val email = emailField.text?.toString()?.trim().orEmpty()\n                val phone = phoneField.text?.toString()?.trim().orEmpty()\n                val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
                         val requestId = result.optString("requestId")
                         runOnUiThread {
                             if (requestId.isBlank()) {
