@@ -101,7 +101,38 @@ jobs:
             { OPERATOR_TOKEN: "x".repeat(40), DB: env.DB }
           );
           assert.equal(denied.status, 401);
-          console.log("PASS: firma ECDSA, detección de alteración, fail-closed y protección del registro operador");
+
+          // El formulario de reposición se ejecuta desde un teléfono sin deviceId
+          // registrado: debe poder pedir un reto bootstrap con su identidad P-256.
+          const spki = new Uint8Array(await webcrypto.subtle.exportKey("spki", pair.publicKey));
+          const fingerprintBytes = new Uint8Array(await webcrypto.subtle.digest("SHA-256", spki));
+          const fingerprint = Buffer.from(fingerprintBytes).toString("hex");
+          const challengeDb = {
+            prepare() {
+              return { bind() { return { run: async () => ({ meta: { changes: 1 } }) }; } };
+            }
+          };
+          const recoveryChallenge = await worker.fetch(
+            new Request("https://sene.test/v1/challenges", {
+              method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                purpose: "PATRON_RECOVERY_REQUEST",
+                installationId: "123e4567-e89b-42d3-a456-426614174000",
+                continuityId: "a".repeat(64),
+                publicKeyBase64: Buffer.from(spki).toString("base64"),
+                fingerprint,
+                targetMethod: "POST",
+                targetPath: "/v1/patron/recovery/request",
+                bodySha256: "b".repeat(64)
+              })
+            }),
+            { DB: challengeDb }
+          );
+          assert.equal(recoveryChallenge.status, 201,
+            "PATRON_RECOVERY_REQUEST debe aceptar identidad bootstrap sin deviceId");
+
+          console.log("PASS: firma ECDSA, contactos oficiales, protección de operador y reto bootstrap de reposición");
+
           JS
 
       - name: Instalar SQLite
