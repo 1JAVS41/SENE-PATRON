@@ -632,3 +632,27 @@ jobs:
           if sqlite3 "$DB_FILE" "DELETE FROM official_support_contacts WHERE id=1;" 2>/dev/null; then exit 1; fi
           if sqlite3 "$DB_FILE" "UPDATE official_support_contacts SET official_email='bad@example.invalid', revision=4, updated_at=300, updated_by='bad' WHERE id=1;" 2>/dev/null; then exit 1; fi
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Probar restauración gratuita de VENTAS en el mismo teléfono
+        run: |
+          set -euo pipefail
+          grep -q 'VENTAS_RESTORE: ["POST", "/v1/ventas/restore"]' cloudflare/sene-api/src/worker.js
+          grep -q 'url.pathname === "/v1/ventas/restore"' cloudflare/sene-api/src/worker.js
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do sqlite3 "$DB_FILE" < "$migration"; done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,registered_email,registered_phone,status,max_devices,created_at,expires_at) VALUES ('license-ventas-restore','TIENDA VENTAS RESTORE','titular@example.invalid','5211111111111','active',3,1,9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) VALUES ('patron-restore-test','license-ventas-restore','PATRON','patron-install','patron-continuity',x'01','patron-fingerprint',1,'active',1),('ventas-before-restore','license-ventas-restore','VENTAS','stable-install','same-phone-continuity',x'02','old-ventas-fingerprint',2,'active',2);"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash,license_id,patron_device_id,remaining_uses,created_at,expires_at,slot_number,operation,encrypted_token,consumed_at) VALUES ('pending-ventas-qr','license-ventas-restore','patron-restore-test',1,3,9999999999,2,'NEW','encrypted-token',NULL);"
+          sqlite3 "$DB_FILE" "INSERT INTO shift_reports (id,license_id,ventas_device_id,shift_key,report_json,created_at) VALUES ('old-shift-report','license-ventas-restore','ventas-before-restore','shift-1','{}',4);"
+          sqlite3 "$DB_FILE" "INSERT INTO work_requests (id,license_id,ventas_device_id,request_type,details_json,status,created_at,idempotency_key) VALUES ('old-work-request','license-ventas-restore','ventas-before-restore','LOAN','{}','approved',4,'old-idempotency');"
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='ventas-before-restore' AND license_id='license-ventas-restore' AND device_type='VENTAS' AND slot_number=2 AND status='active' AND continuity_id='same-phone-continuity' AND NOT EXISTS (SELECT 1 FROM replacement_requests WHERE license_id='license-ventas-restore' AND slot_number=2 AND status='pending');"
+          sqlite3 "$DB_FILE" "UPDATE pairing_tokens SET revoked_at=5 WHERE license_id='license-ventas-restore' AND slot_number=2 AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id='ventas-before-restore' AND status='revoked');"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT 'ventas-after-restore','license-ventas-restore','VENTAS','stable-install','same-phone-continuity',x'03','new-ventas-fingerprint',2,'active',6 FROM devices old WHERE old.id='ventas-before-restore' AND old.status='revoked' AND old.slot_number=2 AND old.continuity_id='same-phone-continuity' AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=old.slot_number AND d.status='active');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='ventas-before-restore';")" = "revoked"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='ventas-after-restore';")" = "active"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-ventas-restore' AND slot_number=2 AND status='active';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT revoked_at FROM pairing_tokens WHERE token_hash='pending-ventas-qr';")" = "5"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM shift_reports r JOIN devices d ON d.id=r.ventas_device_id WHERE d.license_id='license-ventas-restore' AND d.slot_number=2;")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM work_requests w JOIN devices d ON d.id=w.ventas_device_id WHERE d.license_id='license-ventas-restore' AND d.slot_number=2;")" = "1"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
