@@ -19,6 +19,28 @@ CREATE TABLE IF NOT EXISTS official_support_contacts_audit (
   actor TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+CREATE TRIGGER IF NOT EXISTS validate_official_support_contacts_insert
+BEFORE INSERT ON official_support_contacts
+BEGIN
+  SELECT CASE WHEN NEW.id <> 1 OR NEW.revision <> 1
+    OR NEW.registered_at <> NEW.updated_at
+    THEN RAISE(ABORT, 'OFFICIAL_SUPPORT_CONTACTS_INVALID_INITIAL_RECORD') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS validate_official_support_contacts_audit_insert
+BEFORE INSERT ON official_support_contacts_audit
+BEGIN
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM official_support_contacts c
+    WHERE c.id = 1 AND c.revision = NEW.revision
+      AND c.official_email = NEW.official_email
+      AND c.help_phone_1 = NEW.help_phone_1
+      AND c.help_phone_2 = NEW.help_phone_2
+      AND c.updated_by = NEW.actor
+      AND c.updated_at = NEW.created_at
+  ) THEN RAISE(ABORT, 'OFFICIAL_SUPPORT_CONTACTS_AUDIT_MUST_MATCH_MASTER') END;
+END;
+
 CREATE TRIGGER IF NOT EXISTS audit_official_support_contacts_insert
 AFTER INSERT ON official_support_contacts
 BEGIN
