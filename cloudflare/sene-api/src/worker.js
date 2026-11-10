@@ -589,8 +589,8 @@ async function restorePatron(request, env) {
   try {
     results = await env.DB.batch([
       env.DB.prepare(
-        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=?"
-      ).bind(oldPatron.id, license.id, identity.continuityId),
+        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? AND NOT EXISTS (SELECT 1 FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized'))"
+      ).bind(oldPatron.id, license.id, identity.continuityId, license.id),
       env.DB.prepare(
         "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='revoked')"
       ).bind(now, license.id, oldPatron.id),
