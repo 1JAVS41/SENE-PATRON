@@ -616,12 +616,20 @@ class MainActivity : Activity() {
                 val latest = if (reports.length() > 0) reports.optJSONObject(0) else null
                 val report = latest?.optJSONObject("report")
                 val requests = report?.optJSONArray("requests") ?: org.json.JSONArray()
+                val payrollIdsArray = report?.optJSONArray("payrollRequestIds")
+                val payrollIds = if (payrollIdsArray == null) null else buildSet {
+                    for (i in 0 until payrollIdsArray.length()) {
+                        payrollIdsArray.optString(i).takeIf { it.isNotBlank() }?.let { add(it) }
+                    }
+                }
                 val salaryCents = settings?.optLong("salaryCents", 0L) ?: 0L
                 var deductions = 0L
                 var approvedDeductions = 0
                 val lines = StringBuilder()
                 for (i in 0 until requests.length()) {
                     val item = requests.optJSONObject(i) ?: continue
+                    val requestId = item.optString("requestId")
+                    if (payrollIds != null && requestId !in payrollIds) continue
                     if (item.optString("status") != "approved") continue
                     val deduction = item.optJSONObject("decisionDetails")?.optJSONObject("deduction") ?: continue
                     if (!deduction.optBoolean("authorized", false)) continue
