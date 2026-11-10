@@ -1,10 +1,6 @@
 name: Android APK
 
 on:
-  push:
-    branches:
-      - sene-patron-development
-      - sene-cloudflare-backend
   workflow_dispatch:
 
 permissions:
@@ -35,6 +31,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar plataforma y herramientas Android
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Configurar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
