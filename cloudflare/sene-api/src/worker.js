@@ -1650,12 +1650,21 @@ async function decideWorkRequest(request, env) {
     }
   }
   const pendingRequest = await env.DB.prepare(
-    "SELECT request_type FROM work_requests WHERE id = ? AND license_id = ? AND status = 'pending' LIMIT 1"
+    "SELECT request_type, details_json FROM work_requests WHERE id = ? AND license_id = ? AND status = 'pending' LIMIT 1"
   ).bind(requestId, ctx.licenseId).first();
   if (!pendingRequest) return json({ error: "REQUEST_NOT_PENDING_OR_NOT_FOUND" }, 409);
-  if (decisionData.deduction?.authorized === true &&
-      !new Set(["LOAN", "CONSUMPTION", "ABSENCE_PERMISSION", "LATE_ARRIVAL", "SALARY_ADVANCE"]).has(pendingRequest.request_type)) {
-    return json({ error: "DEDUCTION_NOT_ALLOWED_FOR_REQUEST_TYPE" }, 400);
+  if (decisionData.deduction?.authorized === true) {
+    if (decision !== "approved") return json({ error: "DEDUCTION_REQUIRES_APPROVAL" }, 400);
+    if (!new Set(["LOAN", "CONSUMPTION", "ABSENCE_PERMISSION", "LATE_ARRIVAL", "SALARY_ADVANCE"]).has(pendingRequest.request_type)) {
+      return json({ error: "DEDUCTION_NOT_ALLOWED_FOR_REQUEST_TYPE" }, 400);
+    }
+    let requestedDetails = {};
+    try { requestedDetails = JSON.parse(pendingRequest.details_json || "{}"); } catch { return json({ error: "REQUEST_DATA_INVALID" }, 503); }
+    const requestedCents = Number(requestedDetails.amountCents || 0);
+    if (Number.isSafeInteger(requestedCents) && requestedCents > 0 &&
+        decisionData.deduction.amountCents > requestedCents) {
+      return json({ error: "DEDUCTION_EXCEEDS_REQUESTED_AMOUNT" }, 400);
+    }
   }
   const decisionJson = JSON.stringify(decisionData);
   if (decisionJson.length > 4096) return json({ error: "REQUEST_TOO_LARGE" }, 413);
