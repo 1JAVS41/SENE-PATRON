@@ -1771,10 +1771,28 @@ async function patronReportsInbox(request, env) {
   const payroll = await env.DB.prepare(
     "SELECT id, period_key, report_json, created_at FROM payroll_reports WHERE license_id = ? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ?) ORDER BY created_at DESC LIMIT 50"
   ).bind(ctx.licenseId, ctx.licenseId, slot).all();
+  const payrollRows = payroll.results || [];
+  let payrollEntries = [];
+  if (payrollRows.length > 0) {
+    const previousReportAt = payrollRows.length > 1 ? Number(payrollRows[1].created_at) : 0;
+    const entries = await env.DB.prepare(
+      "SELECT id, request_type, details_json, status, decision_json, created_at, decided_at FROM work_requests WHERE license_id = ? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ?) AND (created_at > ? OR decided_at > ? OR status = 'pending') ORDER BY COALESCE(decided_at, created_at) DESC LIMIT 500"
+    ).bind(ctx.licenseId, ctx.licenseId, slot, previousReportAt, previousReportAt).all();
+    payrollEntries = (entries.results || []).map((r) => ({
+      requestId: r.id,
+      type: r.request_type,
+      details: JSON.parse(r.details_json || "{}"),
+      status: r.status,
+      decisionDetails: r.decision_json ? JSON.parse(r.decision_json) : {},
+      createdAt: Number(r.created_at),
+      decidedAt: r.decided_at === null ? 0 : Number(r.decided_at)
+    }));
+  }
   return json({
     slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
     shiftReports: (shifts.results || []).map((r) => ({ reportId: r.id, shiftKey: r.shift_key, report: JSON.parse(r.report_json), createdAt: r.created_at })),
-    payrollReports: (payroll.results || []).map((r) => ({ reportId: r.id, periodKey: r.period_key, report: JSON.parse(r.report_json), createdAt: r.created_at }))
+    payrollReports: payrollRows.map((r) => ({ reportId: r.id, periodKey: r.period_key, report: JSON.parse(r.report_json), createdAt: r.created_at })),
+    payrollEntries
   });
 }
 
