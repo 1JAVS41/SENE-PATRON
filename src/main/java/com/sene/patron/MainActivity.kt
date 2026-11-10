@@ -891,7 +891,8 @@ class MainActivity : Activity() {
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         if (prefs.getString("device_id", null).isNullOrBlank()) return
         refreshingNotifications = true
-        lastNotificationRefreshAt = now
+        // No marcar la consulta como realizada hasta recibir confirmación del servidor.
+        // Si falla la red, el siguiente render o intento manual podrá reintentar.
         Thread {
             try {
                 val api = SeneApiClient(this, baseUrl)
