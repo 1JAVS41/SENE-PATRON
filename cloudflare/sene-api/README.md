@@ -113,3 +113,14 @@ Migración 0010 añade sueldo y fechas de pago por separado para VENTAS_1 y VENT
 - La operación REPLACEMENT solo puede generar QR después de que el operador haya aprobado la reposición del slot correspondiente.
 - Requiere configurar PAIRING_TOKEN_ENCRYPTION_KEY en Cloudflare Workers antes de habilitar la generación de QR. El secreto no debe incluirse en APK ni en Git.
 - Datos bancarios y teléfonos oficiales AYUDA aún deben estar registrados/configurados antes de presentar la experiencia como operativa al cliente.
+
+
+## Reposición de SENE PATRÓN por pérdida del equipo
+
+- Desde AYUDA, el cliente abre «PERDÍ MI EQUIPO SENE PATRÓN» e introduce nombre de empresa, correo registrado y teléfono registrado.
+- El servidor valida los tres datos contra los contactos guardados en la licencia. El registro inicial solicita y guarda correo y teléfono para permitir esta comprobación.
+- Al pulsar «YA REALICÉ EL PAGO», se crea una solicitud idempotente por licencia. El pago es de $500 MXN y el concepto debe ser exactamente «Reposición SENE PATRÓN».
+- El cliente envía primero el comprobante a uno de los números oficiales de AYUDA. La solicitud queda en la cola privada del operador. Tras comprobar el pago, el operador autoriza y recibe un código de un solo uso; debe entregarlo al cliente exclusivamente por un número oficial AYUDA.
+- Al canjear el código en el nuevo teléfono, se revoca el PATRÓN anterior y se recupera la misma licencia y espacios VENTAS 1 y 2. La solicitud se marca consumida.
+- Endpoints privados de operador: GET /v1/operator/patron-recovery-payments/pending y POST /v1/operator/patron-recovery-payments/authorize.
+- Requiere aplicar la migración 0013 antes de habilitar este flujo en producción. No se despliega ni se modifica la D1 real desde este cambio.
