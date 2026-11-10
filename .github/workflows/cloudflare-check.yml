@@ -636,8 +636,8 @@ jobs:
       - name: Probar restauración gratuita de VENTAS en el mismo teléfono
         run: |
           set -euo pipefail
-          grep -q 'VENTAS_RESTORE: ["POST", "/v1/ventas/restore"]' cloudflare/sene-api/src/worker.js
-          grep -q 'url.pathname === "/v1/ventas/restore"' cloudflare/sene-api/src/worker.js
+          grep -Fq 'VENTAS_RESTORE: ["POST", "/v1/ventas/restore"]' cloudflare/sene-api/src/worker.js
+          grep -Fq 'url.pathname === "/v1/ventas/restore"' cloudflare/sene-api/src/worker.js
           DB_FILE="$(mktemp)"
           for migration in cloudflare/sene-api/migrations/*.sql; do sqlite3 "$DB_FILE" < "$migration"; done
           sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,registered_email,registered_phone,status,max_devices,created_at,expires_at) VALUES ('license-ventas-restore','TIENDA VENTAS RESTORE','titular@example.invalid','5211111111111','active',3,1,9999999999);"
