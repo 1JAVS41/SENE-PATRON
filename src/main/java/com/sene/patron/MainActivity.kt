@@ -1042,6 +1042,7 @@ val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, emai
                     AlertDialog.Builder(this)
                         .setTitle("NO SE PUDIERON VERIFICAR LOS CONTACTOS")
                         .setMessage("El servidor no respondió con contactos oficiales válidos o la firma digital no coincide. Por seguridad, no se mostrarán números ni correos alternativos.")
+                        .setNeutralButton("PERDÍ MI EQUIPO SENE PATRÓN") { _, _ -> showPatronRecoveryDialog() }
                         .setPositiveButton("CERRAR", null)
                         .show()
                 }
