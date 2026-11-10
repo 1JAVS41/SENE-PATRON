@@ -1038,8 +1038,7 @@ class MainActivity : Activity() {
                                 "Revisión digital: $revision\n\n" +
                                 "Estos datos fueron validados con la clave pública integrada en SENE PATRÓN."
                         )
-                        .setNegativeButton("REINSTALÉ EN EL MISMO TELÉFONO") { _, _ -> showPatronRestoreDialog() }
-                        .setNegativeButton("REINSTALÉ EN EL MISMO TELÉFONO") { _, _ -> showPatronRestoreDialog() }
+.setNegativeButton("REINSTALÉ EN EL MISMO TELÉFONO") { _, _ -> showPatronRestoreDialog() }
                         .setNeutralButton("PERDÍ MI EQUIPO SENE PATRÓN") { _, _ -> showPatronRecoveryDialog() }
                         .setPositiveButton("CERRAR", null)
                         .show()
