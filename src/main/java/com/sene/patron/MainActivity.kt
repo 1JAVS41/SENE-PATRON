@@ -868,10 +868,10 @@ class MainActivity : Activity() {
                     "1. Realiza el pago de $80 MXN.\n" +
                     "2. En el concepto escribe exactamente:\n$business\n" +
                     "3. Envía la captura del comprobante a los números oficiales de Ayuda por WhatsApp.\n" +
-                    "4. Después pulsa REALIZAR PAGO para enviar la solicitud y espera la confirmación del pago y el código de autorización.\n\n" +
+                    "4. Después pulsa YA REALICÉ EL PAGO para enviar la solicitud y espera la confirmación del pago y el código de autorización.\n\n" +
                     "La licencia se renueva 30 días cuando introduces el código correcto."
             )
-            .setPositiveButton("REALIZAR PAGO") { _, _ ->
+            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestRenewal()
