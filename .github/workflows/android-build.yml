@@ -73,10 +73,25 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
 
-      - name: Compilar APK de depuración
-        run: gradle --no-daemon assembleDebug
+      - name: Compilar APK de depuración y guardar diagnóstico
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon assembleDebug --stacktrace --info 2>&1 | tee build-diagnostics.log
+          result=${PIPESTATUS[0]}
+          exit "$result"
+
+      - name: Publicar diagnóstico de compilación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SENE-PATRON-build-diagnostics
+          path: build-diagnostics.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Publicar APK de depuración para pruebas
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: SENE-PATRON-debug
