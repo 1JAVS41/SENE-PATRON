@@ -451,9 +451,12 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val api = SenePatronApiClient(this, base)
+                // Las solicitudes laborales y las correcciones tienen endpoints separados.
+                // Consultar ambos evita que las autorizaciones de venta desaparezcan de la bandeja.
                 val result = api.requestsInbox(slot, "pending")
+                val correctionResult = api.correctionsInbox(slot, "pending")
                 val work = result.optJSONArray("items") ?: org.json.JSONArray()
-                val corrections = result.optJSONArray("corrections") ?: org.json.JSONArray()
+                val corrections = correctionResult.optJSONArray("items") ?: org.json.JSONArray()
                 val labels = ArrayList<String>()
                 val kinds = ArrayList<String>()
                 val records = ArrayList<org.json.JSONObject>()
@@ -467,7 +470,8 @@ class MainActivity : Activity() {
                     labels.add("CORRECCIÓN DE VENTA\nVenta: " + item.optString("saleId") + "\nMotivo: " + item.optString("reason"))
                     kinds.add("correction"); records.add(item)
                 }
-                val counts = result.optJSONObject("pendingByTeam") ?: org.json.JSONObject()
+                val counts = correctionResult.optJSONObject("pendingByTeam")
+                    ?: result.optJSONObject("pendingByTeam") ?: org.json.JSONObject()
                 val unseenCount = counts.optInt(slot, 0)
                 val pendingCount = labels.size
                 val message = if (pendingCount == 0) "No hay solicitudes pendientes para este equipo." else
@@ -487,7 +491,7 @@ class MainActivity : Activity() {
                                 (item.optJSONObject("details")?.toString(2) ?: "{}")
                         }
                         AlertDialog.Builder(this).setTitle(if (correction) "AUTORIZAR CORRECCIÓN" else "REVISAR SOLICITUD")
-                            .setMessage(details + "\n\n¿Deseas aprobar o rechazar?")
+                            .setMessage(details + "\n\nEl motivo se registra en SENE VENTAS y aquí se muestra para que puedas decidir sin llamar al trabajador. ¿Deseas aprobar o rechazar?")
                             .setPositiveButton("APROBAR") { _, _ -> decideTeamItem(base, item, correction, "approve", slot) }
                             .setNegativeButton("RECHAZAR") { _, _ -> decideTeamItem(base, item, correction, "reject", slot) }
                             .setNeutralButton("VOLVER", null).show()
