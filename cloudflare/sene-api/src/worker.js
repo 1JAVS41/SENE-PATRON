@@ -1871,8 +1871,125 @@ async function patronReportsInbox(request, env) {
   });
 }
 
+
+function validateOfficialContacts(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const allowed = ["officialEmail", "helpPhone1", "helpPhone2"];
+  if (Object.keys(body).some((key) => !allowed.includes(key)) ||
+      allowed.some((key) => typeof body[key] !== "string")) return null;
+  const officialEmail = body.officialEmail.trim().toLowerCase();
+  const helpPhone1 = body.helpPhone1.trim();
+  const helpPhone2 = body.helpPhone2.trim();
+  if (officialEmail.length > 254 ||
+      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(officialEmail) ||
+      !/^\\+[1-9][0-9]{7,14}$/.test(helpPhone1) ||
+      !/^\\+[1-9][0-9]{7,14}$/.test(helpPhone2) ||
+      helpPhone1 === helpPhone2) return null;
+  return { officialEmail, helpPhone1, helpPhone2 };
+}
+
+async function signOfficialContacts(row, env) {
+  if (typeof env.CONTACTS_SIGNING_PRIVATE_JWK !== "string" ||
+      env.CONTACTS_SIGNING_PRIVATE_JWK.length > 4096) {
+    return { error: "CONTACTS_SIGNING_NOT_CONFIGURED" };
+  }
+  let jwk;
+  try { jwk = JSON.parse(env.CONTACTS_SIGNING_PRIVATE_JWK); } catch {
+    return { error: "CONTACTS_SIGNING_KEY_INVALID" };
+  }
+  if (!jwk || jwk.kty !== "EC" || jwk.crv !== "P-256" || typeof jwk.d !== "string") {
+    return { error: "CONTACTS_SIGNING_KEY_INVALID" };
+  }
+  const payload = {
+    revision: Number(row.revision),
+    officialEmail: row.official_email,
+    helpPhone1: row.help_phone_1,
+    helpPhone2: row.help_phone_2,
+    registeredAt: Number(row.registered_at),
+    updatedAt: Number(row.updated_at)
+  };
+  const canonical = JSON.stringify(payload);
+  const privateKey = await crypto.subtle.importKey(
+    "jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]
+  );
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" }, privateKey, new TextEncoder().encode(canonical)
+  );
+  return {
+    payload,
+    signature: base64Url(signature),
+    algorithm: "ECDSA_P256_SHA256",
+    keyId: "sene-official-contacts-v1"
+  };
+}
+
+async function getOfficialSupportContacts(_request, env) {
+  const row = await env.DB.prepare(
+    "SELECT revision, official_email, help_phone_1, help_phone_2, registered_at, updated_at FROM official_support_contacts WHERE id=1 LIMIT 1"
+  ).first();
+  if (!row) return json({ error: "OFFICIAL_CONTACTS_NOT_REGISTERED" }, 404);
+  const signed = await signOfficialContacts(row, env);
+  if (signed.error) return json({ error: signed.error }, 503);
+  return json(signed);
+}
+
+async function registerOfficialSupportContacts(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_JSON" }, 400); }
+  const contacts = validateOfficialContacts(body);
+  if (!contacts) return json({ error: "INVALID_OFFICIAL_CONTACTS" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO official_support_contacts (id, official_email, help_phone_1, help_phone_2, revision, registered_at, updated_at, updated_by) VALUES (1, ?, ?, ?, 1, ?, ?, 'operator-console')"
+    ).bind(contacts.officialEmail, contacts.helpPhone1, contacts.helpPhone2, now, now).run();
+  } catch {
+    const exists = await env.DB.prepare(
+      "SELECT id FROM official_support_contacts WHERE id=1 LIMIT 1"
+    ).first();
+    if (exists) return json({ error: "OFFICIAL_CONTACTS_ALREADY_REGISTERED" }, 409);
+    return json({ error: "OFFICIAL_CONTACTS_REGISTRATION_FAILED" }, 503);
+  }
+  return getOfficialSupportContacts(request, env);
+}
+
+async function updateOfficialSupportContacts(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_JSON" }, 400); }
+  if (!body || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1) {
+    return json({ error: "INVALID_EXPECTED_REVISION" }, 400);
+  }
+  const contacts = validateOfficialContacts({
+    officialEmail: body.officialEmail,
+    helpPhone1: body.helpPhone1,
+    helpPhone2: body.helpPhone2
+  });
+  if (!contacts || Object.keys(body).some((key) =>
+    !["expectedRevision", "officialEmail", "helpPhone1", "helpPhone2"].includes(key))) {
+    return json({ error: "INVALID_OFFICIAL_CONTACTS" }, 400);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const result = await env.DB.prepare(
+    "UPDATE official_support_contacts SET official_email=?, help_phone_1=?, help_phone_2=?, revision=revision+1, updated_at=MAX(?, updated_at+1), updated_by='operator-console' WHERE id=1 AND revision=?"
+  ).bind(contacts.officialEmail, contacts.helpPhone1, contacts.helpPhone2, now, body.expectedRevision).run();
+  if (!result.meta || result.meta.changes !== 1) {
+    const row = await env.DB.prepare(
+      "SELECT revision FROM official_support_contacts WHERE id=1 LIMIT 1"
+    ).first();
+    return json({ error: row ? "REVISION_CONFLICT" : "OFFICIAL_CONTACTS_NOT_REGISTERED",
+      currentRevision: row ? Number(row.revision) : null }, row ? 409 : 404);
+  }
+  return getOfficialSupportContacts(request, env);
+}
+
 async function handle(request, env) {
   const url = new URL(request.url);
+
+  if (request.method === "GET" && url.pathname === "/v1/support/contacts") return getOfficialSupportContacts(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/support/contacts/register") return registerOfficialSupportContacts(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/support/contacts/update") return updateOfficialSupportContacts(request, env);
 
   if (request.method === "GET" && url.pathname === "/health") {
     return json({ service: "SENE licensing API", status: "ok", version: 1 });
