@@ -1050,6 +1050,7 @@ class MainActivity : Activity() {
                     AlertDialog.Builder(this)
                         .setTitle("NO SE PUDIERON VERIFICAR LOS CONTACTOS")
                         .setMessage("El servidor no respondió con contactos oficiales válidos o la firma digital no coincide. Por seguridad, no se mostrarán números ni correos alternativos.")
+                        .setNegativeButton("REINSTALÉ EN EL MISMO TELÉFONO") { _, _ -> showPatronRestoreDialog() }
                         .setNeutralButton("PERDÍ MI EQUIPO SENE PATRÓN") { _, _ -> showPatronRecoveryDialog() }
                         .setPositiveButton("CERRAR", null)
                         .show()
