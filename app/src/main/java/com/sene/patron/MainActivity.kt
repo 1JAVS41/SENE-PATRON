@@ -475,17 +475,14 @@ class MainActivity : Activity() {
                     labels.add("CORRECCIÓN DE VENTA\nVenta: " + item.optString("saleId") + "\nMotivo(s): " + reasonText + cashText)
                     kinds.add("correction"); records.add(item)
                 }
-                // El botón representa solicitudes que aún esperan decisión,
-                // no solo las que todavía no se han abierto. Consultar la bandeja
-                // no debe apagar el indicador mientras el patrón no responda.
-                val counts = api.notifications().optJSONObject("pendingByTeam") ?: org.json.JSONObject()
-                val pendingForTeam = counts.optInt(slot, 0)
+                // Esta bandeja ya contiene únicamente solicitudes pendientes del equipo.
+                // El indicador se mantiene activo hasta aprobar o rechazar cada una.
                 val pendingCount = labels.size
                 val message = if (pendingCount == 0) "No hay solicitudes pendientes para este equipo." else
                     "Solicitudes pendientes en esta bandeja: " + pendingCount + "\nSelecciona una solicitud para revisar y responder."
                 runOnUiThread {
-                    if (slot == "VENTAS_1") updateTeamStatus(team1StatusButton, "EQUIPO 1 · SENE VENTAS", pendingForTeam)
-                    else updateTeamStatus(team2StatusButton, "EQUIPO 2 · SENE VENTAS", pendingForTeam)
+                    if (slot == "VENTAS_1") updateTeamStatus(team1StatusButton, "EQUIPO 1 · SENE VENTAS", pendingCount)
+                    else updateTeamStatus(team2StatusButton, "EQUIPO 2 · SENE VENTAS", pendingCount)
                     val builder = AlertDialog.Builder(this).setTitle(if (slot == "VENTAS_1") "EQUIPO 1 · BANDEJA" else "EQUIPO 2 · BANDEJA")
                     if (labels.isEmpty()) builder.setMessage(message).setPositiveButton("CERRAR", null).show()
                     else builder.setMessage(message).setItems(labels.toTypedArray()) { _, index ->
