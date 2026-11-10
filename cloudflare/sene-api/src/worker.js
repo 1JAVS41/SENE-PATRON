@@ -741,9 +741,9 @@ async function createPairingToken(request, env) {
     const raced = await env.DB.prepare(
       `SELECT encrypted_token, created_at FROM pairing_tokens
         WHERE license_id = ? AND patron_device_id = ? AND slot_number = ?
-          AND operation = 'NEW' AND remaining_uses = 1 AND revoked_at IS NULL
+          AND operation = ? AND remaining_uses = 1 AND revoked_at IS NULL
           AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`
-    ).bind(patron.license_id, patron.id, slotNumber).first();
+    ).bind(patron.license_id, patron.id, slotNumber, operation).first();
     if (!raced?.encrypted_token) return json({ error: "SERVICE_UNAVAILABLE" }, 503);
     try { token = await decryptPairingToken(raced.encrypted_token, env); }
     catch { return json({ error: "PAIRING_TOKEN_RECOVERY_FAILED" }, 503); }
