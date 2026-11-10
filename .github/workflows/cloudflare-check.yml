@@ -144,6 +144,20 @@ jobs:
           sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at, slot_number, operation, encrypted_token) VALUES ('hash-eq1-next', 'license-pair-test', 'patron-qr-test', 1, 31, 253402300799, 2, 'REPLACEMENT', 'cipher-next');"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
+      - name: Probar datos registrados y reposición pagada de PATRÓN
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM pragma_table_info('licenses') WHERE name IN ('registered_email','registered_phone');")" = "2"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM pragma_table_info('registration_requests') WHERE name IN ('registered_email','registered_phone');")" = "2"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patron_recovery_payment_requests';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_one_open_patron_recovery_payment';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_one_pending_patron_recovery';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "PRAGMA integrity_check;")" = "ok"
+
       - name: Probar restricciones de recuperación de PATRÓN
         run: |
           set -euo pipefail
