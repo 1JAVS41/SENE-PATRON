@@ -31,6 +31,19 @@ jobs:
       - name: Instalar Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Generar icono con el logotipo original SENE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          python3 - <<'PY'
+          from PIL import Image
+          src = Image.open('src/main/res/drawable-nodpi/logo_sene_pv.png').convert('RGBA')
+          icon = Image.new('RGBA', (512, 512), (8, 8, 8, 255))
+          src.thumbnail((470, 470), Image.Resampling.LANCZOS)
+          icon.alpha_composite(src, ((512-src.width)//2, (512-src.height)//2))
+          icon.save('src/main/res/drawable-nodpi/ic_launcher_patron.png')
+          PY
+
       - name: Instalar plataforma y herramientas Android
         run: |
           yes | sdkmanager --licenses >/dev/null
