@@ -41,7 +41,7 @@ class MainActivity : Activity() {
     private val success = Color.rgb(22, 139, 69)
     private val white = Color.WHITE
     private var currentPage = "home"
-    private var lastNotificationRefreshAt = 0L
+    @Volatile private var lastNotificationRefreshAt = 0L
     private var refreshingNotifications = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -897,7 +897,10 @@ class MainActivity : Activity() {
                 val api = SeneApiClient(this, baseUrl)
                 val session = api.session()
                 if (session.optString("licenseStatus") != "EXPIRED") {
-                    try { api.refreshNotifications() } catch (_: Exception) { }
+                    // Solo aplicar el intervalo de 24 h cuando el servidor confirmó
+                    // la consulta; un fallo de red no debe silenciar reintentos.
+                    api.refreshNotifications()
+                    lastNotificationRefreshAt = System.currentTimeMillis()
                 }
                 runOnUiThread {
                     refreshingNotifications = false
