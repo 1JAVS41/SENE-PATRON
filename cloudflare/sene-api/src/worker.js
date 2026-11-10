@@ -1015,11 +1015,17 @@ async function createPatronRegistrationRequest(request, env) {
   }
   const normalizedName = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
   const existingForDevice = await env.DB.prepare(
-    "SELECT id, business_name, registered_email, registered_phone, status, created_at FROM registration_requests WHERE installation_id = ? AND fingerprint = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
-  ).bind(proof.challenge.installation_id, proof.challenge.fingerprint.toLowerCase()).first();
+    "SELECT id, business_name, registered_email, registered_phone, fingerprint, status, created_at FROM registration_requests WHERE installation_id = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
+  ).bind(proof.challenge.installation_id).first();
   if (existingForDevice) {
     if (existingForDevice.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalizedName || existingForDevice.registered_email !== registeredEmail || existingForDevice.registered_phone !== registeredPhone) {
       return json({ error: "DEVICE_HAS_DIFFERENT_PENDING_REGISTRATION" }, 409);
+    }
+    if (String(existingForDevice.fingerprint).toLowerCase() !== proof.challenge.fingerprint.toLowerCase()) {
+      const rebound = await env.DB.prepare(
+        "UPDATE registration_requests SET fingerprint=? WHERE id=? AND installation_id=? AND fingerprint=? AND status IN ('pending_payment','authorized')"
+      ).bind(proof.challenge.fingerprint.toLowerCase(), existingForDevice.id, proof.challenge.installation_id, existingForDevice.fingerprint).run();
+      if ((rebound.meta?.changes ?? 0) !== 1) return json({ error: "REGISTRATION_IDENTITY_REBIND_CONFLICT" }, 409);
     }
     return json({ requestId: existingForDevice.id, businessName: existingForDevice.business_name,
       status: existingForDevice.status, amountCents: 58000, currency: "MXN", duplicate: true });
