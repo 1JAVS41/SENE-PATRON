@@ -216,6 +216,7 @@ const CHALLENGE_TARGETS = {
   PATRON_PAYROLL_SETTINGS_SET: ["POST", "/v1/patron/payroll/settings/set"],
   PATRON_REQUEST_DECISION: ["POST", "/v1/patron/requests/decision"],
   VENTAS_REQUEST_UPDATES: ["POST", "/v1/ventas/requests/updates"],
+  VENTAS_REQUEST_HISTORY: ["POST", "/v1/ventas/requests/history"],
   VENTAS_SHIFT_REPORT: ["POST", "/v1/ventas/shift-reports"],
   VENTAS_PAYROLL_REPORT: ["POST", "/v1/ventas/payroll-reports"],
   PATRON_REPORTS_INBOX: ["POST", "/v1/patron/reports/inbox"],
@@ -2200,6 +2201,47 @@ async function decideWorkRequest(request, env) {
   return json({ requestId, status: decision, decidedAt: now, decisionDetails: decisionData });
 }
 
+async function ventasRequestHistory(request, env) {
+  const checked = await verifyBusinessProof(request, env, "VENTAS_REQUEST_HISTORY");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const work = await env.DB.prepare(
+    "SELECT id, request_type, details_json, status, decision_json, created_at, decided_at FROM work_requests WHERE ventas_device_id = ? ORDER BY created_at DESC LIMIT 200"
+  ).bind(ctx.deviceId).all();
+  const corrections = await env.DB.prepare(
+    "SELECT id, sale_id, reason, reasons_json, cash_impact, cash_reason, status, created_at, decided_at FROM correction_requests WHERE ventas_device_id = ? ORDER BY created_at DESC LIMIT 100"
+  ).bind(ctx.deviceId).all();
+  return json({
+    items: (work.results || []).map((row) => ({
+      requestId: row.id,
+      type: row.request_type,
+      details: JSON.parse(row.details_json || "{}"),
+      status: row.status,
+      decisionDetails: row.decision_json ? JSON.parse(row.decision_json) : {},
+      createdAt: Number(row.created_at),
+      decidedAt: row.decided_at === null ? null : Number(row.decided_at)
+    })),
+    corrections: (corrections.results || []).map((row) => ({
+      requestId: row.id,
+      saleId: row.sale_id,
+      reason: row.reason,
+      reasons: (() => { try { return JSON.parse(row.reasons_json || "[]"); } catch { return [row.reason]; } })(),
+      cashImpact: Number(row.cash_impact) === 1,
+      cashReason: row.cash_reason || "",
+      status: row.status,
+      createdAt: Number(row.created_at),
+      decidedAt: row.decided_at === null ? null : Number(row.decided_at)
+    }))
+  });
+}
+
 async function ventasRequestUpdates(request, env) {
   const checked = await verifyBusinessProof(request, env, "VENTAS_REQUEST_UPDATES");
   if (checked.response) return checked.response;
@@ -2513,6 +2555,7 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/notifications") return patronNotifications(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/devices/list") return patronDevicesList(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/decision") return decideWorkRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/ventas/requests/history") return ventasRequestHistory(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests/updates") return ventasRequestUpdates(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/shift-reports") return saveReport(request, env, "VENTAS_SHIFT_REPORT", "shift_reports", "shiftKey", "shift_key");
   if (request.method === "POST" && url.pathname === "/v1/ventas/payroll-reports") return saveReport(request, env, "VENTAS_PAYROLL_REPORT", "payroll_reports", "periodKey", "period_key");
