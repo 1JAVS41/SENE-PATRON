@@ -1207,8 +1207,13 @@ async function createCorrectionRequest(request, env) {
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const saleId = typeof body.saleId === "string" ? body.saleId.trim() : "";
   const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  const allowedReasons = new Set([
+    "Devolución", "Ajuste de precio", "Eliminación de producto",
+    "Corrección de cantidad", "Producto equivocado", "Producto omitido", "Otro"
+  ]);
   const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey : "";
-  if (!saleId || saleId.length > 120 || !reason || reason.length > 500 ||
+  // El servidor solo acepta categorías predefinidas, nunca descripciones comerciales libres.
+  if (!saleId || saleId.length > 120 || !allowedReasons.has(reason) ||
       !/^[0-9a-f-]{36}$/i.test(idempotencyKey)) return json({ error: "INVALID_REQUEST" }, 400);
   const existing = await env.DB.prepare(
     "SELECT id, status, created_at, sale_id FROM correction_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
