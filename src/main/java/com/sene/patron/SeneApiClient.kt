@@ -25,27 +25,30 @@ class SeneApiClient(context: Context, baseUrl: String) {
         require(root.startsWith("https://")) { "La dirección del servidor SENE debe usar HTTPS" }
     }
 
-    fun requestRegistration(businessName: String): JSONObject {
+    fun requestRegistration(businessName: String, registeredEmail: String, registeredPhone: String): JSONObject {
         val normalizedName = businessName.trim().replace(Regex("\\s+"), " ")
-        require(normalizedName.isNotBlank() && normalizedName.length <= 100) {
-            "Escribe el nombre de tu empresa (máximo 100 caracteres)"
-        }
+        val email = registeredEmail.trim().lowercase()
+        val phone = registeredPhone.filter { it.isDigit() }
+        require(normalizedName.isNotBlank() && normalizedName.length <= 100) { "Escribe el nombre de tu empresa (máximo 100 caracteres)" }
+        require(android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) { "Escribe un correo válido" }
+        require(phone.length in 10..15) { "Escribe el número registrado (10 a 15 dígitos)" }
         val identity = PatronDeviceIdentity.get(app)
-        val body = JSONObject().put("businessName", normalizedName)
-        val result = bootstrapSigned(
-            "PATRON_REGISTRATION_REQUEST",
-            "/v1/patron/registrations/request",
-            body.toString(),
-            identity
-        )
+        val body = JSONObject().put("businessName", normalizedName).put("registeredEmail", email).put("registeredPhone", phone)
+        val result = bootstrapSigned("PATRON_REGISTRATION_REQUEST", "/v1/patron/registrations/request", body.toString(), identity)
         val requestId = result.optString("requestId")
         if (requestId.isNotBlank()) {
-            check(prefs.edit()
-                .putString("registration_request_id", requestId)
-                .putString("business_name", result.optString("businessName", normalizedName))
-                .commit()) { "No se pudo guardar la solicitud de registro" }
+            check(prefs.edit().putString("registration_request_id", requestId).putString("business_name", result.optString("businessName", normalizedName)).commit()) { "No se pudo guardar la solicitud de registro" }
         }
         return result
+    }
+
+    fun requestPatronRecovery(businessName: String, registeredEmail: String, registeredPhone: String): JSONObject {
+        val email = registeredEmail.trim().lowercase()
+        val phone = registeredPhone.filter { it.isDigit() }
+        require(businessName.isNotBlank() && android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() && phone.length in 10..15) { "Revisa los datos registrados" }
+        val identity = PatronDeviceIdentity.get(app)
+        val body = JSONObject().put("businessName", businessName.trim()).put("registeredEmail", email).put("registeredPhone", phone)
+        return bootstrapSigned("PATRON_RECOVERY_REQUEST", "/v1/patron/recovery/request", body.toString(), identity)
     }
 
     fun activate(activationCode: String): JSONObject {
