@@ -100,11 +100,11 @@ La confirmación es manual y presupone que el operador verificó el dinero recib
 ## 6. Vinculación de SENE VENTAS por QR
 
 ### `POST /v1/patron/pairing-tokens`
-Requiere dispositivo PATRÓN autenticado y licencia vigente. El reto usa el propósito `PATRON_PAIRING_TOKEN`; el cuerpo firmado es `{"uses":2}`. El QR se genera con 2 usos máximos y vencimiento de 24 horas. El token aleatorio se almacena únicamente como hash.
+Requiere dispositivo PATRÓN autenticado y licencia vigente. El reto usa el propósito `PATRON_PAIRING_TOKEN`; el cuerpo firmado es `{"uses":2}`. Se genera un QR independiente para el slot seleccionado (`VENTAS_1` o `VENTAS_2`), con un solo uso y sin vencimiento temporal. El token aleatorio se almacena cifrado para poder recuperar el mismo QR pendiente y su hash se usa para validarlo.
 
-**Implementación en Worker (parcial):** emisión firmada de QR y vinculación firmada de VENTAS ya tienen handlers. El alta de VENTAS inserta el dispositivo y descuenta un uso del QR en un `DB.batch`, asignando únicamente slots 2 y 3 y rechazando licencias no activas/vencidas, token vencido/revocado, huellas duplicadas o slots ocupados. El plazo QR se fijó en 24 horas como valor recomendado; puede ajustarse antes de producción. Cuerpo:
+**Implementación en Worker (parcial):** emisión firmada de QR y vinculación firmada de VENTAS ya tienen handlers. El alta de VENTAS inserta el dispositivo y descuenta un uso del QR en un `DB.batch`, asignando únicamente slots 2 y 3 y rechazando licencias no activas/vencidas, token vencido/revocado, huellas duplicadas o slots ocupados. Cada QR está ligado a un único slot y operación (`NEW` o `REPLACEMENT`). Cuerpo:
 ```json
-{"uses":2}
+{"slot":"VENTAS_1","operation":"NEW"}
 ```
 El servidor genera token aleatorio de alta entropía, almacena solo hash, vincula licencia/PATRÓN, fija máximo dos usos y vencimiento. Respuesta:
 ```json
