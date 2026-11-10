@@ -223,6 +223,12 @@ jobs:
           sqlite3 "$DB_FILE" "UPDATE correction_grants SET uses_consumed=1, consumed_at=4 WHERE id='grant-1' AND request_id='correction-1' AND license_id='license-correction' AND ventas_device_id='ventas-correction' AND sale_id='sale-42' AND uses_consumed=0;"
           sqlite3 "$DB_FILE" "UPDATE correction_requests SET status='consumed' WHERE id='correction-1' AND status='approved' AND EXISTS (SELECT 1 FROM correction_grants WHERE id='grant-1' AND uses_consumed=1 AND consumed_at=4);"
           test "$(sqlite3 "$DB_FILE" "SELECT status FROM correction_requests WHERE id='correction-1';")" = "consumed"
+          # Simula la repetición tras perder la respuesta HTTPS: solo el mismo
+          # request, permiso, licencia, equipo y venta deben reconocer el consumo.
+          replay="$(sqlite3 "$DB_FILE" "SELECT g.consumed_at FROM correction_grants g JOIN correction_requests r ON r.id=g.request_id WHERE g.id='grant-1' AND g.request_id='correction-1' AND g.license_id='license-correction' AND g.ventas_device_id='ventas-correction' AND g.sale_id='sale-42' AND g.uses_allowed=1 AND g.uses_consumed=1 AND r.status='consumed' AND r.license_id='license-correction' AND r.ventas_device_id='ventas-correction' AND r.sale_id='sale-42' LIMIT 1;")"
+          test "$replay" = "4"
+          mismatch="$(sqlite3 "$DB_FILE" "SELECT g.consumed_at FROM correction_grants g JOIN correction_requests r ON r.id=g.request_id WHERE g.id='grant-1' AND g.request_id='correction-1' AND g.license_id='license-correction' AND g.ventas_device_id='another-device' AND g.sale_id='sale-42' AND g.uses_allowed=1 AND g.uses_consumed=1 AND r.status='consumed' AND r.license_id='license-correction' AND r.ventas_device_id='another-device' AND r.sale_id='sale-42' LIMIT 1;")"
+          test -z "$mismatch"
           second="$(sqlite3 "$DB_FILE" "UPDATE correction_grants SET uses_consumed=1, consumed_at=5 WHERE id='grant-1' AND uses_consumed=0; SELECT changes();")"
           test "$second" = "0"
           test "$(sqlite3 "$DB_FILE" "SELECT consumed_at FROM correction_grants WHERE id='grant-1';")" = "4"
