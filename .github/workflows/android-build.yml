@@ -31,6 +31,8 @@ jobs:
 
       - name: Instalar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Generar icono con el logotipo original SENE
         run: |
@@ -45,10 +47,8 @@ jobs:
           icon.save('src/main/res/drawable-nodpi/ic_launcher_patron.png')
           PY
 
-      - name: Instalar plataforma y herramientas Android
-        run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Instalar licencias Android
+        run: yes | sdkmanager --licenses >/dev/null
 
       - name: Instalar Gradle 8.9
         run: |
