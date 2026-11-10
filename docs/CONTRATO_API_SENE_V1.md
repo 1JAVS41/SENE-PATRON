@@ -302,3 +302,21 @@ Este flujo está en GitHub, pero no está desplegado ni probado E2E contra Cloud
 
 
 Los reportes de nómina conservan el historial reciente en `requests` y separan el conjunto del periodo en `payrollRequestIds`. Para el cálculo, PATRÓN utiliza `payrollEntries`, que el servidor construye consultando las solicitudes y decisiones autoritativas de D1 dentro del ciclo entre reportes; no confía en estados ni cantidades de descuento enviados por el APK VENTAS. Los reintentos idempotentes devuelven el reporte original almacenado.
+
+
+## 6-A. Restauración gratuita de SENE VENTAS tras reinstalar en el mismo teléfono
+
+### `POST /v1/ventas/restore`
+
+**Implementado en la rama del Worker; todavía no desplegado en producción.** Requiere reto bootstrap firmado con propósito `VENTAS_RESTORE`. El cuerpo incluye nombre exacto de empresa, correo y teléfono registrados, además de la identidad P-256 nueva del teléfono. El Worker comprueba que la licencia coincida y que exista un equipo VENTAS activo del mismo slot con el mismo `continuityId` derivado de `ANDROID_ID`. Si coincide, revoca la identidad criptográfica anterior, revoca el QR pendiente de ese slot y registra la nueva clave en el mismo espacio `VENTAS_1` o `VENTAS_2`. No crea licencia ni plaza adicional. Si el teléfono es distinto, los datos no coinciden o hay una reposición pagada pendiente, rechaza la restauración.
+
+Los reportes y solicitudes históricos permanecen asociados a los registros previos; las bandejas del patrón consultan por licencia y slot, por lo que no se pierde el historial. La reposición de un teléfono perdido sigue siendo un flujo distinto, con autorización de pago.
+
+## 9-A. Consultas de VENTAS para historial y nómina
+
+- `POST /v1/ventas/requests/history`: consulta firmada y limitada al `deviceId` autenticado. Devuelve solicitudes operativas y correcciones de ese equipo, con estado y respuesta del patrón; no permite consultar al otro equipo.
+- `POST /v1/ventas/payroll/settings/get`: consulta firmada que devuelve únicamente el sueldo y las fechas de pago configuradas para el slot del equipo autenticado.
+- `POST /v1/ventas/payroll-reports`: recibe el reporte del periodo únicamente cuando el servidor confirma que la fecha local de Ciudad de México coincide con la fecha de pago configurada. El cliente puede consultar y preparar el reporte cualquier día; el envío a WhatsApp solo se habilita con `payroll.dueToday=true` devuelto por `POST /v1/device/session`.
+- `POST /v1/ventas/shift-reports`: guarda cierres y cortes de turno para que PATRÓN los consulte por separado para cada slot.
+
+Los nuevos propósitos de reto son `VENTAS_RESTORE`, `VENTAS_REQUEST_HISTORY` y `VENTAS_PAYROLL_SETTINGS_GET`. Todos validan firma, ruta, método y hash exacto del cuerpo. El Worker no debe desplegarse hasta ejecutar la suite de pruebas y revisar los secretos y la vinculación D1 de producción.
