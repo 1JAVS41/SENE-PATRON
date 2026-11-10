@@ -120,6 +120,30 @@ jobs:
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
+      - name: Probar reserva de empresa y QR independientes de un solo uso
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id, business_name, status, max_devices, created_at, expires_at) VALUES ('license-pair-test', 'TIENDA QR', 'active', 3, 1, 9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) VALUES ('patron-qr-test', 'license-pair-test', 'PATRON', 'install-qr', 'continuity-qr', x'01', 'fingerprint-qr', 1, 'active', 1);"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at, slot_number, operation, encrypted_token) VALUES ('hash-eq1', 'license-pair-test', 'patron-qr-test', 1, 10, 253402300799, 2, 'NEW', 'cipher-1');"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at, slot_number, operation, encrypted_token) VALUES ('hash-eq2', 'license-pair-test', 'patron-qr-test', 1, 10, 253402300799, 3, 'NEW', 'cipher-2');"
+          if sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at, slot_number, operation, encrypted_token) VALUES ('hash-eq1-dup', 'license-pair-test', 'patron-qr-test', 1, 11, 253402300799, 2, 'NEW', 'cipher-dup');" 2>/dev/null; then
+            echo "ERROR: se permitió más de un QR pendiente para el mismo equipo"
+            exit 1
+          fi
+          sqlite3 "$DB_FILE" "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at) VALUES ('reg-one','Tienda QR','tienda qr','install-reg','fingerprint-reg','pending_payment',20);"
+          if sqlite3 "$DB_FILE" "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at) VALUES ('reg-dup','TIENDA QR','tienda qr','install-other','fingerprint-other','pending_payment',21);" 2>/dev/null; then
+            echo "ERROR: se permitió reservar dos veces el mismo nombre comercial"
+            exit 1
+          fi
+          sqlite3 "$DB_FILE" "UPDATE pairing_tokens SET remaining_uses=0, consumed_at=30 WHERE token_hash='hash-eq1';"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at, slot_number, operation, encrypted_token) VALUES ('hash-eq1-next', 'license-pair-test', 'patron-qr-test', 1, 31, 253402300799, 2, 'REPLACEMENT', 'cipher-next');"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar restricciones de recuperación de PATRÓN
         run: |
           set -euo pipefail
