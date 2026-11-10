@@ -60,7 +60,7 @@ class MainActivity : Activity() {
         when {
             currentPage == "home" -> super.onBackPressed()
             currentPage == "menu" -> { currentPage = "home"; render() }
-            currentPage == "team1" || currentPage == "team2" -> { currentPage = "menu"; render() }
+            currentPage == "team1" || currentPage == "team2" -> { currentPage = "home"; render() }
             currentPage.startsWith("team1_") -> { currentPage = "team1"; render() }
             currentPage.startsWith("team2_") -> { currentPage = "team2"; render() }
             else -> { currentPage = "menu"; render() }
@@ -1177,7 +1177,7 @@ class MainActivity : Activity() {
             isFocusable = true
             contentDescription = if (currentPage == "menu") "Volver al panel principal" else "Abrir menú de administración"
             setOnClickListener {
-                currentPage = if (currentPage == "menu") "home" else "menu"
+                currentPage = "home"
                 render()
             }
         }
