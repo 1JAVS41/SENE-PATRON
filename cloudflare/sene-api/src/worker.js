@@ -2229,7 +2229,7 @@ async function handle(request, env) {
   if (request.method === "GET" && url.pathname === "/v1/operator/replacements/pending") return listOperatorReplacements(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/replacements/approve") return decideOperatorReplacement(request, env, "approve");
   if (request.method === "POST" && url.pathname === "/v1/operator/replacements/reject") return decideOperatorReplacement(request, env, "reject");
-  if (request.method === "POST" && url.pathname === "/v1/operator/licenses/create") return createOperatorLicense(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/licenses/create") return json({ error: "LEGACY_ENDPOINT_RETIRED", message: "Usa el registro solicitado desde SENE PATRÓN." }, 410);
   if (request.method === "POST" && url.pathname === "/v1/operator/licenses/confirm-initial-payment") return confirmInitialPayment(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/licenses/reissue-activation-code") return reissueActivationCode(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/renewals/pending") return listOperatorRenewals(request, env);
