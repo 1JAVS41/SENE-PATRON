@@ -1016,24 +1016,26 @@ async function authorizePatronRegistration(request, env) {
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
   const results = await env.DB.batch([
+    // Cada alta depende de que la solicitud siga pendiente; evita licencias duplicadas
+    // si dos operadores confirman simultáneamente el mismo comprobante.
     env.DB.prepare(
-      "INSERT INTO licenses (id,label,business_name,registered_email,registered_phone,status,max_devices,activation_code_hash,created_at) VALUES (?,?,?,?,?,'pending',3,?,?)"
-    ).bind(licenseId,row.business_name,row.business_name,row.registered_email,row.registered_phone,codeHash,now),
+      "INSERT INTO licenses (id,label,business_name,registered_email,registered_phone,status,max_devices,activation_code_hash,created_at) SELECT ?,?,?,?,?, 'pending',3,?,? WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='pending_payment')"
+    ).bind(licenseId,row.business_name,row.business_name,row.registered_email,row.registered_phone,codeHash,now,requestId),
     env.DB.prepare(
-      "UPDATE registration_requests SET status='authorized',license_id=?,code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment'"
-    ).bind(licenseId,codeHash,reference,now,requestId),
+      "UPDATE registration_requests SET status='authorized',license_id=?,code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment' AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND activation_code_hash=?)"
+    ).bind(licenseId,codeHash,reference,now,requestId,licenseId,codeHash),
     env.DB.prepare(
-      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) VALUES (?,?, 'SETUP',50000,'MXN','CONFIRMED',?,?,?,?,'operator')"
-    ).bind(crypto.randomUUID(),licenseId,reference,"registration-setup:"+requestId,now,now),
+      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) SELECT ?,?,'SETUP',50000,'MXN','CONFIRMED',?,?,?,?,?,'operator' WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?)"
+    ).bind(crypto.randomUUID(),licenseId,reference,"registration-setup:"+requestId,now,now,requestId,licenseId,codeHash),
     env.DB.prepare(
-      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) VALUES (?,?, 'FIRST_RENT',8000,'MXN','CONFIRMED',?,?,?,?,'operator')"
-    ).bind(crypto.randomUUID(),licenseId,reference,"registration-rent:"+requestId,now,now),
+      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) SELECT ?,?,'FIRST_RENT',8000,'MXN','CONFIRMED',?,?,?,?,?,'operator' WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?)"
+    ).bind(crypto.randomUUID(),licenseId,reference,"registration-rent:"+requestId,now,now,requestId,licenseId,codeHash),
     env.DB.prepare(
-      "UPDATE licenses SET setup_paid_at=?,first_rent_paid_at=? WHERE id=? AND status='pending'"
-    ).bind(now,now,licenseId),
+      "UPDATE licenses SET setup_paid_at=?,first_rent_paid_at=? WHERE id=? AND status='pending' AND EXISTS (SELECT 1 FROM payments WHERE license_id=? AND payment_type='SETUP' AND idempotency_key=?) AND EXISTS (SELECT 1 FROM payments WHERE license_id=? AND payment_type='FIRST_RENT' AND idempotency_key=?)"
+    ).bind(now,now,licenseId,licenseId,"registration-setup:"+requestId,licenseId,"registration-rent:"+requestId),
     env.DB.prepare(
-      "INSERT INTO audit_log (id,license_id,actor_type,actor_id,event_type,details_json,created_at) VALUES (?,?,'operator','operator','patron_registration_authorized',?,?)"
-    ).bind(crypto.randomUUID(),licenseId,JSON.stringify({requestId,paymentReference:reference,totalCents:58000}),now)
+      "INSERT INTO audit_log (id,license_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,'operator','operator','patron_registration_authorized',?,? WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?) AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL)"
+    ).bind(crypto.randomUUID(),licenseId,JSON.stringify({requestId,paymentReference:reference,totalCents:58000}),now,requestId,licenseId,codeHash,licenseId)
   ]);
   if (results.some((item) => (item?.meta?.changes ?? 0) !== 1)) {
     return json({ error: "REGISTRATION_AUTHORIZATION_CONFLICT" }, 409);
