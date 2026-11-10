@@ -491,7 +491,9 @@ class MainActivity : Activity() {
                                 (item.optJSONObject("details")?.toString(2) ?: "{}")
                         }
                         AlertDialog.Builder(this).setTitle(if (correction) "AUTORIZAR CORRECCIÓN" else "REVISAR SOLICITUD")
-                            .setMessage(details + "\n\nEl motivo se registra en SENE VENTAS y aquí se muestra para que puedas decidir sin llamar al trabajador. ¿Deseas aprobar o rechazar?")
+                            .setMessage(details + if (correction)
+                                "\n\nEl motivo de corrección se muestra aquí para que puedas decidir directamente, sin llamar al trabajador. ¿Deseas aprobar o rechazar?"
+                            else "\n\n¿Deseas aprobar o rechazar?")
                             .setPositiveButton("APROBAR") { _, _ -> decideTeamItem(base, item, correction, "approve", slot) }
                             .setNegativeButton("RECHAZAR") { _, _ -> decideTeamItem(base, item, correction, "reject", slot) }
                             .setNeutralButton("VOLVER", null).show()
