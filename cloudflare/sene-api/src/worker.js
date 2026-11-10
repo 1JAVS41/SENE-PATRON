@@ -1339,7 +1339,8 @@ async function consumeCorrectionGrant(request, env) {
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
   const grantId = typeof body.grantId === "string" ? body.grantId : "";
   const saleId = typeof body.saleId === "string" ? body.saleId.trim() : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !/^[0-9a-f-]{36}$/i.test(grantId) || !saleId) {
+  const planHash = typeof body.planHash === "string" ? body.planHash.toLowerCase() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !/^[0-9a-f-]{36}$/i.test(grantId) || !saleId || !/^[a-f0-9]{64}$/.test(planHash)) {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
   const now = Math.floor(Date.now() / 1000);
@@ -1354,19 +1355,19 @@ async function consumeCorrectionGrant(request, env) {
          FROM correction_grants g
          JOIN correction_requests r ON r.id = g.request_id
         WHERE g.id = ? AND g.request_id = ? AND g.license_id = ?
-          AND g.ventas_device_id = ? AND g.sale_id = ?
+          AND g.ventas_device_id = ? AND g.sale_id = ? AND g.plan_hash = ?
           AND g.uses_allowed = 1 AND g.uses_consumed = 1
           AND r.id = ? AND r.license_id = ? AND r.ventas_device_id = ?
-          AND r.sale_id = ? AND r.status = 'consumed'
+          AND r.sale_id = ? AND r.plan_hash = ? AND r.status = 'consumed'
         LIMIT 1`
-    ).bind(grantId, requestId, ctx.licenseId, ctx.deviceId, saleId,
-      requestId, ctx.licenseId, ctx.deviceId, saleId).first();
+    ).bind(grantId, requestId, ctx.licenseId, ctx.deviceId, saleId, planHash,
+      requestId, ctx.licenseId, ctx.deviceId, saleId, planHash).first();
   } catch {
     return json({ error: "CORRECTION_GRANT_CHECK_FAILED" }, 503);
   }
   if (priorConsumption) {
     return json({
-      authorized: true, requestId, grantId, saleId,
+      authorized: true, requestId, grantId, saleId, planHash,
       consumedAt: Number(priorConsumption.consumed_at),
       usesRemaining: 0, idempotentReplay: true
     });
@@ -1376,8 +1377,8 @@ async function consumeCorrectionGrant(request, env) {
   try {
     results = await env.DB.batch([
       env.DB.prepare(
-        "UPDATE correction_grants SET uses_consumed = 1, consumed_at = ? WHERE id = ? AND request_id = ? AND license_id = ? AND ventas_device_id = ? AND sale_id = ? AND uses_allowed = 1 AND uses_consumed = 0 AND EXISTS (SELECT 1 FROM correction_requests WHERE id = ? AND status = 'approved' AND sale_id = ?)"
-      ).bind(now, grantId, requestId, ctx.licenseId, ctx.deviceId, saleId, requestId, saleId),
+        "UPDATE correction_grants SET uses_consumed = 1, consumed_at = ? WHERE id = ? AND request_id = ? AND license_id = ? AND ventas_device_id = ? AND sale_id = ? AND plan_hash = ? AND uses_allowed = 1 AND uses_consumed = 0 AND EXISTS (SELECT 1 FROM correction_requests WHERE id = ? AND status = 'approved' AND sale_id = ? AND plan_hash = ?)"
+      ).bind(now, grantId, requestId, ctx.licenseId, ctx.deviceId, saleId, planHash, requestId, saleId, planHash),
       env.DB.prepare(
         "UPDATE correction_requests SET status = 'consumed' WHERE id = ? AND license_id = ? AND ventas_device_id = ? AND sale_id = ? AND status = 'approved' AND EXISTS (SELECT 1 FROM correction_grants WHERE id = ? AND uses_consumed = 1 AND consumed_at = ?)"
       ).bind(requestId, ctx.licenseId, ctx.deviceId, saleId, grantId, now),
@@ -1391,7 +1392,7 @@ async function consumeCorrectionGrant(request, env) {
   if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
     return json({ error: "GRANT_ALREADY_CONSUMED_OR_MISMATCH" }, 409);
   }
-  return json({ authorized: true, requestId, grantId, saleId, consumedAt: now, usesRemaining: 0 });
+  return json({ authorized: true, requestId, grantId, saleId, planHash, consumedAt: now, usesRemaining: 0 });
 }
 
 async function deviceSession(request, env) {
