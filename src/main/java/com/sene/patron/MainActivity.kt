@@ -1038,6 +1038,8 @@ class MainActivity : Activity() {
                                 "Revisión digital: $revision\n\n" +
                                 "Estos datos fueron validados con la clave pública integrada en SENE PATRÓN."
                         )
+                        .setNegativeButton("REINSTALÉ EN EL MISMO TELÉFONO") { _, _ -> showPatronRestoreDialog() }
+                        .setNegativeButton("REINSTALÉ EN EL MISMO TELÉFONO") { _, _ -> showPatronRestoreDialog() }
                         .setNeutralButton("PERDÍ MI EQUIPO SENE PATRÓN") { _, _ -> showPatronRecoveryDialog() }
                         .setPositiveButton("CERRAR", null)
                         .show()
@@ -1055,6 +1057,62 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    private fun showPatronRestoreDialog() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.trim()?.takeIf { it.startsWith("https://") }
+        if (baseUrl == null) { showServerConfig(); return }
+        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        fun field(hintText: String, type: Int) = EditText(this).apply {
+            hint = hintText
+            inputType = type
+            setSingleLine(true)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            form.addView(this)
+        }
+        val company = field("Nombre exacto de la empresa registrada",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+        val email = field("Correo electrónico registrado",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        val phone = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
+        form.addView(text(
+            "Esta opción es únicamente para cuando desinstalaste o reinstalaste SENE PATRÓN en EL MISMO TELÉFONO. No tiene costo si el servidor confirma que coincide con el equipo anterior. Si perdiste o cambiaste de teléfono, utiliza PERDÍ MI EQUIPO SENE PATRÓN.",
+            13, muted, false
+        ))
+        AlertDialog.Builder(this)
+            .setTitle("RESTAURAR EN EL MISMO TELÉFONO")
+            .setView(form)
+            .setPositiveButton("RESTAURAR VINCULACIÓN") { _, _ ->
+                val name = company.text?.toString()?.trim().orEmpty()
+                val mail = email.text?.toString()?.trim().orEmpty()
+                val number = phone.text?.toString()?.trim().orEmpty()
+                if (name.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(mail).matches() ||
+                    number.filter { it.isDigit() }.length !in 10..15) {
+                    Toast.makeText(this, "Completa los datos registrados correctamente", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).restorePatron(name, mail, number)
+                        runOnUiThread {
+                            lastNotificationRefreshAt = 0L
+                            Toast.makeText(this,
+                                "Vinculación restaurada en este teléfono. Estado: " + result.optString("licenseStatus"),
+                                Toast.LENGTH_LONG).show()
+                            render()
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            Toast.makeText(this,
+                                "No se pudo restaurar en este teléfono. " + (error.message ?: ""),
+                                Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
     }
 
     private fun showPatronRecoveryDialog() {
