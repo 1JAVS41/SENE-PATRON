@@ -283,7 +283,7 @@ async function issueChallenge(request, env) {
   let fingerprint = "";
   let deviceId = null;
 
-  if (purpose === "PATRON_ACTIVATE" || purpose === "PATRON_REGISTRATION_REQUEST" || purpose === "VENTAS_PAIR" || purpose === "PATRON_RECOVERY") {
+  if (purpose === "PATRON_ACTIVATE" || purpose === "PATRON_REGISTRATION_REQUEST" || purpose === "PATRON_RECOVERY_REQUEST" || purpose === "VENTAS_PAIR" || purpose === "PATRON_RECOVERY") {
     const identity = await validateBootstrapIdentity(body);
     if (!identity) return json({ error: "INVALID_DEVICE_IDENTITY" }, 400);
     installationId = identity.installationId;
