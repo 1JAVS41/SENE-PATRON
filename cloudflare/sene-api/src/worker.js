@@ -602,23 +602,38 @@ async function reissuePatronRecoveryCode(request, env) {
   const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
   if (!/^[0-9a-f-]{36}$/i.test(requestId) || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
   if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
+  const existing = await env.DB.prepare(
+    "SELECT code_hash FROM patron_recovery_requests WHERE id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = patron_recovery_requests.old_patron_device_id AND status = 'active') LIMIT 1"
+  ).bind(requestId).first();
+  if (!existing?.code_hash) return json({ error: "PATRON_RECOVERY_NOT_REISSUABLE" }, 409);
+  const paidRequest = await env.DB.prepare(
+    "SELECT id FROM patron_recovery_payment_requests WHERE code_hash = ? AND status = 'authorized' LIMIT 1"
+  ).bind(existing.code_hash).first();
   const code = makeCode();
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
+  const statements = [
+    env.DB.prepare(
+      "UPDATE patron_recovery_requests SET code_hash = ? WHERE id = ? AND status = 'pending' AND code_hash = ? AND EXISTS (SELECT 1 FROM devices WHERE id = patron_recovery_requests.old_patron_device_id AND status = 'active')"
+    ).bind(codeHash, requestId, existing.code_hash)
+  ];
+  if (paidRequest) {
+    statements.push(env.DB.prepare(
+      "UPDATE patron_recovery_payment_requests SET code_hash = ? WHERE id = ? AND code_hash = ? AND status = 'authorized'"
+    ).bind(codeHash, paidRequest.id, existing.code_hash));
+  }
+  statements.push(env.DB.prepare(
+    "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, old_patron_device_id, 'operator', 'operator', 'patron_recovery_code_reissued', ?, ? FROM patron_recovery_requests WHERE id = ? AND status = 'pending' AND code_hash = ?"
+  ).bind(crypto.randomUUID(), JSON.stringify({ recoveryRequestId: requestId, paidRecovery: Boolean(paidRequest) }), now, requestId, codeHash));
   let results;
   try {
-    results = await env.DB.batch([
-      env.DB.prepare(
-        "UPDATE patron_recovery_requests SET code_hash = ? WHERE id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = patron_recovery_requests.old_patron_device_id AND status = 'active')"
-      ).bind(codeHash, requestId),
-      env.DB.prepare(
-        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, old_patron_device_id, 'operator', 'operator', 'patron_recovery_code_reissued', ?, ? FROM patron_recovery_requests WHERE id = ? AND status = 'pending' AND code_hash = ?"
-      ).bind(crypto.randomUUID(), JSON.stringify({ recoveryRequestId: requestId }), now, requestId, codeHash)
-    ]);
+    results = await env.DB.batch(statements);
   } catch {
     return json({ error: "PATRON_RECOVERY_NOT_REISSUABLE" }, 409);
   }
-  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+      (paidRequest && (results?.[1]?.meta?.changes ?? 0) !== 1) ||
+      (results?.[results.length - 1]?.meta?.changes ?? 0) !== 1) {
     return json({ error: "PATRON_RECOVERY_NOT_REISSUABLE" }, 409);
   }
   return json({ recoveryRequestId: requestId, recoveryCode: code, expiresAt: null, note: "Código anterior invalidado; el nuevo es de un solo uso." }, 200);
