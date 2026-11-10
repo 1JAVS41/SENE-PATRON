@@ -1086,6 +1086,46 @@ async function requireOfficialHelpRecipient(env, suppliedPhone) {
   return official.includes(supplied);
 }
 
+async function registerLegacyLicenseContacts(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
+  const email = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
+  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\\D/g, "") : "";
+  const verificationNote = typeof body.verificationNote === "string" ? body.verificationNote.trim().slice(0, 200) : "";
+  if (!/^[0-9a-f-]{36}$/i.test(licenseId) ||
+      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) ||
+      phone.length < 10 || phone.length > 15 || verificationNote.length < 8 ||
+      Object.keys(body).some((key) => !["licenseId", "registeredEmail", "registeredPhone", "verificationNote"].includes(key))) {
+    return json({ error: "INVALID_REGISTERED_CONTACTS" }, 400);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const details = JSON.stringify({
+    contactUpdate: "operator_verified_legacy_license",
+    emailDomain: email.split("@")[1],
+    phoneLast4: phone.slice(-4),
+    verificationNote
+  });
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE licenses SET registered_email=?,registered_phone=? WHERE id=? AND status IN ('active','expired') AND (registered_email IS NULL OR trim(registered_email)='') AND (registered_phone IS NULL OR trim(registered_phone)='')"
+      ).bind(email, phone, licenseId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id,license_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,id,'operator','operator','legacy_license_contacts_registered',?,? FROM licenses WHERE id=? AND registered_email=? AND registered_phone=?"
+      ).bind(crypto.randomUUID(), details, now, licenseId, email, phone)
+    ]);
+  } catch {
+    return json({ error: "CONTACT_REGISTRATION_FAILED" }, 503);
+  }
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "LICENSE_NOT_ELIGIBLE_OR_CONTACTS_ALREADY_SET" }, 409);
+  }
+  return json({ licenseId, contactsRegistered: true, recoveryAvailable: true }, 200);
+}
+
 async function listOperatorRegistrations(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
   const rows = await env.DB.prepare(
@@ -2388,6 +2428,7 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/recovery/request") return createPatronRecoveryPaymentRequest(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/patron-recovery-payments/pending") return listOperatorPatronRecoveryPayments(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery-payments/authorize") return authorizePatronRecoveryPayment(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/licenses/register-legacy-contacts") return registerLegacyLicenseContacts(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/registrations/pending") return listOperatorRegistrations(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/registrations/authorize") return authorizePatronRegistration(request, env);
 
