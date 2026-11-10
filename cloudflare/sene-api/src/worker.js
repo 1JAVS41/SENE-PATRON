@@ -496,13 +496,13 @@ async function recoverPatron(request, env) {
   if (!recovery || !["active", "expired"].includes(recovery.license_status)) {
     return json({ error: "RECOVERY_CODE_INVALID_OR_USED" }, 409);
   }
-  // Los códigos emitidos por reposición pagada quedan ligados al teléfono que creó
-  // la solicitud. Los códigos de recuperación manual del operador conservan su flujo.
-  const paidRecovery = recovery.payment_status !== null && recovery.payment_status !== undefined;
-  if (paidRecovery && (recovery.payment_status !== "authorized" ||
+  // Toda reposición de PATRÓN requiere pago validado y queda ligada al teléfono
+  // que creó la solicitud; no se aceptan códigos manuales que omitan los $500 MXN.
+  const paidRecovery = recovery.payment_status === "authorized";
+  if (!paidRecovery ||
       recovery.recovery_installation_id !== identity.installationId ||
-      String(recovery.recovery_fingerprint).toLowerCase() !== identity.fingerprint)) {
-    return json({ error: "RECOVERY_DEVICE_MISMATCH" }, 409);
+      String(recovery.recovery_fingerprint).toLowerCase() !== identity.fingerprint) {
+    return json({ error: "RECOVERY_DEVICE_MISMATCH_OR_PAYMENT_REQUIRED" }, 409);
   }
   const newDeviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
@@ -552,43 +552,10 @@ async function recoverPatron(request, env) {
 
 async function createPatronRecovery(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
-  let body;
-  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
-  const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
-  const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 200) : "";
-  const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
-  if (!/^[0-9a-f-]{36}$/i.test(licenseId) || !reason || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
-  if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
-  const oldPatron = await env.DB.prepare(
-    "SELECT d.id FROM devices d JOIN licenses l ON l.id = d.license_id WHERE d.license_id = ? AND d.device_type = 'PATRON' AND d.slot_number = 1 AND d.status = 'active' AND l.status IN ('active','expired') LIMIT 1"
-  ).bind(licenseId).first();
-  if (!oldPatron) return json({ error: "ACTIVE_PATRON_NOT_FOUND" }, 409);
-  const id = crypto.randomUUID();
-  const code = makeCode();
-  const codeHash = await sha256(code);
-  const now = Math.floor(Date.now() / 1000);
-  try {
-    const results = await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO patron_recovery_requests (id, license_id, old_patron_device_id, code_hash, reason, status, created_at, created_by) VALUES (?, ?, ?, ?, ?, 'pending', ?, 'operator')"
-      ).bind(id, licenseId, oldPatron.id, codeHash, reason, now),
-      env.DB.prepare(
-        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, ?, 'operator', 'operator', 'patron_recovery_created', ?, ?)"
-      ).bind(crypto.randomUUID(), licenseId, oldPatron.id, JSON.stringify({ recoveryRequestId: id, reason }), now)
-    ]);
-    if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
-      return json({ error: "PATRON_RECOVERY_ALREADY_PENDING" }, 409);
-    }
-  } catch {
-    return json({ error: "PATRON_RECOVERY_ALREADY_PENDING" }, 409);
-  }
   return json({
-    recoveryRequestId: id,
-    recoveryCode: code,
-    licenseId,
-    expiresAt: null,
-    note: "Código de recuperación de un solo uso, sin caducidad temporal. Entrégalo solo al titular tras verificar su identidad y negocio."
-  }, 201);
+    error: "PAID_RECOVERY_REQUIRED",
+    message: "La reposición de SENE PATRÓN requiere una solicitud pagada de $500 MXN creada desde la aplicación y verificada por AYUDA."
+  }, 410);
 }
 
 async function listPatronRecoveries(request, env) {
@@ -614,6 +581,7 @@ async function reissuePatronRecoveryCode(request, env) {
   const paidRequest = await env.DB.prepare(
     "SELECT id FROM patron_recovery_payment_requests WHERE code_hash = ? AND status = 'authorized' LIMIT 1"
   ).bind(existing.code_hash).first();
+  if (!paidRequest) return json({ error: "PAID_RECOVERY_REQUIRED" }, 409);
   const code = makeCode();
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
