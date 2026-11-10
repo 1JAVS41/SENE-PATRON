@@ -538,7 +538,9 @@ async function createPatronRecovery(request, env) {
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 200) : "";
-  if (!/^[0-9a-f-]{36}$/i.test(licenseId) || !reason) return json({ error: "INVALID_REQUEST" }, 400);
+  const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(licenseId) || !reason || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   const oldPatron = await env.DB.prepare(
     "SELECT d.id FROM devices d JOIN licenses l ON l.id = d.license_id WHERE d.license_id = ? AND d.device_type = 'PATRON' AND d.slot_number = 1 AND d.status = 'active' AND l.status IN ('active','expired') LIMIT 1"
   ).bind(licenseId).first();
@@ -584,7 +586,9 @@ async function reissuePatronRecoveryCode(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const requestId = typeof body.recoveryRequestId === "string" ? body.recoveryRequestId : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   const code = makeCode();
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
@@ -1048,7 +1052,9 @@ async function reissueActivationCode(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
-  if (!/^[0-9a-f-]{36}$/i.test(licenseId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(licenseId) || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   const code = makeCode();
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
@@ -1076,7 +1082,9 @@ async function reissueRenewalCode(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   const code = makeCode();
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
