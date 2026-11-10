@@ -569,7 +569,7 @@ class MainActivity : Activity() {
                     correction.addView(primaryButton("AUTORIZAR UNA CORRECCIÓN") {
                         AlertDialog.Builder(this)
                             .setTitle("Autorizar corrección")
-                            .setMessage("Por privacidad, el servidor solo muestra un aviso genérico: el texto con el producto/código y las cantidades permanece en el teléfono del trabajador y NO aparece aquí. Antes de autorizar, comunícate directamente con el trabajador y confirma exactamente qué producto, código y cantidad deben corregirse. Si autorizas, podrá modificar esta venta una sola vez. El cambio se aplicará únicamente en ese teléfono; los datos comerciales no se enviarán al servidor.")
+                            .setMessage("Revisa el motivo de la solicitud que aparece en esta tarjeta (por ejemplo: devolución, ajuste de precio, eliminación de producto o corrección de cantidad). Con esa información puedes decidir directamente desde SENE PATRÓN si autorizas o rechazas la corrección. Si autorizas, el trabajador podrá corregir esa venta una sola vez. El detalle comercial de la operación y los cambios de caja e inventario permanecen en SENE VENTAS; el servidor solo conserva el motivo, el estado y los identificadores necesarios para controlar el permiso.")
                             .setPositiveButton("AUTORIZAR") { _, _ -> decideTeamCorrection(team, requestId, true) }
                             .setNegativeButton("RECHAZAR") { _, _ -> decideTeamCorrection(team, requestId, false) }
                             .setNeutralButton("CANCELAR", null)
