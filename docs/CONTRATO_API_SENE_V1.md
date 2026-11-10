@@ -299,4 +299,4 @@ Este flujo está en GitHub, pero no está desplegado ni probado E2E contra Cloud
 - La identidad del slot procede del dispositivo firmado, nunca del campo enviado por VENTAS.
 
 
-Los reportes de nómina conservan el historial reciente en `requests` y separan el conjunto del periodo en `payrollRequestIds`. PATRÓN calcula únicamente descuentos de solicitudes incluidas en ese conjunto para evitar repetir descuentos en pagos posteriores. Los reintentos idempotentes devuelven el reporte original almacenado.
+Los reportes de nómina conservan el historial reciente en `requests` y separan el conjunto del periodo en `payrollRequestIds`. Para el cálculo, PATRÓN utiliza `payrollEntries`, que el servidor construye consultando las solicitudes y decisiones autoritativas de D1 dentro del ciclo entre reportes; no confía en estados ni cantidades de descuento enviados por el APK VENTAS. Los reintentos idempotentes devuelven el reporte original almacenado.
