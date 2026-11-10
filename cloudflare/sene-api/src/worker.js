@@ -700,7 +700,7 @@ async function pairVentas(request, env) {
            JOIN licenses l ON l.id = p.license_id
            JOIN devices patron ON patron.id = p.patron_device_id
           WHERE p.token_hash = ?
-            AND p.remaining_uses > 0 AND p.revoked_at IS NULL AND p.expires_at >= ?
+            AND p.remaining_uses > 0 AND p.revoked_at IS NULL
             AND patron.status = 'active' AND patron.device_type = 'PATRON'
             AND l.status = 'active' AND l.expires_at > ?
             AND NOT EXISTS (
@@ -719,16 +719,16 @@ async function pairVentas(request, env) {
       ).bind(
         deviceId, identity.installationId, body.continuityId.toLowerCase(),
         identity.publicKey, identity.fingerprint, now,
-        tokenHash, now, now, identity.fingerprint
+        tokenHash, now, identity.fingerprint
       ),
       env.DB.prepare(
         `UPDATE pairing_tokens
             SET remaining_uses = remaining_uses - 1
           WHERE token_hash = ? AND remaining_uses > 0
-            AND revoked_at IS NULL AND expires_at >= ?
+            AND revoked_at IS NULL
             AND EXISTS (SELECT 1 FROM devices d
                          WHERE d.id = ? AND d.license_id = pairing_tokens.license_id)`
-      ).bind(tokenHash, now, deviceId)
+      ).bind(tokenHash, deviceId)
     ]);
 
     if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
