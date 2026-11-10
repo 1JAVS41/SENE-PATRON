@@ -56,3 +56,6 @@ La migración es local al repositorio: **no debe ejecutarse todavía en la base 
 
 
 **Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
+
+
+Regla de seguridad de descuentos: solo préstamo, consumo, permiso para faltar, llegada tarde y adelanto de sueldo admiten descuento autorizado explícitamente por el patrón. El servidor rechaza importes cero, negativos o superiores al máximo permitido.
