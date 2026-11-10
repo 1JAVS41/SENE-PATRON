@@ -1147,23 +1147,41 @@ async function reissueActivationCode(request, env) {
   const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
   if (!/^[0-9a-f-]{36}$/i.test(licenseId) || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
   if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
+  const current = await env.DB.prepare(
+    "SELECT activation_code_hash FROM licenses WHERE id = ? AND status = 'pending' AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM devices WHERE license_id = ? AND slot_number = 1 AND status = 'active') LIMIT 1"
+  ).bind(licenseId, licenseId).first();
+  if (!current) return json({ error: "LICENSE_NOT_ELIGIBLE_FOR_CODE_REISSUE" }, 409);
+  const registration = await env.DB.prepare(
+    "SELECT id, code_hash FROM registration_requests WHERE license_id = ? AND status = 'authorized' LIMIT 1"
+  ).bind(licenseId).first();
+  if (registration && registration.code_hash !== current.activation_code_hash) {
+    return json({ error: "ACTIVATION_REGISTRATION_CODE_MISMATCH" }, 409);
+  }
   const code = makeCode();
   const codeHash = await sha256(code);
   const now = Math.floor(Date.now() / 1000);
+  const statements = [
+    env.DB.prepare(
+      "UPDATE licenses SET activation_code_hash = ? WHERE id = ? AND status = 'pending' AND activation_code_hash IS ? AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM devices WHERE license_id = ? AND slot_number = 1 AND status = 'active')"
+    ).bind(codeHash, licenseId, current.activation_code_hash ?? null, licenseId)
+  ];
+  if (registration) {
+    statements.push(env.DB.prepare(
+      "UPDATE registration_requests SET code_hash = ? WHERE id = ? AND license_id = ? AND status = 'authorized' AND code_hash = ?"
+    ).bind(codeHash, registration.id, licenseId, registration.code_hash));
+  }
+  statements.push(env.DB.prepare(
+    "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, 'operator', 'operator', 'activation_code_reissued', ?, ? WHERE EXISTS (SELECT 1 FROM licenses WHERE id = ? AND activation_code_hash = ?) AND (? = 0 OR EXISTS (SELECT 1 FROM registration_requests WHERE id = ? AND license_id = ? AND status = 'authorized' AND code_hash = ?))"
+  ).bind(crypto.randomUUID(), licenseId, JSON.stringify({ reason: "operator_reissue", registrationBound: Boolean(registration) }), now, licenseId, codeHash, registration ? 1 : 0, registration?.id ?? "", licenseId, codeHash));
   let results;
   try {
-    results = await env.DB.batch([
-      env.DB.prepare(
-        "UPDATE licenses SET activation_code_hash = ? WHERE id = ? AND status = 'pending' AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM devices WHERE license_id = ? AND slot_number = 1 AND status = 'active')"
-      ).bind(codeHash, licenseId, licenseId),
-      env.DB.prepare(
-        "INSERT INTO audit_log (id, license_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, 'operator', 'operator', 'activation_code_reissued', ?, ? WHERE EXISTS (SELECT 1 FROM licenses WHERE id = ? AND activation_code_hash = ?)"
-      ).bind(crypto.randomUUID(), licenseId, JSON.stringify({ reason: "operator_reissue" }), now, licenseId, codeHash)
-    ]);
+    results = await env.DB.batch(statements);
   } catch {
     return json({ error: "ACTIVATION_CODE_REISSUE_FAILED" }, 503);
   }
-  if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+      (registration && (results?.[1]?.meta?.changes ?? 0) !== 1) ||
+      (results?.[results.length - 1]?.meta?.changes ?? 0) !== 1) {
     return json({ error: "LICENSE_NOT_ELIGIBLE_FOR_CODE_REISSUE" }, 409);
   }
   return json({ licenseId, activationCode: code, expiresAt: null, note: "Código anterior invalidado. Código nuevo de un solo uso; entrégalo solo tras verificar los pagos." }, 200);
