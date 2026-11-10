@@ -178,7 +178,7 @@ class MainActivity : Activity() {
             setSingleLine(true)
         }
         val recoveryCode = EditText(this).apply {
-            hint = "Código de recuperación de PATRÓN (12 caracteres)"
+            hint = "Código de recuperación de un solo uso (12 caracteres)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             setSingleLine(true)
         }
@@ -232,7 +232,7 @@ class MainActivity : Activity() {
             }
         })
         gap(root, 9)
-        root.addView(primaryButton("RECUPERAR PATRÓN (REINSTALACIÓN O TELÉFONO NUEVO)") {
+        root.addView(primaryButton("RECUPERAR PATRÓN · MISMO TELÉFONO O NUEVO") {
             val value = base.text.toString().trim().trimEnd('/')
             val recovery = recoveryCode.text.toString().trim()
             val uri = Uri.parse(value)
@@ -247,7 +247,7 @@ class MainActivity : Activity() {
                         val state = api.session(recovered.getString("deviceId"))
                         runOnUiThread {
                             recoveryCode.text.clear()
-                            Toast.makeText(this, "PATRÓN recuperado. Estado: " + state.optString("licenseStatus"), Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, "PATRÓN recuperado en este equipo. Estado: " + state.optString("licenseStatus"), Toast.LENGTH_LONG).show()
                             currentPage = "home"
                             render()
                         }
