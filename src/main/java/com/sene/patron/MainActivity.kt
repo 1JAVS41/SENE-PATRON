@@ -788,7 +788,13 @@ class MainActivity : Activity() {
                 }
                 Thread {
                     try {
-                        val email = emailField.text?.toString()?.trim().orEmpty()\n                val phone = phoneField.text?.toString()?.trim().orEmpty()\n                val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
+                        val email = emailField.text?.toString()?.trim().orEmpty()
+val phone = phoneField.text?.toString()?.trim().orEmpty()
+if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() || phone.filter { it.isDigit() }.length !in 10..15) {
+    Toast.makeText(this, "Escribe un correo y teléfono válidos", Toast.LENGTH_LONG).show()
+    return@setPositiveButton
+}
+val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
                         val requestId = result.optString("requestId")
                         runOnUiThread {
                             if (requestId.isBlank()) {
@@ -1065,7 +1071,7 @@ class MainActivity : Activity() {
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestPatronRecovery(name, mail, number)
-                        runOnUiThread { AlertDialog.Builder(this).setTitle("SOLICITUD DE REPOSICIÓN RECIBIDA").setMessage("Folio: ${result.optString("requestId")}\n\nEstado: ${result.optString("status", "pendiente de verificación")}\n\nImporte: $500 MXN\n\nEl código se entregará después de verificar el comprobante, exclusivamente por los números oficiales de AYUDA.").setPositiveButton("ACEPTAR", null).show() }
+                        runOnUiThread { AlertDialog.Builder(this).setTitle("SOLICITUD DE REPOSICIÓN RECIBIDA").setMessage("Folio: ${result.optString("requestId")}\n\nEstado: ${result.optString("status", "pendiente de verificación")}\n\nImporte: $500 MXN\n\nEl código se entregará después de verificar el comprobante, exclusivamente por los números oficiales de AYUDA.").setPositiveButton("INTRODUCIR CÓDIGO") { _, _ -> showPatronRecoveryCodeDialog() }.setNegativeButton("CERRAR", null).show() }
                     } catch (error: Exception) { runOnUiThread { Toast.makeText(this, error.message ?: "No se pudo enviar la solicitud", Toast.LENGTH_LONG).show() } }
                 }.start()
             }.setNegativeButton("CANCELAR", null).show()
