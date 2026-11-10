@@ -537,8 +537,8 @@ async function recoverPatron(request, env) {
   } catch {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
-  if ([0, 2, 3, 4].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1) ||
-      (paidRecovery && (results?.[5]?.meta?.changes ?? 0) !== 1)) {
+  if ([0, 2, 4, 5].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1) ||
+      (paidRecovery && (results?.[6]?.meta?.changes ?? 0) !== 1)) {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
   return json({
