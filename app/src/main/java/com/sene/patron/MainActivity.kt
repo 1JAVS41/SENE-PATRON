@@ -232,22 +232,8 @@ class MainActivity : Activity() {
             setSingleLine(true)
         }
         val recoveryCode = EditText(this).apply {
-            hint = "Código de reposición pagada de PATRÓN perdido (12 caracteres)"
+            hint = "Código de recuperación de un solo uso (12 caracteres)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            setSingleLine(true)
-        }
-        val businessName = EditText(this).apply {
-            hint = "Nombre exacto de la empresa registrada"
-            setSingleLine(true)
-        }
-        val registeredEmail = EditText(this).apply {
-            hint = "Correo registrado de la empresa"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setSingleLine(true)
-        }
-        val registeredPhone = EditText(this).apply {
-            hint = "Teléfono registrado (con lada)"
-            inputType = InputType.TYPE_CLASS_PHONE
             setSingleLine(true)
         }
         val fields = card()
@@ -256,12 +242,8 @@ class MainActivity : Activity() {
         fields.addView(base)
         fields.addView(text("Código de activación", 13, ink, true))
         fields.addView(code)
-        fields.addView(text("Reposición de un PATRÓN perdido · requiere código autorizado tras pago", 13, ink, true))
+        fields.addView(text("Recuperación de un PATRÓN perdido", 13, ink, true))
         fields.addView(recoveryCode)
-        fields.addView(text("Restauración gratuita · mismo teléfono después de reinstalar", 13, ink, true))
-        fields.addView(businessName)
-        fields.addView(registeredEmail)
-        fields.addView(registeredPhone)
         root.addView(fields)
         gap(root, 12)
         root.addView(primaryButton("GUARDAR DIRECCIÓN") {
@@ -304,48 +286,12 @@ class MainActivity : Activity() {
             }
         })
         gap(root, 9)
-        root.addView(primaryButton("RESTAURAR GRATIS · MISMO TELÉFONO") {
-            val value = base.text.toString().trim().trimEnd('/')
-            val company = businessName.text.toString().trim()
-            val email = registeredEmail.text.toString().trim()
-            val phone = registeredPhone.text.toString().filter { it.isDigit() }
-            val uri = Uri.parse(value)
-            if (!value.startsWith("https://") || uri.host.isNullOrBlank() ||
-                company.isBlank() || email.isBlank() || phone.length !in 10..15) {
-                Toast.makeText(this, "Captura HTTPS, empresa, correo y teléfono registrados", Toast.LENGTH_LONG).show()
-            } else {
-                AlertDialog.Builder(this)
-                    .setTitle("Restauración gratuita en el mismo teléfono")
-                    .setMessage("El servidor comprobará que este es el mismo teléfono y que la empresa, correo y teléfono coinciden con el registro. No genera una licencia ni un espacio nuevo.")
-                    .setNegativeButton("CANCELAR", null)
-                    .setPositiveButton("VERIFICAR Y RESTAURAR") { _, _ ->
-                        prefs.edit().putString("server_base_url", value).apply()
-                        Thread {
-                            try {
-                                val api = SenePatronApiClient(this, value)
-                                val restored = api.restoreSamePhone(company, email, phone)
-                                val state = api.session(restored.getString("deviceId"))
-                                runOnUiThread {
-                                    Toast.makeText(this, "Restauración verificada. Estado: " + state.optString("licenseStatus"), Toast.LENGTH_LONG).show()
-                                    currentPage = "home"
-                                    render()
-                                }
-                            } catch (e: Exception) {
-                                runOnUiThread {
-                                    Toast.makeText(this, "No se pudo restaurar: " + (e.message ?: "Verifica que sea el mismo teléfono y los datos registrados"), Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }.start()
-                    }.show()
-            }
-        })
-        gap(root, 9)
-        root.addView(primaryButton("RECUPERAR PATRÓN PERDIDO · CÓDIGO DE REPOSICIÓN") {
+        root.addView(primaryButton("RECUPERAR PATRÓN · MISMO TELÉFONO O NUEVO") {
             val value = base.text.toString().trim().trimEnd('/')
             val recovery = recoveryCode.text.toString().trim()
             val uri = Uri.parse(value)
             if (!value.startsWith("https://") || uri.host.isNullOrBlank() || recovery.isBlank()) {
-                Toast.makeText(this, "Captura la dirección HTTPS y el código autorizado de reposición", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Captura la dirección HTTPS y el código de recuperación", Toast.LENGTH_LONG).show()
             } else {
                 prefs.edit().putString("server_base_url", value).apply()
                 Thread {
