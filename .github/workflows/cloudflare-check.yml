@@ -27,6 +27,83 @@ jobs:
       - name: Comprobar sintaxis del Worker
         run: node --check cloudflare/sene-api/src/worker.js
 
+      - name: Probar firma digital real de contactos AYUDA en el Worker
+        run: |
+          set -euo pipefail
+          cp cloudflare/sene-api/src/worker.js /tmp/sene-worker.mjs
+          node --input-type=module <<'JS'
+          import worker from "file:///tmp/sene-worker.mjs";
+          import assert from "node:assert/strict";
+          import { webcrypto } from "node:crypto";
+
+          const pair = await webcrypto.subtle.generateKey(
+            { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]
+          );
+          const privateJwk = await webcrypto.subtle.exportKey("jwk", pair.privateKey);
+          const publicJwk = await webcrypto.subtle.exportKey("jwk", pair.publicKey);
+          const row = {
+            revision: 1,
+            official_email: "ayuda@example.invalid",
+            help_phone_1: "+5211111111111",
+            help_phone_2: "+5222222222222",
+            registered_at: 100,
+            updated_at: 100
+          };
+          const env = {
+            CONTACTS_SIGNING_PRIVATE_JWK: JSON.stringify(privateJwk),
+            DB: { prepare() { return { first: async () => row }; } }
+          };
+          const response = await worker.fetch(
+            new Request("https://sene.test/v1/support/contacts"), env
+          );
+          assert.equal(response.status, 200);
+          const signed = await response.json();
+          assert.equal(signed.keyId, "sene-official-contacts-v1");
+          assert.equal(signed.algorithm, "ECDSA_P256_SHA256");
+          assert.deepEqual(Object.keys(signed.payload), [
+            "revision", "officialEmail", "helpPhone1", "helpPhone2", "registeredAt", "updatedAt"
+          ]);
+          const publicKey = await webcrypto.subtle.importKey(
+            "jwk", publicJwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]
+          );
+          const signature = Buffer.from(signed.signature, "base64url");
+          const canonical = new TextEncoder().encode(JSON.stringify(signed.payload));
+          assert.equal(signature.length, 64);
+          assert.equal(await webcrypto.subtle.verify(
+            { name: "ECDSA", hash: "SHA-256" }, publicKey, signature, canonical
+          ), true);
+
+          const tampered = { ...signed.payload, helpPhone1: "+5233333333333" };
+          assert.equal(await webcrypto.subtle.verify(
+            { name: "ECDSA", hash: "SHA-256" }, publicKey, signature,
+            new TextEncoder().encode(JSON.stringify(tampered))
+          ), false);
+
+          const noKey = await worker.fetch(
+            new Request("https://sene.test/v1/support/contacts"),
+            { DB: env.DB }
+          );
+          assert.equal(noKey.status, 503);
+
+          const noContacts = await worker.fetch(
+            new Request("https://sene.test/v1/support/contacts"),
+            { CONTACTS_SIGNING_PRIVATE_JWK: JSON.stringify(privateJwk),
+              DB: { prepare() { return { first: async () => null }; } } }
+          );
+          assert.equal(noContacts.status, 404);
+
+          const denied = await worker.fetch(
+            new Request("https://sene.test/v1/operator/support/contacts/register", {
+              method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ officialEmail: "x@example.invalid",
+                helpPhone1: "+5211111111111", helpPhone2: "+5222222222222" })
+            }),
+            { OPERATOR_TOKEN: "x".repeat(40), DB: env.DB }
+          );
+          assert.equal(denied.status, 401);
+          console.log("PASS: firma ECDSA, detección de alteración, fail-closed y protección del registro operador");
+          JS
+
       - name: Instalar SQLite
         run: |
           sudo apt-get update
