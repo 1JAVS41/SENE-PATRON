@@ -223,3 +223,32 @@ No desplegar ni pedir al usuario que ejecute migraciones hasta completar la revi
 - El endpoint de reporte de nómina valida en servidor que hoy (America/Mexico_City) sea una fecha configurada para el slot real del dispositivo. Se rechaza si no está configurado o no corresponde el día.
 - Android PATRÓN tiene pantalla de configuración independiente por Equipo 1 y Equipo 2; Android VENTAS añade menú Día de pago, consulta local y envío del reporte al servidor.
 - Pendiente probar flujos E2E y validar el cálculo final de nómina a partir de reglas aprobadas/descuentos; no desplegar todavía.
+
+
+## Auditoría cruzada Android VENTAS ↔ Worker (2026-11-10)
+
+Se revisaron los archivos activos de la rama `sene-ventas-preparacion-patron`:
+- `app/src/main/java/com/sene/ventas/SeneApiClient.kt`
+- `app/src/main/java/com/sene/ventas/App.kt`
+
+Y el Worker de esta rama:
+- `cloudflare/sene-api/src/worker.js`
+
+### Verificaciones positivas
+- Las llamadas activas de VENTAS para vincular, sesión, solicitudes de trabajo, recuperación de respuestas, cierre de turno y reporte de nómina usan los mismos propósitos y rutas declarados en `CHALLENGE_TARGETS`.
+- Las solicitudes de trabajo guardan una clave UUID local y el Worker hace deduplicación por dispositivo + clave; los reintentos no crean otra solicitud.
+- Los cierres de turno se encolan localmente y se retiran de la cola después de respuesta exitosa. El Worker usa `shiftKey` único por dispositivo para responder idempotentemente.
+- Nómina se envía con fecha local del servidor como clave; el Worker valida que sea día de pago del slot real. El cálculo del patrón usa `payrollEntries` consultadas desde D1 y decisiones autorizadas, no el array `requests` enviado por el teléfono.
+- El build Android PATRÓN del commit `d098d9ba50f6e9df78728babb4398ab25e6d3cb5` terminó success (run `42730920846`) y publicó el artefacto `SENE PATRON-online` de 1,313,514 bytes.
+
+### Bloqueo funcional encontrado: corrección de venta no conectada en la interfaz VENTAS
+- El cliente `SeneApiClient.kt` contiene métodos `createCorrectionRequest()` y `consumeCorrectionGrant()`.
+- Sin embargo, la inspección completa de `App.kt` no encuentra referencias a esos métodos ni controles/textos de corrección. Por tanto, la presencia de endpoints y métodos cliente no demuestra que el trabajador pueda solicitar una corrección desde la app ni consumir el permiso de un solo uso al corregir una venta.
+- El flujo Worker sí contempla solicitud idempotente, aprobación PATRÓN, grant ligado a solicitud/dispositivo/venta y consumo único. Falta cerrar la integración de interfaz y enlazarla con la venta local concreta, sin alterar ventas/inventario/caja por defecto.
+- Este punto debe implementarse y probarse antes de declarar completa la función de corrección. No se modificó la lógica comercial de VENTAS en esta auditoría.
+
+### Estado de compilación y despliegue
+- Android PATRÓN: run `42730920846`, **success**, artefacto publicado.
+- Android VENTAS: último run consultado `42727055819`, **success** (commit `f4768d6d2c41577714866f75fdba0c5d64c00718`).
+- Ambos resultados son compilaciones CI; no son pruebas de flujo en teléfonos ni pruebas E2E.
+- El Worker del panel Cloudflare continúa sin desplegar el código de esta rama y las migraciones 0002–0010 no están aplicadas a la D1 real. No desplegar ni ejecutar migraciones hasta validar el entorno de pruebas y la interfaz privada del operador.
