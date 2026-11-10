@@ -93,9 +93,13 @@ Se implementaron `POST /v1/operator/licenses/reissue-activation-code` y `POST /v
 **Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
 
 
-## Recuperación de PATRÓN perdido
+## Recuperación pagada de PATRÓN perdido
 
-La migración 0009 y el Worker incluyen recuperación privada de PATRÓN. El operador crea un código de un solo uso tras verificar al titular; puede listar pendientes, reemitir o cancelar. El nuevo PATRÓN firma reto bootstrap; el Worker revoca el anterior, invalida QR, registra el nuevo slot 1 y consume el código atómicamente. El cliente Android PATRÓN incluye el método de recuperación. Sigue sin desplegarse ni probarse E2E.
+La reposición del equipo SENE PATRÓN cuesta **$500 MXN**. El cliente inicia una solicitud desde AYUDA con nombre de empresa, correo y teléfono registrados. El concepto de pago debe ser exactamente `Reposición SENE PATRÓN`. Las solicitudes repetidas reutilizan la solicitud pendiente de la licencia; el operador verifica el comprobante y entrega el código únicamente por los números oficiales AYUDA.
+
+El código es de un solo uso, se almacena solo como hash y queda ligado a la instalación y huella criptográfica del teléfono que creó la solicitud. La reemisión invalida el código anterior y conserva esa misma vinculación. Al canjearlo, el Worker revoca el PATRÓN anterior, invalida los QR pendientes, registra el nuevo dispositivo en el mismo slot 1, conserva los dos slots VENTAS y transfiere cualquier solicitud de mensualidad abierta al nuevo PATRÓN. La solicitud de recuperación y el consumo del código se procesan de forma transaccional. El endpoint heredado de recuperación manual gratuita está retirado y devuelve `PAID_RECOVERY_REQUIRED`.
+
+La migración 0013 crea los campos de contacto registrado y la tabla de solicitudes de reposición pagada. El cliente Android PATRÓN incluye el formulario y el campo para introducir el código. El flujo aún requiere pruebas E2E en un entorno Cloudflare de pruebas; no está desplegado en producción.
 
 
 ## Nómina por equipo
