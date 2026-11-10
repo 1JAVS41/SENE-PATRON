@@ -958,7 +958,10 @@ async function createPatronRecoveryPaymentRequest(request, env) {
   }
   const id=crypto.randomUUID(), now=Math.floor(Date.now()/1000);
   try {
-    await env.DB.prepare("INSERT INTO patron_recovery_payment_requests (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,created_at) VALUES (?,?,?,?,?,?,?,'pending_payment',?)").bind(id,license.id,oldPatron.id,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),email,phone,now).run();
+    const created = await env.DB.prepare(
+      "INSERT INTO patron_recovery_payment_requests (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,created_at) SELECT ?,?,?,?,?,?,?,'pending_payment',? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active')"
+    ).bind(id,license.id,oldPatron.id,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),email,phone,now,oldPatron.id,license.id).run();
+    if ((created.meta?.changes ?? 0) !== 1) return json({ error: "REGISTERED_PATRON_NOT_FOUND" }, 409);
   } catch {
     const raced=await env.DB.prepare("SELECT id,status,created_at,installation_id,fingerprint,registered_email,registered_phone FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
     if(raced) {
