@@ -59,10 +59,15 @@ jobs:
       - name: Compilar APK de depuración
         run: gradle --no-daemon assembleDebug
 
-      - name: Publicar APK de depuración para pruebas
+      - name: Preparar APK con nombre oficial
+        run: |
+          mkdir -p dist
+          cp build/outputs/apk/debug/*.apk "dist/SENE PATRON-online.apk"
+
+      - name: Publicar APK oficial para pruebas
         uses: actions/upload-artifact@v4
         with:
-          name: SENE-PATRON-debug
-          path: build/outputs/apk/debug/*.apk
+          name: SENE PATRON-online
+          path: "dist/SENE PATRON-online.apk"
           if-no-files-found: error
           retention-days: 14
