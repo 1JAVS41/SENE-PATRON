@@ -159,6 +159,12 @@ class MainActivity : Activity() {
         })
         gap(root, 12)
         root.addView(primaryButton("AYUDA") { showContactDialog() })
+        if (!prefs.getString("patron_recovery_payment_request_id", null).isNullOrBlank()) {
+            gap(root, 10)
+            root.addView(primaryButton("INTRODUCIR CÓDIGO DE REPOSICIÓN") {
+                showPatronRecoveryCodeDialog()
+            })
+        }
     }
 
     private fun showOwnerOptions() {
@@ -1072,7 +1078,14 @@ val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, emai
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestPatronRecovery(name, mail, number)
-                        runOnUiThread { AlertDialog.Builder(this).setTitle("SOLICITUD DE REPOSICIÓN RECIBIDA").setMessage("Folio: ${result.optString("requestId")}\n\nEstado: ${result.optString("status", "pendiente de verificación")}\n\nImporte: $500 MXN\n\nEl código se entregará después de verificar el comprobante, exclusivamente por los números oficiales de AYUDA.").setPositiveButton("INTRODUCIR CÓDIGO") { _, _ -> showPatronRecoveryCodeDialog() }.setNegativeButton("CERRAR", null).show() }
+                        runOnUiThread {
+                            AlertDialog.Builder(this)
+                                .setTitle("SOLICITUD DE REPOSICIÓN RECIBIDA")
+                                .setMessage("Folio: ${result.optString("requestId")}\n\nEstado: ${result.optString("status", "pendiente de verificación")}\n\nImporte: $500 MXN\n\nEl código se entregará después de verificar el comprobante, exclusivamente por los números oficiales de AYUDA. Puedes introducirlo aquí o volver más tarde desde la pantalla principal.")
+                                .setPositiveButton("INTRODUCIR CÓDIGO") { _, _ -> showPatronRecoveryCodeDialog() }
+                                .setNegativeButton("CERRAR", null)
+                                .show()
+                        }
                     } catch (error: Exception) { runOnUiThread { Toast.makeText(this, error.message ?: "No se pudo enviar la solicitud", Toast.LENGTH_LONG).show() } }
                 }.start()
             }.setNegativeButton("CANCELAR", null).show()
