@@ -172,6 +172,32 @@ class SenePatronApiClient(context: Context, baseUrl: String) {
             JSONObject().put("slot", slot).toString(), deviceId)
     }
 
+    /** Obtiene y verifica criptográficamente los contactos oficiales AYUDA. */
+    fun officialSupportContacts(): JSONObject {
+        val signed = get("/v1/support/contacts")
+        return OfficialSupportVerifier.verifyAndRemember(app, signed)
+    }
+
+    private fun get(path: String): JSONObject {
+        val connection = (URL(root + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 15000
+            useCaches = false
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("X-SENE-Version", "1")
+        }
+        try {
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw SenePatronApiException(status, response)
+            return JSONObject(response)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun saveDevice(result: JSONObject) {
         val id = result.optString("deviceId")
         check(id.isNotBlank()) { "El servidor no devolvió el identificador del dispositivo" }
