@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - sene-cloudflare-backend
+      - fix/patron-gradle-toolchain
     paths:
       - "src/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-build.yml"
+  pull_request:
+    branches:
+      - sene-cloudflare-backend
   workflow_dispatch:
 
 permissions:
