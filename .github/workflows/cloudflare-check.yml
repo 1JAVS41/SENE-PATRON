@@ -205,6 +205,12 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patron_recovery_payment_requests';")" = "1"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_one_open_patron_recovery_payment';")" = "1"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_one_pending_patron_recovery';")" = "1"
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,status,max_devices,created_at,expires_at) VALUES ('legacy-license','TIENDA ANTIGUA','active',3,1,9999999999);"
+          sqlite3 "$DB_FILE" "UPDATE licenses SET registered_email='titular@example.invalid',registered_phone='5211111111111' WHERE id='legacy-license' AND status IN ('active','expired') AND (registered_email IS NULL OR trim(registered_email)='') AND (registered_phone IS NULL OR trim(registered_phone)='');"
+          test "$(sqlite3 "$DB_FILE" "SELECT registered_email || ':' || registered_phone FROM licenses WHERE id='legacy-license';")" = "titular@example.invalid:5211111111111"
+          overwrite="$(sqlite3 "$DB_FILE" "UPDATE licenses SET registered_email='attacker@example.invalid',registered_phone='5222222222222' WHERE id='legacy-license' AND status IN ('active','expired') AND (registered_email IS NULL OR trim(registered_email)='') AND (registered_phone IS NULL OR trim(registered_phone)=''); SELECT changes();")"
+          test "$overwrite" = "0"
+          test "$(sqlite3 "$DB_FILE" "SELECT registered_email FROM licenses WHERE id='legacy-license';")" = "titular@example.invalid"
           test "$(sqlite3 "$DB_FILE" "PRAGMA integrity_check;")" = "ok"
 
       - name: Probar restricciones de recuperación de PATRÓN
