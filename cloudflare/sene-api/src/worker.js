@@ -1363,8 +1363,8 @@ async function decideOperatorReplacement(request, env, decision) {
           "UPDATE replacement_requests SET status = 'approved', decided_at = ?, decided_by = 'operator' WHERE id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked')"
         ).bind(now, requestId, row.old_device_id),
         env.DB.prepare(
-          "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL"
-        ).bind(now, row.license_id),
+          "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL AND (slot_number = ? OR slot_number IS NULL)"
+        ).bind(now, row.license_id, row.slot_number),
         env.DB.prepare(
           "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'operator', 'operator', 'device_replacement_approved', ?, ? WHERE EXISTS (SELECT 1 FROM replacement_requests WHERE id = ? AND status = 'approved')"
         ).bind(crypto.randomUUID(), row.license_id, row.old_device_id, JSON.stringify({ requestId, slotNumber: row.slot_number }), now, requestId)
