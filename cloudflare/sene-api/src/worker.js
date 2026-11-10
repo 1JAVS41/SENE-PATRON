@@ -589,14 +589,14 @@ async function restorePatron(request, env) {
   try {
     results = await env.DB.batch([
       env.DB.prepare(
-        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? AND NOT EXISTS (SELECT 1 FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized'))"
-      ).bind(oldPatron.id, license.id, identity.continuityId, license.id),
+        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized'))"
+      ).bind(oldPatron.id, license.id, identity.continuityId, license.id, license.id),
       env.DB.prepare(
         "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='revoked')"
       ).bind(now, license.id, oldPatron.id),
       env.DB.prepare(
-        "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT ?,?,?,?,?,?, ?,1,'active',? FROM devices old WHERE old.id=? AND old.license_id=? AND old.status='revoked' AND old.continuity_id=? AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=1 AND d.status='active')"
-      ).bind(newDeviceId, license.id, "PATRON", identity.installationId, identity.continuityId, identity.publicKey, identity.fingerprint, now, oldPatron.id, license.id, identity.continuityId),
+        "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT ?,?,?,?,?,?, ?,1,'active',? FROM devices old WHERE old.id=? AND old.license_id=? AND old.status='revoked' AND old.continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=1 AND d.status='active')"
+      ).bind(newDeviceId, license.id, "PATRON", identity.installationId, identity.continuityId, identity.publicKey, identity.fingerprint, now, oldPatron.id, license.id, identity.continuityId, license.id),
       env.DB.prepare(
         "UPDATE renewal_requests SET patron_device_id=? WHERE license_id=? AND patron_device_id=? AND status IN ('pending_payment','authorized') AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
       ).bind(newDeviceId, license.id, oldPatron.id, newDeviceId),
