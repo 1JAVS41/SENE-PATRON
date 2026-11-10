@@ -467,7 +467,12 @@ class MainActivity : Activity() {
                 }
                 for (i in 0 until corrections.length()) {
                     val item = corrections.optJSONObject(i) ?: continue
-                    labels.add("CORRECCIÓN DE VENTA\nVenta: " + item.optString("saleId") + "\nMotivo: " + item.optString("reason"))
+                    val reasons = item.optJSONArray("reasons")
+                    val reasonText = if (reasons != null && reasons.length() > 0)
+                        (0 until reasons.length()).joinToString(", ") { reasons.optString(it) }
+                    else item.optString("reason")
+                    val cashText = if (item.optBoolean("cashImpact")) "\\nAjuste de caja: " + item.optString("cashReason") else ""
+                    labels.add("CORRECCIÓN DE VENTA\\nVenta: " + item.optString("saleId") + "\\nMotivo(s): " + reasonText + cashText)
                     kinds.add("correction"); records.add(item)
                 }
                 val counts = correctionResult.optJSONObject("pendingByTeam")
@@ -485,7 +490,13 @@ class MainActivity : Activity() {
                         val item = records[index]
                         val correction = kinds[index] == "correction"
                         val details = if (correction) {
-                            "Venta: " + item.optString("saleId") + "\nMotivo: " + item.optString("reason")
+                            val reasons = item.optJSONArray("reasons")
+                            val reasonText = if (reasons != null && reasons.length() > 0)
+                                (0 until reasons.length()).joinToString(", ") { reasons.optString(it) }
+                            else item.optString("reason")
+                            "Venta: " + item.optString("saleId") + "\\nMotivos: " + reasonText +
+                                if (item.optBoolean("cashImpact")) "\\nCambio de caja: sí\\nMotivo de caja: " + item.optString("cashReason")
+                                else "\\nCambio de caja: no"
                         } else {
                             "Tipo: " + item.optString("type") + "\nDetalle: " +
                                 (item.optJSONObject("details")?.toString(2) ?: "{}")
