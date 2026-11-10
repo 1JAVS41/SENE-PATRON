@@ -8,3 +8,8 @@ ALTER TABLE pairing_tokens ADD COLUMN consumed_at INTEGER;
 CREATE INDEX IF NOT EXISTS idx_pairing_pending_slot
   ON pairing_tokens(license_id, patron_device_id, slot_number, operation, created_at DESC)
   WHERE remaining_uses = 1 AND revoked_at IS NULL AND consumed_at IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pairing_one_pending_slot
+  ON pairing_tokens(license_id, slot_number)
+  WHERE remaining_uses = 1 AND revoked_at IS NULL AND consumed_at IS NULL
+    AND operation IN ('NEW','REPLACEMENT');
