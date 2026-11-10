@@ -48,7 +48,14 @@ class SeneApiClient(context: Context, baseUrl: String) {
         require(businessName.isNotBlank() && android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() && phone.length in 10..15) { "Revisa los datos registrados" }
         val identity = PatronDeviceIdentity.get(app)
         val body = JSONObject().put("businessName", businessName.trim()).put("registeredEmail", email).put("registeredPhone", phone)
-        return bootstrapSigned("PATRON_RECOVERY_REQUEST", "/v1/patron/recovery/request", body.toString(), identity)
+        val result = bootstrapSigned("PATRON_RECOVERY_REQUEST", "/v1/patron/recovery/request", body.toString(), identity)
+        val requestId = result.optString("requestId")
+        if (requestId.isNotBlank()) {
+            check(prefs.edit().putString("patron_recovery_payment_request_id", requestId).commit()) {
+                "No se pudo guardar la solicitud de reposición"
+            }
+        }
+        return result
     }
 
     fun activate(activationCode: String): JSONObject {
@@ -106,7 +113,10 @@ class SeneApiClient(context: Context, baseUrl: String) {
         val result = bootstrapSigned("PATRON_RECOVERY", "/v1/patron/recover", body.toString(), identity)
         val registeredId = result.optString("deviceId")
         if (registeredId.isNotBlank()) {
-            check(prefs.edit().putString("device_id", registeredId).commit()) {
+            check(prefs.edit()
+                .putString("device_id", registeredId)
+                .remove("patron_recovery_payment_request_id")
+                .commit()) {
                 "No se pudo guardar la recuperación de SENE PATRÓN"
             }
         }
