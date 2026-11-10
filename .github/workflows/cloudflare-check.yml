@@ -36,16 +36,10 @@ jobs:
         run: |
           set -euo pipefail
           DB_FILE="$(mktemp)"
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0001_initial.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0002_security_billing_usage.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0003_workflow_reports.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0004_device_history_replacements.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0005_monthly_renewals.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0006_device_replacement_flow.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0007_renewal_operator_audit.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0008_notification_seen_state.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0009_patron_recovery.sql
-          sqlite3 "$DB_FILE" < cloudflare/sene-api/migrations/0010_payroll_settings.sql
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            echo "Aplicando $(basename "$migration")"
+            sqlite3 "$DB_FILE" < "$migration"
+          done
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
