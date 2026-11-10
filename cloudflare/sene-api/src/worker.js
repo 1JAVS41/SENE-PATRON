@@ -1775,9 +1775,10 @@ async function patronReportsInbox(request, env) {
   let payrollEntries = [];
   if (payrollRows.length > 0) {
     const previousReportAt = payrollRows.length > 1 ? Number(payrollRows[1].created_at) : 0;
+    const latestReportAt = Number(payrollRows[0].created_at);
     const entries = await env.DB.prepare(
-      "SELECT id, request_type, details_json, status, decision_json, created_at, decided_at FROM work_requests WHERE license_id = ? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ?) AND (created_at > ? OR decided_at > ? OR status = 'pending') ORDER BY COALESCE(decided_at, created_at) DESC LIMIT 500"
-    ).bind(ctx.licenseId, ctx.licenseId, slot, previousReportAt, previousReportAt).all();
+      "SELECT id, request_type, details_json, status, decision_json, created_at, decided_at FROM work_requests WHERE license_id = ? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ?) AND ((created_at > ? AND created_at <= ?) OR (decided_at > ? AND decided_at <= ?) OR (status = 'pending' AND created_at <= ?)) ORDER BY COALESCE(decided_at, created_at) DESC LIMIT 500"
+    ).bind(ctx.licenseId, ctx.licenseId, slot, previousReportAt, latestReportAt, previousReportAt, latestReportAt, latestReportAt).all();
     payrollEntries = (entries.results || []).map((r) => ({
       requestId: r.id,
       type: r.request_type,
