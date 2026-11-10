@@ -502,6 +502,10 @@ class MainActivity : Activity() {
             submitTeamDecision(base, item, correction, decision, slot, org.json.JSONObject())
             return
         }
+        val requestType = item.optString("type")
+        val canAuthorizeDeduction = requestType in setOf(
+            "LOAN", "CONSUMPTION", "ABSENCE_PERMISSION", "LATE_ARRIVAL", "SALARY_ADVANCE"
+        )
         val authorizeDeduction = CheckBox(this).apply {
             text = "Autorizar descuento en nómina"
             textSize = 14f
@@ -516,30 +520,36 @@ class MainActivity : Activity() {
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(4))
-            addView(authorizeDeduction)
-            addView(amount)
+            if (canAuthorizeDeduction) {
+                addView(authorizeDeduction)
+                addView(amount)
+            } else {
+                addView(text("Esta solicitud no permite descuentos de nómina.", 13, ink))
+            }
         }
         AlertDialog.Builder(this).setTitle("APROBAR SOLICITUD")
-            .setMessage("El descuento no se aplica automáticamente. Marca la casilla solo si autorizas descontar una cantidad al trabajador.")
+            .setMessage("La aprobación no descuenta automáticamente. Solo puedes autorizar descuentos para préstamos, consumos, permisos, retardos y adelantos.")
             .setView(form)
             .setPositiveButton("APROBAR") { _, _ ->
                 val details = org.json.JSONObject()
-                val deduction = org.json.JSONObject().put("authorized", authorizeDeduction.isChecked)
-                if (authorizeDeduction.isChecked) {
-                    val value = amount.text.toString().trim().replace(",", ".").toDoubleOrNull()
-                    if (value == null || value <= 0 || value > 1000000) {
-                        Toast.makeText(this, "Captura una cantidad válida para el descuento", Toast.LENGTH_LONG).show()
-                        return@setPositiveButton
+                if (canAuthorizeDeduction) {
+                    val deduction = org.json.JSONObject().put("authorized", authorizeDeduction.isChecked)
+                    if (authorizeDeduction.isChecked) {
+                        val value = amount.text.toString().trim().replace(",", ".").toDoubleOrNull()
+                        if (value == null || value <= 0 || value > 1000000) {
+                            Toast.makeText(this, "Captura una cantidad válida para el descuento", Toast.LENGTH_LONG).show()
+                            return@setPositiveButton
+                        }
+                        val amountCents = Math.round(value * 100.0)
+                        val requestedCents = item.optJSONObject("details")?.optLong("amountCents", 0L) ?: 0L
+                        if (requestedCents > 0L && amountCents > requestedCents) {
+                            Toast.makeText(this, "El descuento no puede superar la cantidad solicitada", Toast.LENGTH_LONG).show()
+                            return@setPositiveButton
+                        }
+                        deduction.put("amountCents", amountCents)
                     }
-                    val amountCents = Math.round(value * 100.0)
-                    val requestedCents = item.optJSONObject("details")?.optLong("amountCents", 0L) ?: 0L
-                    if (requestedCents > 0L && amountCents > requestedCents) {
-                        Toast.makeText(this, "El descuento no puede superar la cantidad solicitada", Toast.LENGTH_LONG).show()
-                        return@setPositiveButton
-                    }
-                    deduction.put("amountCents", amountCents)
+                    details.put("deduction", deduction)
                 }
-                details.put("deduction", deduction)
                 submitTeamDecision(base, item, correction, decision, slot, details)
             }
             .setNegativeButton("CANCELAR", null).show()
