@@ -873,14 +873,26 @@ async function createPatronRecoveryPaymentRequest(request, env) {
   if (!license || license.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalized) return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
   const oldPatron = await env.DB.prepare("SELECT id FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' LIMIT 1").bind(license.id).first();
   if (!oldPatron) return json({ error: "REGISTERED_PATRON_NOT_FOUND" }, 409);
-  const existing = await env.DB.prepare("SELECT id,status,created_at FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
-  if (existing) return json({ requestId:existing.id,status:existing.status,createdAt:existing.created_at,amountCents:50000,currency:"MXN",duplicate:true });
+  const existing = await env.DB.prepare("SELECT id,status,created_at,installation_id,fingerprint FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
+  if (existing) {
+    if (existing.installation_id !== proof.challenge.installation_id ||
+        String(existing.fingerprint).toLowerCase() !== String(proof.challenge.fingerprint).toLowerCase()) {
+      return json({ error: "RECOVERY_REQUEST_BOUND_TO_OTHER_DEVICE" }, 409);
+    }
+    return json({ requestId:existing.id,status:existing.status,createdAt:existing.created_at,amountCents:50000,currency:"MXN",duplicate:true });
+  }
   const id=crypto.randomUUID(), now=Math.floor(Date.now()/1000);
   try {
     await env.DB.prepare("INSERT INTO patron_recovery_payment_requests (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,created_at) VALUES (?,?,?,?,?,?,?,'pending_payment',?)").bind(id,license.id,oldPatron.id,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),email,phone,now).run();
   } catch {
-    const raced=await env.DB.prepare("SELECT id,status,created_at FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
-    if(raced) return json({requestId:raced.id,status:raced.status,createdAt:raced.created_at,amountCents:50000,currency:"MXN",duplicate:true});
+    const raced=await env.DB.prepare("SELECT id,status,created_at,installation_id,fingerprint FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
+    if(raced) {
+      if (raced.installation_id !== proof.challenge.installation_id ||
+          String(raced.fingerprint).toLowerCase() !== String(proof.challenge.fingerprint).toLowerCase()) {
+        return json({ error: "RECOVERY_REQUEST_BOUND_TO_OTHER_DEVICE" }, 409);
+      }
+      return json({requestId:raced.id,status:raced.status,createdAt:raced.created_at,amountCents:50000,currency:"MXN",duplicate:true});
+    }
     return json({error:"RECOVERY_REQUEST_FAILED"},503);
   }
   return json({requestId:id,status:"pending_payment",createdAt:now,amountCents:50000,currency:"MXN",businessName:license.business_name,
