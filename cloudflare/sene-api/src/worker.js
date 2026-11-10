@@ -1644,9 +1644,18 @@ async function decideWorkRequest(request, env) {
     if (!decisionData.deduction || typeof decisionData.deduction !== "object" ||
         typeof decisionData.deduction.authorized !== "boolean") return json({ error: "INVALID_DEDUCTION" }, 400);
     if (!decisionData.deduction.authorized) delete decisionData.deduction.amountCents;
-    else if (!Number.isInteger(decisionData.deduction.amountCents) || decisionData.deduction.amountCents < 0 || decisionData.deduction.amountCents > 100000000) {
+    else if (!Number.isSafeInteger(decisionData.deduction.amountCents) ||
+        decisionData.deduction.amountCents <= 0 || decisionData.deduction.amountCents > 100000000) {
       return json({ error: "INVALID_DEDUCTION" }, 400);
     }
+  }
+  const pendingRequest = await env.DB.prepare(
+    "SELECT request_type FROM work_requests WHERE id = ? AND license_id = ? AND status = 'pending' LIMIT 1"
+  ).bind(requestId, ctx.licenseId).first();
+  if (!pendingRequest) return json({ error: "REQUEST_NOT_PENDING_OR_NOT_FOUND" }, 409);
+  if (decisionData.deduction?.authorized === true &&
+      !new Set(["LOAN", "CONSUMPTION", "ABSENCE_PERMISSION", "LATE_ARRIVAL", "SALARY_ADVANCE"]).has(pendingRequest.request_type)) {
+    return json({ error: "DEDUCTION_NOT_ALLOWED_FOR_REQUEST_TYPE" }, 400);
   }
   const decisionJson = JSON.stringify(decisionData);
   if (decisionJson.length > 4096) return json({ error: "REQUEST_TOO_LARGE" }, 413);
