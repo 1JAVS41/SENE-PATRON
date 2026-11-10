@@ -633,7 +633,7 @@ async function cancelPatronRecovery(request, env) {
 function bytesToBase64Url(bytes) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function base64UrlToBytes(value) {
@@ -858,7 +858,7 @@ async function createPatronRegistrationRequest(request, env) {
   if (!proof.ok) return json({ error: proof.error }, proof.status);
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
-  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\\s+/g, " ") : "";
+  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\s+/g, " ") : "";
   if (!businessName || businessName.length > 100 ||
       Object.keys(body).some((key) => key !== "businessName") ||
       !/^[0-9a-f-]{36}$/i.test(proof.challenge.installation_id) ||
@@ -905,7 +905,7 @@ async function createPatronRegistrationRequest(request, env) {
 }
 
 function normalizeOfficialPhone(value) {
-  return typeof value === "string" ? value.replace(/\\D/g, "") : "";
+  return typeof value === "string" ? value.replace(/\D/g, "") : "";
 }
 
 async function requireOfficialHelpRecipient(env, suppliedPhone) {
