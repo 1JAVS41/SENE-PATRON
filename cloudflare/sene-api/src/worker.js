@@ -613,16 +613,54 @@ async function cancelPatronRecovery(request, env) {
   return json({ recoveryRequestId: requestId, status: "cancelled" });
 }
 
+function bytesToBase64Url(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToBytes(value) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(normalized + "=".repeat((4 - normalized.length % 4) % 4));
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+async function pairingEncryptionKey(env) {
+  const raw = typeof env.PAIRING_TOKEN_ENCRYPTION_KEY === "string"
+    ? env.PAIRING_TOKEN_ENCRYPTION_KEY.trim() : "";
+  if (!/^[0-9a-f]{64}$/i.test(raw)) throw new Error("PAIRING_ENCRYPTION_KEY_NOT_CONFIGURED");
+  const bytes = Uint8Array.from(raw.match(/../g), (part) => parseInt(part, 16));
+  return crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+async function encryptPairingToken(token, env) {
+  const key = await pairingEncryptionKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(token));
+  return bytesToBase64Url(new Uint8Array([...iv, ...new Uint8Array(encrypted)]));
+}
+
+async function decryptPairingToken(value, env) {
+  const key = await pairingEncryptionKey(env);
+  const packed = base64UrlToBytes(value);
+  if (packed.length < 29) throw new Error("INVALID_ENCRYPTED_PAIRING_TOKEN");
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: packed.slice(0, 12) }, key, packed.slice(12)
+  );
+  return new TextDecoder().decode(plain);
+}
+
 async function createPairingToken(request, env) {
   const proof = await verifySignedRequest(request, env, "PATRON_PAIRING_TOKEN");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
 
   let body;
-  try { body = JSON.parse(proof.bodyText); } catch {
-    return json({ error: "INVALID_REQUEST" }, 400);
-  }
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const slot = body?.slot;
+  const operation = body?.operation || "NEW";
   if (!body || typeof body !== "object" || Array.isArray(body) ||
-      Object.keys(body).length !== 1 || body.uses !== 2) {
+      Object.keys(body).some((key) => !["slot", "operation"].includes(key)) ||
+      !["VENTAS_1", "VENTAS_2"].includes(slot) || operation !== "NEW") {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
 
@@ -637,29 +675,60 @@ async function createPairingToken(request, env) {
   if (patron.license_status !== "active" || !patron.expires_at || patron.expires_at <= now) {
     return json({ error: "LICENSE_EXPIRED" }, 403);
   }
-  const quotaError = await consumeWeeklyQuota(env, patron.id);
-  if (quotaError) return json({ error: quotaError.error }, quotaError.status);
+  const slotNumber = slot === "VENTAS_1" ? 2 : 3;
+  const occupied = await env.DB.prepare(
+    "SELECT id FROM devices WHERE license_id = ? AND slot_number = ? AND status = 'active' LIMIT 1"
+  ).bind(patron.license_id, slotNumber).first();
+  if (occupied) return json({ error: "EQUIPMENT_SLOT_ALREADY_LINKED" }, 409);
 
-  const token = randomHex(32);
+  // Return the same still-pending QR after app restarts; never mint duplicates.
+  const pending = await env.DB.prepare(
+    `SELECT token_hash, encrypted_token, created_at FROM pairing_tokens
+      WHERE license_id = ? AND patron_device_id = ? AND slot_number = ?
+        AND operation = 'NEW' AND remaining_uses = 1 AND revoked_at IS NULL
+        AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`
+  ).bind(patron.license_id, patron.id, slotNumber).first();
+  if (pending?.encrypted_token) {
+    try {
+      const token = await decryptPairingToken(pending.encrypted_token, env);
+      return json({ qrPayload: `SENEPAIR2:${token}`, slot, remainingUses: 1,
+        createdAt: pending.created_at, expiresAt: null, recovered: true });
+    } catch {
+      return json({ error: "PAIRING_TOKEN_RECOVERY_FAILED" }, 503);
+    }
+  }
+
+  let token, encryptedToken;
+  try {
+    token = randomHex(32);
+    encryptedToken = await encryptPairingToken(token, env);
+  } catch {
+    return json({ error: "PAIRING_ENCRYPTION_NOT_CONFIGURED" }, 503);
+  }
   const tokenHash = await sha256(token);
-  // Pairing QR has no time-based expiry. It remains valid until its uses are consumed or it is revoked.
-  // Keep the legacy NOT NULL column compatible with existing D1 schemas using a year-9999 sentinel.
-  const expiresAt = 253402300799;
+  const expiresAt = 253402300799; // No time-based expiry.
   try {
     await env.DB.prepare(
       `INSERT INTO pairing_tokens
-       (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at)
-       VALUES (?, ?, ?, 2, ?, ?)`
-    ).bind(tokenHash, patron.license_id, patron.id, now, expiresAt).run();
+       (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at,
+        slot_number, operation, encrypted_token, consumed_at)
+       VALUES (?, ?, ?, 1, ?, ?, ?, 'NEW', ?, NULL)`
+    ).bind(tokenHash, patron.license_id, patron.id, now, expiresAt, slotNumber, encryptedToken).run();
   } catch {
-    return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+    const raced = await env.DB.prepare(
+      `SELECT encrypted_token, created_at FROM pairing_tokens
+        WHERE license_id = ? AND patron_device_id = ? AND slot_number = ?
+          AND operation = 'NEW' AND remaining_uses = 1 AND revoked_at IS NULL
+          AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`
+    ).bind(patron.license_id, patron.id, slotNumber).first();
+    if (!raced?.encrypted_token) return json({ error: "SERVICE_UNAVAILABLE" }, 503);
+    try { token = await decryptPairingToken(raced.encrypted_token, env); }
+    catch { return json({ error: "PAIRING_TOKEN_RECOVERY_FAILED" }, 503); }
+    return json({ qrPayload: `SENEPAIR2:${token}`, slot, remainingUses: 1,
+      createdAt: raced.created_at, expiresAt: null, recovered: true });
   }
-
-  return json({
-    qrPayload: `SENEPAIR1:${token}`,
-    remainingUses: 2,
-    expiresAt
-  }, 201);
+  return json({ qrPayload: `SENEPAIR2:${token}`, slot, remainingUses: 1,
+    createdAt: now, expiresAt: null, recovered: false }, 201);
 }
 
 async function pairVentas(request, env) {
@@ -667,9 +736,7 @@ async function pairVentas(request, env) {
   if (!proof.ok) return json({ error: proof.error }, proof.status);
 
   let body;
-  try { body = JSON.parse(proof.bodyText); } catch {
-    return json({ error: "INVALID_REQUEST" }, 400);
-  }
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const identity = await validateBootstrapIdentity(body);
   const qrPayload = typeof body.qrToken === "string" ? body.qrToken.trim() : "";
   if (!identity || identity.installationId !== proof.challenge.installation_id ||
@@ -687,53 +754,34 @@ async function pairVentas(request, env) {
         `INSERT INTO devices
          (id, license_id, device_type, installation_id, continuity_id,
           public_key, fingerprint, slot_number, status, created_at)
-         SELECT ?, p.license_id, 'VENTAS', ?, ?, ?, ?,
-                CASE
-                  WHEN NOT EXISTS (
-                    SELECT 1 FROM devices d2
-                     WHERE d2.license_id = p.license_id AND d2.slot_number = 2
-                       AND d2.status = 'active'
-                  ) THEN 2 ELSE 3
-                END,
-                'active', ?
+         SELECT ?, p.license_id, 'VENTAS', ?, ?, ?, ?, p.slot_number, 'active', ?
            FROM pairing_tokens p
            JOIN licenses l ON l.id = p.license_id
            JOIN devices patron ON patron.id = p.patron_device_id
-          WHERE p.token_hash = ?
-            AND p.remaining_uses > 0 AND p.revoked_at IS NULL
+          WHERE p.token_hash = ? AND p.remaining_uses = 1
+            AND p.revoked_at IS NULL AND p.consumed_at IS NULL
+            AND p.operation = 'NEW' AND p.slot_number IN (2,3)
             AND patron.status = 'active' AND patron.device_type = 'PATRON'
             AND l.status = 'active' AND l.expires_at > ?
-            AND NOT EXISTS (
-              SELECT 1 FROM devices duplicate
-               WHERE duplicate.license_id = p.license_id
-                 AND duplicate.fingerprint = ?
-            )
-            AND (
-              NOT EXISTS (SELECT 1 FROM devices d3
-                           WHERE d3.license_id = p.license_id
-                             AND d3.slot_number = 2 AND d3.status = 'active')
-              OR NOT EXISTS (SELECT 1 FROM devices d4
-                              WHERE d4.license_id = p.license_id
-                                AND d4.slot_number = 3 AND d4.status = 'active')
-            )`
-      ).bind(
-        deviceId, identity.installationId, body.continuityId.toLowerCase(),
-        identity.publicKey, identity.fingerprint, now,
-        tokenHash, now, identity.fingerprint
-      ),
+            AND NOT EXISTS (SELECT 1 FROM devices existing
+              WHERE existing.license_id = p.license_id
+                AND existing.slot_number = p.slot_number AND existing.status = 'active')
+            AND NOT EXISTS (SELECT 1 FROM devices duplicate
+              WHERE duplicate.license_id = p.license_id AND duplicate.fingerprint = ?)`
+      ).bind(deviceId, identity.installationId, body.continuityId.toLowerCase(),
+        identity.publicKey, identity.fingerprint, now, tokenHash, now, identity.fingerprint),
       env.DB.prepare(
-        `UPDATE pairing_tokens
-            SET remaining_uses = remaining_uses - 1
-          WHERE token_hash = ? AND remaining_uses > 0
-            AND revoked_at IS NULL
+        `UPDATE pairing_tokens SET remaining_uses = 0, consumed_at = ?
+          WHERE token_hash = ? AND remaining_uses = 1 AND revoked_at IS NULL
+            AND consumed_at IS NULL AND operation = 'NEW'
             AND EXISTS (SELECT 1 FROM devices d
-                         WHERE d.id = ? AND d.license_id = pairing_tokens.license_id)`
-      ).bind(tokenHash, deviceId)
+              WHERE d.id = ? AND d.license_id = pairing_tokens.license_id
+                AND d.slot_number = pairing_tokens.slot_number)`
+      ).bind(now, tokenHash, deviceId)
     ]);
-
     if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
         (results?.[1]?.meta?.changes ?? 0) !== 1) {
-      return json({ error: "PAIRING_TOKEN_INVALID_OR_FULL" }, 409);
+      return json({ error: "PAIRING_TOKEN_INVALID_OR_SLOT_OCCUPIED" }, 409);
     }
   } catch {
     return json({ error: "PAIRING_CONFLICT_OR_DATABASE_ERROR" }, 409);
@@ -745,15 +793,9 @@ async function pairVentas(request, env) {
   const license = await env.DB.prepare(
     "SELECT expires_at FROM licenses WHERE id = ? LIMIT 1"
   ).bind(registered.license_id).first();
-
-  return json({
-    deviceId,
-    slot: registered.slot_number === 2 ? "VENTAS_1" : "VENTAS_2",
-    licenseStatus: "ACTIVE",
-    periodEndsAt: license.expires_at
-  }, 201);
+  return json({ deviceId, slot: registered.slot_number === 2 ? "VENTAS_1" : "VENTAS_2",
+    licenseStatus: "ACTIVE", periodEndsAt: license.expires_at }, 201);
 }
-
 
 function constantTimeTextEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string") return false;
