@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:allowBackup="false"
-        android:label="SENE PATRON-online"
+        android:label="SENE PATRÓN"
         android:icon="@drawable/ic_launcher_patron"
         android:roundIcon="@drawable/ic_launcher_patron"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
