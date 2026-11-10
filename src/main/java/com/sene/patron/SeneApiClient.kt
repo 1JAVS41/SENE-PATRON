@@ -45,6 +45,30 @@ class SeneApiClient(context: Context, baseUrl: String) {
 
     fun storedDeviceId(): String? = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
 
+    /** Descarga y verifica la firma digital de los contactos oficiales AYUDA. */
+    fun officialSupportContacts(): JSONObject =
+        OfficialSupportVerifier.verifyAndRemember(app, get("/v1/support/contacts"))
+
+    private fun get(path: String): JSONObject {
+        val connection = (URL(root + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 15000
+            useCaches = false
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("X-SENE-Version", "1")
+        }
+        try {
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw SeneApiException(status, response)
+            return JSONObject(response)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     fun recover(recoveryCode: String): JSONObject {
         val identity = PatronDeviceIdentity.get(app)
         val body = JSONObject()
