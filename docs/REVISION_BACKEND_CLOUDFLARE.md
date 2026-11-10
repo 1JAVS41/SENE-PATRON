@@ -252,3 +252,24 @@ Y el Worker de esta rama:
 - Android VENTAS: último run consultado `42727055819`, **success** (commit `f4768d6d2c41577714866f75fdba0c5d64c00718`).
 - Ambos resultados son compilaciones CI; no son pruebas de flujo en teléfonos ni pruebas E2E.
 - El Worker del panel Cloudflare continúa sin desplegar el código de esta rama y las migraciones 0002–0010 no están aplicadas a la D1 real. No desplegar ni ejecutar migraciones hasta validar el entorno de pruebas y la interfaz privada del operador.
+
+
+### Seguimiento de integración de correcciones (2026-11-10)
+
+Se verificó además la pantalla activa de SENE PATRÓN:
+- `src/main/java/com/sene/patron/MainActivity.kt` contiene `renderCorrectionInbox`.
+- Cada equipo muestra su bandeja de correcciones por separado; el patrón puede autorizar o rechazar.
+- La autorización genera un permiso de un solo uso ligado a una solicitud, dispositivo y venta.
+- El cliente PATRÓN llama al endpoint firmado de decisión y vuelve a consultar la bandeja.
+
+Se confirmó el requisito de producto acordado: el trabajador solicita la corrección desde SENE VENTAS indicando el motivo; el patrón la administra exclusivamente desde SENE PATRÓN (no WhatsApp); el permiso aprobado solo vale para esa venta y una utilización. Los datos comerciales permanecen locales en VENTAS.
+
+Pendiente de integrar en VENTAS:
+1. Asignar un identificador estable a cada ticket local (incluidas ventas históricas mediante una clave derivada estable, sin subir el ticket al servidor).
+2. Permitir elegir un ticket y enviar motivo + clave UUID idempotente al endpoint existente.
+3. Incluir las decisiones de corrección en la respuesta de actualizaciones de VENTAS, para que el trabajador vea pendiente/aprobada/rechazada y el identificador del permiso autorizado.
+4. Consumir el permiso firmado y ligado al ticket justo antes de habilitar la operación local de corrección; el servidor debe seguir rechazando cualquier segundo uso o discrepancia de venta/equipo.
+
+**Guardarraíl:** todavía no se debe programar una eliminación o modificación concreta de líneas, inventario o caja. La autorización técnica está definida, pero la acción local exacta que el trabajador podrá ejecutar tras la autorización (anular ticket completo, corregir productos/cantidades u otra operación) debe quedar especificada antes de modificar los registros comerciales. No se debe asumir ni inventar esa semántica.
+
+No se cambió la lógica de ventas, inventario ni caja durante esta revisión.
