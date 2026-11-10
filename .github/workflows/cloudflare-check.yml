@@ -130,8 +130,26 @@ jobs:
           );
           assert.equal(recoveryChallenge.status, 201,
             "PATRON_RECOVERY_REQUEST debe aceptar identidad bootstrap sin deviceId");
+          const restoreChallenge = await worker.fetch(
+            new Request("https://sene.test/v1/challenges", {
+              method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                purpose: "PATRON_RESTORE",
+                installationId: "123e4567-e89b-42d3-a456-426614174000",
+                continuityId: "a".repeat(64),
+                publicKeyBase64: Buffer.from(spki).toString("base64"),
+                fingerprint,
+                targetMethod: "POST",
+                targetPath: "/v1/patron/restore",
+                bodySha256: "c".repeat(64)
+              })
+            }),
+            { DB: challengeDb }
+          );
+          assert.equal(restoreChallenge.status, 201,
+            "PATRON_RESTORE debe aceptar identidad bootstrap sin deviceId");
 
-          console.log("PASS: firma ECDSA, contactos oficiales, protección de operador y reto bootstrap de reposición");
+          console.log("PASS: firma ECDSA, contactos oficiales y retos bootstrap de reposición/restauración");
 
           JS
 
