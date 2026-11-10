@@ -9,8 +9,8 @@ El Worker incluye actualmente:
 - `GET /health`.
 - Retos firmados de dos minutos ligados a método, ruta, hash del cuerpo, propósito e identidad.
 - Verificación ECDSA P-256 compatible con Android Keystore (firma DER convertida a P-1363 para WebCrypto), consumo de reto de un solo uso y validación de dispositivo.
-- Alta inicial privada de licencia, confirmación manual y auditable de pagos de $500 + $80, y activación por 30 días solo después de ambos pagos.
-- QR opaco de dos usos para vincular los dos equipos VENTAS.
+- Registro inicial solicitado desde SENE PATRÓN, nombre de empresa reservado mientras la solicitud está abierta, confirmación manual y auditable de $500 + $80, código único entregado solo tras verificar el pago y activación por 30 días después de canjearlo.
+- Dos QR independientes de un solo uso, fijos a VENTAS_1 y VENTAS_2; se recupera el mismo QR pendiente tras cerrar la app. El token se conserva cifrado con AES-GCM en D1.
 - Sesión de dispositivo y cuota semanal atómica de 20 operaciones remotas por instalación.
 - Solicitudes de trabajador, bandeja y decisiones separadas por equipo, actualizaciones de respuesta, reportes de cierre de turno y reportes de nómina.
 - Solicitud de renovación y canje de código de un solo uso; código no caduca por tiempo y queda ligado a solicitud, licencia y PATRÓN.
@@ -25,7 +25,7 @@ SENE PATRÓN ya contiene una primera integración Android real, aún no validada
 - Identidad P-256 en Android Keystore con clave privada no exportable.
 - Cliente HTTPS firmado con retos de dos minutos y hash del cuerpo exacto.
 - Activación inicial y recuperación de PATRÓN con códigos de un solo uso.
-- Consulta de sesión/licencia, creación de QR de dos usos y vinculación de VENTAS.
+- Consulta de sesión/licencia, creación/recuperación de QR fijo de un solo uso por equipo y vinculación de VENTAS.
 - Consulta de dispositivos vinculados y solicitud de reemplazo.
 - Bandejas separadas por Equipo 1 y Equipo 2, aprobación/rechazo de solicitudes y correcciones.
 - Contadores independientes de notificaciones: rojo con 0 y verde con el número exacto cuando hay pendientes.
@@ -38,7 +38,7 @@ SENE VENTAS ya incluye cliente HTTPS firmado, vinculación QR, solicitudes de tr
 
 ## Estado de despliegue
 
-**El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0006 todavía no se aplican allí.
+**El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0012 todavía no se aplican allí.
 
 No desplegar ni aplicar migraciones remotas hasta completar revisión y pruebas E2E en un entorno de pruebas, y recibir autorización explícita.
 
@@ -47,7 +47,7 @@ No desplegar ni aplicar migraciones remotas hasta completar revisión y pruebas 
 El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 1. `node --check` para detectar errores de sintaxis.
-2. Migraciones 0001–0006 sobre SQLite temporal e `integrity_check`.
+2. Migraciones 0001–0012 sobre SQLite temporal e `integrity_check`.
 3. Prueba del límite semanal de 20 operaciones y rechazo de la número 21.
 4. Pruebas de renovación, pago inicial de $580 y activación por 30 días.
 5. Pruebas de historial y reemplazo de dispositivos, unicidad de solicitudes pendientes, revocación e invalidación de QR.
@@ -63,7 +63,7 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 - Binding del Worker: `DB`.
 - Migraciones versionadas: 0001 a 0006.
 - La migración 0001 ya se aplicó manualmente a la D1 real. **No volver a ejecutarla.**
-- Las migraciones 0002–0006 solo se han probado en CI sobre SQLite temporal.
+- Las migraciones 0002–0012 solo se han probado en CI sobre SQLite temporal.
 
 ## Pendientes antes de producción
 
@@ -87,7 +87,7 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 ## Recuperación de códigos
 
-Se implementaron `POST /v1/operator/licenses/reissue-activation-code` y `POST /v1/operator/renewals/reissue-code`. Rotan el hash del código, invalidan el anterior, exigen pago confirmado y dejan auditoría. Los códigos no se guardan en texto claro. Migración 0007 añade `authorized_by` a renovaciones. CI debe aplicar 0001–0010.
+Se implementaron `POST /v1/operator/licenses/reissue-activation-code` y `POST /v1/operator/renewals/reissue-code`. Rotan el hash del código, invalidan el anterior, exigen pago confirmado y dejan auditoría. Los códigos no se guardan en texto claro. Migración 0007 añade `authorized_by` a renovaciones. CI debe aplicar 0001–0012. Para QR recuperables, configurar PAIRING_TOKEN_ENCRYPTION_KEY como secreto del Worker: 64 caracteres hexadecimales aleatorios (32 bytes). Sin este secreto el servidor rechaza emitir QR, nunca almacena tokens en claro.
 
 
 **Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
@@ -101,3 +101,15 @@ La migración 0009 y el Worker incluyen recuperación privada de PATRÓN. El ope
 ## Nómina por equipo
 
 Migración 0010 añade sueldo y fechas de pago por separado para VENTAS_1 y VENTAS_2. PATRÓN puede consultar/guardar el sueldo base, día fijo mensual y/o fechas específicas. El Worker valida en servidor que el reporte de nómina se envíe solo en una fecha configurada para el slot real del equipo, usando America/Mexico_City. Si no está configurado o no es día de pago, rechaza el envío.
+
+
+## Cambios recientes de registro y QR (migraciones 0011–0012)
+
+- Registro inicial iniciado desde la APK PATRÓN con identidad del teléfono firmada; una solicitud pendiente por instalación y una reserva única por nombre normalizado.
+- El alta cuesta $580 MXN: $500 de configuración + $80 de primera mensualidad. El concepto de pago debe contener únicamente el nombre exacto de la empresa. La solicitud es idempotente y no crea la licencia activa antes de confirmar el pago.
+- Operación privada de operador: consultar solicitudes pendientes y autorizar una sola vez después de revisar el comprobante. El código se entrega al operador para que lo comunique exclusivamente por los números oficiales de AYUDA; no hay envío automático por WhatsApp integrado.
+- El canje del código queda ligado a la identidad PATRÓN que creó la solicitud. Solo entonces se crea el dispositivo PATRÓN y se activa la licencia por 30 días.
+- QR independientes: VENTAS_1/Equipo 1 (slot 2) y VENTAS_2/Equipo 2 (slot 3), cada uno de un solo uso, sin vencimiento temporal y ligado a empresa/licencia/slot/operación. Cerrar la app no crea otro QR: el servidor recupera el mismo token cifrado.
+- La operación REPLACEMENT solo puede generar QR después de que el operador haya aprobado la reposición del slot correspondiente.
+- Requiere configurar PAIRING_TOKEN_ENCRYPTION_KEY en Cloudflare Workers antes de habilitar la generación de QR. El secreto no debe incluirse en APK ni en Git.
+- Datos bancarios y teléfonos oficiales AYUDA aún deben estar registrados/configurados antes de presentar la experiencia como operativa al cliente.
