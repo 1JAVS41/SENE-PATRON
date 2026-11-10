@@ -604,6 +604,24 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    // El contador de cada equipo representa solicitudes y correcciones pendientes
+    // que requieren atención. Se calcula con la respuesta del servidor, nunca se comparte
+    // entre Equipo 1 y Equipo 2.
+    private fun updateTeamNotificationCount(team: String, payload: JSONObject) {
+        val requests = payload.optJSONArray("items") ?: org.json.JSONArray()
+        val corrections = payload.optJSONArray("corrections") ?: org.json.JSONArray()
+        var pending = 0
+        for (index in 0 until requests.length()) {
+            if (requests.optJSONObject(index)?.optString("status") == "pending") pending++
+        }
+        for (index in 0 until corrections.length()) {
+            if (corrections.optJSONObject(index)?.optString("status") == "pending") pending++
+        }
+        getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
+            .putInt("notifications_$team", pending)
+            .apply()
+    }
+
     private fun refreshTeamRequests(team: String, force: Boolean = false) {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
@@ -622,7 +640,8 @@ class MainActivity : Activity() {
                     .putLong("requests_updated_$team", System.currentTimeMillis())
                     .putBoolean("requests_refreshing_$team", false)
                     .apply()
-                runOnUiThread { if (!isFinishing && currentPage == "${team}_requests") render() }
+                updateTeamNotificationCount(team, result)
+                runOnUiThread { if (!isFinishing && (currentPage == "${team}_requests" || currentPage == "team1" || currentPage == "team2" || currentPage == "menu")) render() }
             } catch (error: Exception) {
                 prefs.edit().putBoolean("requests_refreshing_$team", false).apply()
                 runOnUiThread {
