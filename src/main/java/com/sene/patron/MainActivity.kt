@@ -792,15 +792,16 @@ class MainActivity : Activity() {
                     Toast.makeText(this, "Escribe el nombre exacto de tu empresa", Toast.LENGTH_LONG).show()
                     return@setPositiveButton
                 }
+                val email = emailField.text?.toString()?.trim().orEmpty()
+                val phone = phoneField.text?.toString()?.trim().orEmpty()
+                if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
+                    phone.filter { it.isDigit() }.length !in 10..15) {
+                    Toast.makeText(this, "Escribe un correo y teléfono válidos", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
                 Thread {
                     try {
-                        val email = emailField.text?.toString()?.trim().orEmpty()
-val phone = phoneField.text?.toString()?.trim().orEmpty()
-if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() || phone.filter { it.isDigit() }.length !in 10..15) {
-    Toast.makeText(this, "Escribe un correo y teléfono válidos", Toast.LENGTH_LONG).show()
-    return@setPositiveButton
-}
-val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
+                        val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
                         val requestId = result.optString("requestId")
                         runOnUiThread {
                             if (requestId.isBlank()) {
