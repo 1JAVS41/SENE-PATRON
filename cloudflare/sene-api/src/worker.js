@@ -491,10 +491,18 @@ async function recoverPatron(request, env) {
   }
   const codeHash = await sha256(code);
   const recovery = await env.DB.prepare(
-    "SELECT r.id, r.license_id, r.old_patron_device_id, l.status AS license_status, l.expires_at FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id WHERE r.code_hash = ? AND r.status = 'pending' LIMIT 1"
+    "SELECT r.id, r.license_id, r.old_patron_device_id, l.status AS license_status, l.expires_at, p.installation_id AS recovery_installation_id, p.fingerprint AS recovery_fingerprint, p.status AS payment_status FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id LEFT JOIN patron_recovery_payment_requests p ON p.code_hash = r.code_hash WHERE r.code_hash = ? AND r.status = 'pending' LIMIT 1"
   ).bind(codeHash).first();
   if (!recovery || !["active", "expired"].includes(recovery.license_status)) {
     return json({ error: "RECOVERY_CODE_INVALID_OR_USED" }, 409);
+  }
+  // Los códigos emitidos por reposición pagada quedan ligados al teléfono que creó
+  // la solicitud. Los códigos de recuperación manual del operador conservan su flujo.
+  const paidRecovery = recovery.payment_status !== null && recovery.payment_status !== undefined;
+  if (paidRecovery && (recovery.payment_status !== "authorized" ||
+      recovery.recovery_installation_id !== identity.installationId ||
+      String(recovery.recovery_fingerprint).toLowerCase() !== identity.fingerprint)) {
+    return json({ error: "RECOVERY_DEVICE_MISMATCH" }, 409);
   }
   const newDeviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
@@ -516,15 +524,18 @@ async function recoverPatron(request, env) {
       ).bind(now, recovery.id, codeHash, newDeviceId),
       env.DB.prepare(
         "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'system', 'patron_recovery', 'patron_device_recovered', ?, ? WHERE EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND status = 'consumed' AND consumed_at = ?) AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'active')"
-      ).bind(crypto.randomUUID(), recovery.license_id, newDeviceId, JSON.stringify({ recoveryRequestId: recovery.id, oldDeviceId: recovery.old_patron_device_id }), now, recovery.id, now, newDeviceId)
+      ).bind(crypto.randomUUID(), recovery.license_id, newDeviceId, JSON.stringify({ recoveryRequestId: recovery.id, oldDeviceId: recovery.old_patron_device_id }), now, recovery.id, now, newDeviceId),
+      env.DB.prepare(
+        "UPDATE patron_recovery_payment_requests SET status = 'consumed', consumed_at = ? WHERE code_hash = ? AND status = 'authorized' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND status = 'consumed' AND code_hash = ?)"
+      ).bind(now, codeHash, recovery.id, codeHash)
     ]);
   } catch {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
-  if ([0, 2, 3, 4].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1)) {
+  if ([0, 2, 3, 4].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1) ||
+      (paidRecovery && (results?.[5]?.meta?.changes ?? 0) !== 1)) {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
-  await env.DB.prepare("UPDATE patron_recovery_payment_requests SET status = 'consumed', consumed_at = ? WHERE code_hash = ? AND status = 'authorized'").bind(now, codeHash).run();
   return json({
     deviceId: newDeviceId,
     slot: "PATRON",
