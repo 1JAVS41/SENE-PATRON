@@ -25,6 +25,29 @@ class SeneApiClient(context: Context, baseUrl: String) {
         require(root.startsWith("https://")) { "La dirección del servidor SENE debe usar HTTPS" }
     }
 
+    fun requestRegistration(businessName: String): JSONObject {
+        val normalizedName = businessName.trim().replace(Regex("\\s+"), " ")
+        require(normalizedName.isNotBlank() && normalizedName.length <= 100) {
+            "Escribe el nombre de tu empresa (máximo 100 caracteres)"
+        }
+        val identity = PatronDeviceIdentity.get(app)
+        val body = JSONObject().put("businessName", normalizedName)
+        val result = bootstrapSigned(
+            "PATRON_REGISTRATION_REQUEST",
+            "/v1/patron/registrations/request",
+            body.toString(),
+            identity
+        )
+        val requestId = result.optString("requestId")
+        if (requestId.isNotBlank()) {
+            check(prefs.edit()
+                .putString("registration_request_id", requestId)
+                .putString("business_name", result.optString("businessName", normalizedName))
+                .commit()) { "No se pudo guardar la solicitud de registro" }
+        }
+        return result
+    }
+
     fun activate(activationCode: String): JSONObject {
         val identity = PatronDeviceIdentity.get(app)
         val body = JSONObject()
