@@ -1233,6 +1233,10 @@ async function createCorrectionRequest(request, env) {
     if (existing.plan_hash !== planHash) return json({ error: "IDEMPOTENCY_PLAN_MISMATCH" }, 409);
     return json({ requestId: existing.id, saleId: existing.sale_id, status: existing.status, createdAt: existing.created_at, planHash: existing.plan_hash, duplicate: true });
   }
+  const activeForSale = await env.DB.prepare(
+    "SELECT id, status FROM correction_requests WHERE ventas_device_id = ? AND sale_id = ? AND status IN ('pending', 'approved', 'consumed') LIMIT 1"
+  ).bind(ctx.deviceId, saleId).first();
+  if (activeForSale) return json({ error: "CORRECTION_ALREADY_EXISTS", status: activeForSale.status }, 409);
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   try {
