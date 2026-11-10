@@ -2283,7 +2283,7 @@ async function ventasRequestHistory(request, env) {
     "SELECT id, request_type, details_json, status, decision_json, created_at, decided_at FROM work_requests WHERE ventas_device_id = ? ORDER BY created_at DESC LIMIT 200"
   ).bind(ctx.deviceId).all();
   const corrections = await env.DB.prepare(
-    "SELECT id, sale_id, reason, reasons_json, cash_impact, cash_reason, status, created_at, decided_at FROM correction_requests WHERE ventas_device_id = ? ORDER BY created_at DESC LIMIT 100"
+    "SELECT r.id, r.sale_id, r.reason, r.reasons_json, r.cash_impact, r.cash_reason, r.plan_hash, r.status, r.created_at, r.decided_at, g.id AS grant_id FROM correction_requests r LEFT JOIN correction_grants g ON g.request_id = r.id WHERE r.ventas_device_id = ? ORDER BY r.created_at DESC LIMIT 100"
   ).bind(ctx.deviceId).all();
   return json({
     items: (work.results || []).map((row) => ({
@@ -2302,6 +2302,8 @@ async function ventasRequestHistory(request, env) {
       reasons: (() => { try { return JSON.parse(row.reasons_json || "[]"); } catch { return [row.reason]; } })(),
       cashImpact: Number(row.cash_impact) === 1,
       cashReason: row.cash_reason || "",
+      planHash: row.plan_hash,
+      grantId: row.grant_id || null,
       status: row.status,
       createdAt: Number(row.created_at),
       decidedAt: row.decided_at === null ? null : Number(row.decided_at)
