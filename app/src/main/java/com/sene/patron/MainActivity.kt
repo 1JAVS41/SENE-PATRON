@@ -166,9 +166,55 @@ class MainActivity : Activity() {
             root.addView(menuCard(item.first, item.second, item.third))
             if (index != actions.lastIndex) gap(root, 10)
         }
+        gap(root, 10)
+        root.addView(primaryButton("AYUDA OFICIAL SENE") { showOfficialSupportContacts() })
         gap(root, 13)
         root.addView(info("LICENCIA SENE · 3 ESPACIOS",
             "Un dispositivo SENE PATRÓN y exactamente dos espacios SENE VENTAS."))
+    }
+
+
+    private fun showOfficialSupportContacts() {
+        val base = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+            .getString("server_base_url", null)
+        if (base.isNullOrBlank()) {
+            Toast.makeText(this, "Conecta primero con el servidor oficial SENE.", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, "Consultando y verificando la firma digital de AYUDA…", Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                val contacts = SenePatronApiClient(this, base).officialSupportContacts()
+                val email = contacts.getString("officialEmail")
+                val phone1 = contacts.getString("helpPhone1")
+                val phone2 = contacts.getString("helpPhone2")
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("CONTACTOS OFICIALES SENE · VERIFICADOS")
+                        .setMessage("Estos datos fueron comprobados con la firma digital del servidor. Revisión: " +
+                            contacts.getLong("revision") + "\n\nAYUDA 1: $phone1\nAYUDA 2: $phone2\nCorreo: $email")
+                        .setItems(arrayOf("Abrir WhatsApp · AYUDA 1", "Abrir WhatsApp · AYUDA 2", "Enviar correo oficial")) { _, which ->
+                            val uri = when (which) {
+                                0 -> android.net.Uri.parse("https://wa.me/" + phone1.filter { it.isDigit() })
+                                1 -> android.net.Uri.parse("https://wa.me/" + phone2.filter { it.isDigit() })
+                                else -> android.net.Uri.parse("mailto:" + email)
+                            }
+                            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+                            catch (_: Exception) { Toast.makeText(this, "No se pudo abrir la aplicación correspondiente.", Toast.LENGTH_LONG).show() }
+                        }
+                        .setPositiveButton("CERRAR", null)
+                        .show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("AYUDA OFICIAL NO VERIFICADA")
+                        .setMessage("Por seguridad, SENE no mostrará ni utilizará números o correos que no pueda verificar con la firma digital del servidor.\n\nDetalle: " +
+                            (e.message ?: "Error de verificación"))
+                        .setPositiveButton("ENTENDIDO", null).show()
+                }
+            }
+        }.start()
     }
 
     private fun connectionScreen(root: LinearLayout) {
