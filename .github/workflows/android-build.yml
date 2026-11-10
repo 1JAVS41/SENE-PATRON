@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - sene-cloudflare-backend
+      - 'fix/**'
     paths:
       - "src/**"
       - "build.gradle.kts"
