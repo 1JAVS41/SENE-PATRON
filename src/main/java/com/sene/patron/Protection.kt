@@ -70,6 +70,7 @@ object Protection {
                         .putBoolean("authorized", true)
                         .putString("device_id", id)
                         .apply()
+                    isAuthorized(activity) // provisiona el vínculo Keystore en el primer acceso
                     (activity.getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
                         ?.hideSoftInputFromWindow(field.windowToken, 0)
                     dialog.dismiss()
