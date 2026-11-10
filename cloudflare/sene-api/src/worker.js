@@ -904,6 +904,22 @@ async function createPatronRegistrationRequest(request, env) {
   }, 201);
 }
 
+function normalizeOfficialPhone(value) {
+  return typeof value === "string" ? value.replace(/\\D/g, "") : "";
+}
+
+async function requireOfficialHelpRecipient(env, suppliedPhone) {
+  const supplied = normalizeOfficialPhone(suppliedPhone);
+  if (!supplied || supplied.length < 10) return false;
+  const row = await env.DB.prepare(
+    "SELECT help_phone_1, help_phone_2 FROM official_support_contacts WHERE id = 1 LIMIT 1"
+  ).first();
+  if (!row) return false;
+  const official = [normalizeOfficialPhone(row.help_phone_1), normalizeOfficialPhone(row.help_phone_2)]
+    .filter((phone) => phone.length >= 10);
+  return official.includes(supplied);
+}
+
 async function listOperatorRegistrations(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
   const rows = await env.DB.prepare(
@@ -918,7 +934,11 @@ async function authorizePatronRegistration(request, env) {
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
   const reference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0,120) : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference) return json({ error: "INVALID_REQUEST" }, 400);
+  const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) {
+    return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
+  }
   const row = await env.DB.prepare(
     "SELECT id,business_name,status FROM registration_requests WHERE id=? LIMIT 1"
   ).bind(requestId).first();
@@ -1140,7 +1160,11 @@ async function authorizeRenewal(request, env) {
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
   const reference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference) return json({ error: "INVALID_REQUEST" }, 400);
+  const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) {
+    return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
+  }
   const row = await env.DB.prepare(
     "SELECT r.id, r.license_id, r.status, l.expires_at FROM renewal_requests r JOIN licenses l ON l.id = r.license_id WHERE r.id = ? LIMIT 1"
   ).bind(requestId).first();
