@@ -471,8 +471,8 @@ class MainActivity : Activity() {
                     val reasonText = if (reasons != null && reasons.length() > 0)
                         (0 until reasons.length()).joinToString(", ") { reasons.optString(it) }
                     else item.optString("reason")
-                    val cashText = if (item.optBoolean("cashImpact")) "\\nAjuste de caja: " + item.optString("cashReason") else ""
-                    labels.add("CORRECCIÓN DE VENTA\\nVenta: " + item.optString("saleId") + "\\nMotivo(s): " + reasonText + cashText)
+                    val cashText = if (item.optBoolean("cashImpact")) "\nAjuste de caja: " + item.optString("cashReason") else ""
+                    labels.add("CORRECCIÓN DE VENTA\nVenta: " + item.optString("saleId") + "\nMotivo(s): " + reasonText + cashText)
                     kinds.add("correction"); records.add(item)
                 }
                 val counts = correctionResult.optJSONObject("pendingByTeam")
@@ -494,9 +494,9 @@ class MainActivity : Activity() {
                             val reasonText = if (reasons != null && reasons.length() > 0)
                                 (0 until reasons.length()).joinToString(", ") { reasons.optString(it) }
                             else item.optString("reason")
-                            "Venta: " + item.optString("saleId") + "\\nMotivos: " + reasonText +
-                                if (item.optBoolean("cashImpact")) "\\nCambio de caja: sí\\nMotivo de caja: " + item.optString("cashReason")
-                                else "\\nCambio de caja: no"
+                            "Venta: " + item.optString("saleId") + "\nMotivos: " + reasonText +
+                                if (item.optBoolean("cashImpact")) "\nCambio de caja: sí\nMotivo de caja: " + item.optString("cashReason")
+                                else "\nCambio de caja: no"
                         } else {
                             "Tipo: " + item.optString("type") + "\nDetalle: " +
                                 (item.optJSONObject("details")?.toString(2) ?: "{}")
