@@ -33,7 +33,8 @@ internal object OfficialSupportVerifier {
         check(revision >= 1 && registeredAt > 0 && updatedAt >= registeredAt) {
             "La revisión de contactos oficiales no es válida"
         }
-        check(email.length <= 254 && Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$").matches(email)) {
+        check(email.length <= 254 && Regex("^[\\x21-\\x7E]+$").matches(email) &&
+            Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$").matches(email)) {
             "El correo oficial recibido no es válido"
         }
         check(Regex("^\\+[1-9][0-9]{7,14}$").matches(phone1) &&
