@@ -909,7 +909,6 @@ async function authorizePatronRecoveryPayment(request, env) {
   const results=await env.DB.batch([
     env.DB.prepare("INSERT INTO patron_recovery_requests (id,license_id,old_patron_device_id,code_hash,reason,status,created_at,created_by) VALUES (?,?,?,?,?,'pending',?,'operator')").bind(recoveryId,row.license_id,row.old_patron_device_id,hash,"Reposición SENE PATRÓN",now),
     env.DB.prepare("UPDATE patron_recovery_payment_requests SET status='authorized',code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment'").bind(hash,reference,now,requestId),
-    env.DB.prepare("INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) VALUES (?,?, 'PATRON_REPLACEMENT',50000,'MXN','CONFIRMED',?,?,?,?,'operator')").bind(crypto.randomUUID(),row.license_id,reference,"patron-recovery:"+requestId,now,now),
     env.DB.prepare("INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) VALUES (?,?,?,'operator','operator','patron_recovery_payment_authorized',?,?)").bind(crypto.randomUUID(),row.license_id,row.old_patron_device_id,JSON.stringify({requestId,recoveryRequestId:recoveryId,paymentReference:reference,amountCents:50000}),now)
   ]);
   if (results.some(x=>(x?.meta?.changes??0)!==1)) return json({error:"RECOVERY_AUTHORIZATION_CONFLICT"},409);
