@@ -481,35 +481,6 @@ async function recoverPatron(request, env) {
   const newDeviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
-  // Idempotencia de recuperación: si el consumo ya se confirmó en D1 pero
-  // la respuesta HTTPS se perdió, el mismo equipo puede repetir la petición.
-  // Solo se reconoce el mismo permiso ya consumido para la misma venta,
-  // licencia y dispositivo; nunca se restaura ni se vuelve a consumir.
-  let priorConsumption;
-  try {
-    priorConsumption = await env.DB.prepare(
-      `SELECT g.consumed_at
-         FROM correction_grants g
-         JOIN correction_requests r ON r.id = g.request_id
-        WHERE g.id = ? AND g.request_id = ? AND g.license_id = ?
-          AND g.ventas_device_id = ? AND g.sale_id = ?
-          AND g.uses_allowed = 1 AND g.uses_consumed = 1
-          AND r.id = ? AND r.license_id = ? AND r.ventas_device_id = ?
-          AND r.sale_id = ? AND r.status = 'consumed'
-        LIMIT 1`
-    ).bind(grantId, requestId, ctx.licenseId, ctx.deviceId, saleId,
-      requestId, ctx.licenseId, ctx.deviceId, saleId).first();
-  } catch {
-    return json({ error: "CORRECTION_GRANT_CHECK_FAILED" }, 503);
-  }
-  if (priorConsumption) {
-    return json({
-      authorized: true, requestId, grantId, saleId,
-      consumedAt: Number(priorConsumption.consumed_at),
-      usesRemaining: 0, idempotentReplay: true
-    });
-  }
-
   let results;
   try {
     results = await env.DB.batch([
@@ -1351,6 +1322,35 @@ async function consumeCorrectionGrant(request, env) {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
   const now = Math.floor(Date.now() / 1000);
+  // Idempotencia de recuperación: si el consumo ya se confirmó en D1 pero
+  // la respuesta HTTPS se perdió, el mismo equipo puede repetir la petición.
+  // Solo se reconoce el mismo permiso ya consumido para la misma venta,
+  // licencia y dispositivo; nunca se restaura ni se vuelve a consumir.
+  let priorConsumption;
+  try {
+    priorConsumption = await env.DB.prepare(
+      `SELECT g.consumed_at
+         FROM correction_grants g
+         JOIN correction_requests r ON r.id = g.request_id
+        WHERE g.id = ? AND g.request_id = ? AND g.license_id = ?
+          AND g.ventas_device_id = ? AND g.sale_id = ?
+          AND g.uses_allowed = 1 AND g.uses_consumed = 1
+          AND r.id = ? AND r.license_id = ? AND r.ventas_device_id = ?
+          AND r.sale_id = ? AND r.status = 'consumed'
+        LIMIT 1`
+    ).bind(grantId, requestId, ctx.licenseId, ctx.deviceId, saleId,
+      requestId, ctx.licenseId, ctx.deviceId, saleId).first();
+  } catch {
+    return json({ error: "CORRECTION_GRANT_CHECK_FAILED" }, 503);
+  }
+  if (priorConsumption) {
+    return json({
+      authorized: true, requestId, grantId, saleId,
+      consumedAt: Number(priorConsumption.consumed_at),
+      usesRemaining: 0, idempotentReplay: true
+    });
+  }
+
   let results;
   try {
     results = await env.DB.batch([
