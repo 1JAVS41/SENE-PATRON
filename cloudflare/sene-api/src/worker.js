@@ -2051,35 +2051,10 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/corrections/decision") return decideCorrectionRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/corrections/consume") return consumeCorrectionGrant(request, env);
 
-  // Temporary operator scaffold only. Do not expose this token in either APK.
+  // Retired legacy endpoint: it bypassed the official AYUDA contact and payment workflow.
+  // Keep an explicit rejection so old clients cannot silently fall through to another flow.
   if (request.method === "POST" && url.pathname === "/admin/licenses") {
-    if (!(await requireAdmin(request, env))) return json({ error: "unauthorized" }, 401);
-
-    let body;
-    try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
-    const label = typeof body.label === "string" ? body.label.trim().slice(0, 80) : "";
-    const licenseId = crypto.randomUUID();
-    const activationCode = makeCode();
-    const codeHash = await sha256(activationCode);
-    const now = Math.floor(Date.now() / 1000);
-
-    try {
-      await env.DB.prepare(
-        "INSERT INTO licenses (id, label, status, max_devices, activation_code_hash, created_at) VALUES (?, ?, 'pending', 3, ?, ?)"
-      ).bind(licenseId, label || null, codeHash, now).run();
-    } catch {
-      return json({ error: "database_error" }, 503);
-    }
-
-    return json({
-      licenseId,
-      activationCode,
-      package: "1_PATRON_2_VENTAS",
-      maxDevices: 3,
-      validityDays: 30,
-      status: "pending",
-      note: "Guarda este código: no se puede recuperar desde el servidor."
-    }, 201);
+    return json({ error: "LEGACY_ENDPOINT_RETIRED", message: "Usa el flujo oficial de licencias y entrega verificada por AYUDA." }, 410);
   }
 
   return json({ error: "not_found" }, 404);
