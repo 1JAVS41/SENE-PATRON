@@ -323,6 +323,17 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending' AND seen_at IS NULL;")" = "1"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending' AND seen_at IS NULL;")" = "1"
           test "$(sqlite3 "$DB_FILE" "SELECT (SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending' AND seen_at IS NULL);")" = "0"
+          # El botón representa solicitudes aún sin resolver, aunque ya se hayan visto.
+          pending_team1="$(sqlite3 "$DB_FILE" "SELECT (SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending') + (SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending');")"
+          pending_team2="$(sqlite3 "$DB_FILE" "SELECT (SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending') + (SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending');")"
+          test "$pending_team1" = "2"
+          test "$pending_team2" = "2"
+          sqlite3 "$DB_FILE" "UPDATE work_requests SET status='approved' WHERE id='work-inbox-1' AND status='pending';"
+          sqlite3 "$DB_FILE" "UPDATE correction_requests SET status='rejected' WHERE id='correction-inbox-1' AND status='pending';"
+          pending_team1="$(sqlite3 "$DB_FILE" "SELECT (SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending') + (SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-1' AND status='pending');")"
+          pending_team2="$(sqlite3 "$DB_FILE" "SELECT (SELECT COUNT(*) FROM work_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending') + (SELECT COUNT(*) FROM correction_requests WHERE ventas_device_id='ventas-inbox-2' AND status='pending');")"
+          test "$pending_team1" = "0"
+          test "$pending_team2" = "2"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')" = ""
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
