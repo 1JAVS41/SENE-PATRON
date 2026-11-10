@@ -677,7 +677,7 @@ async function createPairingToken(request, env) {
   const operation = body?.operation || "NEW";
   if (!body || typeof body !== "object" || Array.isArray(body) ||
       Object.keys(body).some((key) => !["slot", "operation"].includes(key)) ||
-      !["VENTAS_1", "VENTAS_2"].includes(slot) || operation !== "NEW") {
+      !["VENTAS_1", "VENTAS_2"].includes(slot) || !["NEW", "REPLACEMENT"].includes(operation)) {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
 
@@ -697,14 +697,20 @@ async function createPairingToken(request, env) {
     "SELECT id FROM devices WHERE license_id = ? AND slot_number = ? AND status = 'active' LIMIT 1"
   ).bind(patron.license_id, slotNumber).first();
   if (occupied) return json({ error: "EQUIPMENT_SLOT_ALREADY_LINKED" }, 409);
+  if (operation === "REPLACEMENT") {
+    const approved = await env.DB.prepare(
+      "SELECT id FROM replacement_requests WHERE license_id = ? AND slot_number = ? AND status = 'approved' ORDER BY decided_at DESC LIMIT 1"
+    ).bind(patron.license_id, slotNumber).first();
+    if (!approved) return json({ error: "REPLACEMENT_NOT_AUTHORIZED" }, 403);
+  }
 
   // Return the same still-pending QR after app restarts; never mint duplicates.
   const pending = await env.DB.prepare(
     `SELECT token_hash, encrypted_token, created_at FROM pairing_tokens
       WHERE license_id = ? AND patron_device_id = ? AND slot_number = ?
-        AND operation = 'NEW' AND remaining_uses = 1 AND revoked_at IS NULL
+        AND operation = ? AND remaining_uses = 1 AND revoked_at IS NULL
         AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`
-  ).bind(patron.license_id, patron.id, slotNumber).first();
+  ).bind(patron.license_id, patron.id, slotNumber, operation).first();
   if (pending?.encrypted_token) {
     try {
       const token = await decryptPairingToken(pending.encrypted_token, env);
@@ -729,8 +735,8 @@ async function createPairingToken(request, env) {
       `INSERT INTO pairing_tokens
        (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at,
         slot_number, operation, encrypted_token, consumed_at)
-       VALUES (?, ?, ?, 1, ?, ?, ?, 'NEW', ?, NULL)`
-    ).bind(tokenHash, patron.license_id, patron.id, now, expiresAt, slotNumber, encryptedToken).run();
+       VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, NULL)`
+    ).bind(tokenHash, patron.license_id, patron.id, now, expiresAt, slotNumber, operation, encryptedToken).run();
   } catch {
     const raced = await env.DB.prepare(
       `SELECT encrypted_token, created_at FROM pairing_tokens
@@ -777,7 +783,7 @@ async function pairVentas(request, env) {
            JOIN devices patron ON patron.id = p.patron_device_id
           WHERE p.token_hash = ? AND p.remaining_uses = 1
             AND p.revoked_at IS NULL AND p.consumed_at IS NULL
-            AND p.operation = 'NEW' AND p.slot_number IN (2,3)
+            AND p.operation IN ('NEW','REPLACEMENT') AND p.slot_number IN (2,3)
             AND patron.status = 'active' AND patron.device_type = 'PATRON'
             AND l.status = 'active' AND l.expires_at > ?
             AND NOT EXISTS (SELECT 1 FROM devices existing
