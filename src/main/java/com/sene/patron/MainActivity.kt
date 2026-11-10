@@ -130,142 +130,78 @@ class MainActivity : Activity() {
     }
 
     private fun homeScreen(root: LinearLayout) {
-        header(root, "Panel principal")
-        val summary = card()
-        summary.addView(kicker("ESTADO DE TU LICENCIA"))
-        summary.addView(horizontal("SENE PATRÓN", "EQUIPO PRINCIPAL", ink, red))
-        gap(summary, 9)
-        summary.addView(View(this).apply { setBackgroundColor(Color.rgb(235, 226, 229)) },
-            LinearLayout.LayoutParams(-1, dp(1)))
-        gap(summary, 9)
-        val serverPrefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
-        val linkedCount = serverPrefs.getInt("linked_ventas_count", -1)
-        val linkedLabel = if (linkedCount >= 0) "$linkedCount de 2 vinculados" else "PENDIENTE DE CONSULTA"
-        summary.addView(horizontal("Dispositivos SENE VENTAS", linkedLabel, ink, if (linkedCount >= 0) success else muted))
-        summary.addView(text("La licencia contempla 1 equipo SENE PATRÓN y hasta 2 equipos SENE VENTAS.", 13, muted))
-        root.addView(summary)
-        gap(root, 12)
+        header(root, "Inicio")
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val linked = !prefs.getString("device_id", null).isNullOrBlank()
+        val status = prefs.getString("license_status", "").orEmpty()
+        val count = prefs.getInt("linked_ventas_count", -1)
 
-        val status = card()
-        val licenseStatus = serverPrefs.getString("license_status", "").orEmpty()
-        status.addView(horizontal(
-            "Administración",
-            when (licenseStatus) {
-                "active" -> "CONECTADO"
-                "expired" -> "LICENCIA VENCIDA"
+        val summary = card()
+        summary.addView(kicker("TU NEGOCIO"))
+        summary.addView(horizontal(
+            "Licencia SENE",
+            when (status) {
+                "active" -> "ACTIVA"
+                "expired" -> "VENCIDA"
                 "suspended" -> "SUSPENDIDA"
-                else -> "PENDIENTE DE VINCULACIÓN"
+                else -> if (linked) "POR CONFIRMAR" else "SIN VINCULAR"
             },
             ink,
-            when (licenseStatus) {
+            when (status) {
                 "active" -> success
                 "expired", "suspended" -> red
                 else -> muted
             }
         ))
-        status.addView(text(
-            "El servidor administra licencias, solicitudes, reportes, notificaciones y permisos. Ventas, inventario, caja y gastos permanecen locales en SENE VENTAS.",
-            12, muted
+        gap(summary, 5)
+        summary.addView(text(
+            if (count >= 0) "$count de 2 equipos SENE VENTAS vinculados"
+            else "Puedes administrar hasta dos teléfonos SENE VENTAS.",
+            13, muted
         ))
-        root.addView(status)
-        gap(root, 10)
-
-        val linked = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
-            .getString("device_id", null).orEmpty().isNotBlank()
-        root.addView(primaryButton(if (linked) "ACTUALIZAR ESTADO Y NOTIFICACIONES" else "VINCULAR LICENCIA SENE") {
-            if (linked) refreshNotificationsFromServer(force = true) else showActivationDialog()
-        })
-        if (!linked) {
-            gap(root, 7)
-            root.addView(primaryButton("RECUPERAR PATRÓN PERDIDO") { showPatronRecoveryDialog() })
-        }
-        gap(root, 7)
-        root.addView(primaryButton("CONFIGURAR CONEXIÓN SEGURA") { showServerConfig() })
-        if (linked) {
-            gap(root, 7)
-            root.addView(primaryButton("PAGAR MENSUALIDAD · $80 MXN") { showRenewalDialog() })
-            val pendingRenewal = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
-                .getString("renewal_request_id", null)
-            if (!pendingRenewal.isNullOrBlank()) {
-                gap(root, 7)
-                root.addView(primaryButton("INTRODUCIR CÓDIGO DE RENOVACIÓN") {
-                    showRenewalCodeDialog(pendingRenewal)
-                })
-            }
-        }
-        gap(root, 14)
-
-        root.addView(primaryButton("¿NECESITAS AYUDA?") { showContactDialog() })
-        gap(root, 7)
-        root.addView(text(
-            "Si perdiste un equipo, comunícate para obtener una nueva app y su vinculación.",
-            12, muted
-        ).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(3), dp(8), dp(3)) })
-        gap(root, 14)
-
-        // Marco de altura fija: ambos trazos ocupan el mismo rectángulo y el destello queda encima.
-        val warningFrame = FrameLayout(this).apply {
-            setPadding(dp(3), dp(3), dp(3), dp(3))
-            clipChildren = false
-            clipToPadding = false
-        }
-        val warningBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.rgb(91, 10, 27), Color.rgb(190, 35, 48), Color.rgb(91, 10, 27)))
-                .apply { cornerRadius = dp(15).toFloat() }
-            elevation = dp(5).toFloat()
-        }
-        val warningText = FastMarqueeTextView(this).apply {
-            message = "EN CASO DE PÉRDIDA DE ALGÚN EQUIPO VINCULADO, LA REPOSICIÓN DE NUESTRA APP TIENE UN COSTO POR DISPOSICIÓN DE LICENCIA Y VINCULACIÓN. ¡CUIDA TUS EQUIPOS DE TRABAJO!"
-            setTextColor(Color.WHITE)
-            setTextSizeSp(13f)
-            setTypeface(Typeface.DEFAULT_BOLD)
-            contentDescription = message
-        }
-        warningBox.addView(warningText, LinearLayout.LayoutParams(-1, dp(38)))
-        warningFrame.addView(warningBox, FrameLayout.LayoutParams(-1, -1))
-        warningFrame.addView(BorderRunnerView(this), FrameLayout.LayoutParams(-1, -1))
-        root.addView(warningFrame, LinearLayout.LayoutParams(-1, dp(66)))
+        root.addView(summary)
         gap(root, 16)
 
-        val instruction = FrameLayout(this).apply {
-            setPadding(dp(5), dp(8), dp(5), dp(8))
-        }
-        val instructionText = "TOCA EL CARRITO SENE PATRÓN PARA ADMINISTRAR"
-        val instructionShadow = text(instructionText, 13, Color.rgb(3, 27, 78), false).apply {
-            gravity = Gravity.CENTER
-            letterSpacing = .025f
-            translationX = dp(1).toFloat()
-            translationY = dp(1).toFloat()
-            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), Color.rgb(0, 18, 58))
-        }
-        val instructionFace = text(instructionText, 13, Color.rgb(80, 170, 255), false).apply {
-            gravity = Gravity.CENTER
-            letterSpacing = .025f
-            setShadowLayer(dp(2).toFloat(), 0f, 0f, Color.rgb(130, 205, 255))
-            post {
-                paint.shader = LinearGradient(
-                    0f, 0f, 0f, height.toFloat().coerceAtLeast(1f),
-                    intArrayOf(Color.rgb(225, 245, 255), Color.rgb(70, 160, 245),
-                        Color.rgb(15, 75, 165), Color.rgb(175, 220, 255)),
-                    null, Shader.TileMode.CLAMP
-                )
-                invalidate()
-            }
-        }
-        instruction.addView(instructionShadow, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
-        instruction.addView(instructionFace, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
-        root.addView(instruction, LinearLayout.LayoutParams(-1, -2))
+        root.addView(text("TUS EQUIPOS", 12, muted, true))
+        gap(root, 7)
+        root.addView(teamMenuCard("EQUIPO 1", "Avisos, personal, pagos y teléfono", "team1"))
         gap(root, 10)
-        root.addView(text("SENE PATRÓN  ·  Versión 0.5.0", 11, muted)
+        root.addView(teamMenuCard("EQUIPO 2", "Avisos, personal, pagos y teléfono", "team2"))
+        gap(root, 15)
+
+        root.addView(primaryButton(
+            if (linked) "CONEXIÓN Y PAGOS" else "ACTIVAR SENE PATRÓN"
+        ) {
+            if (linked) showOwnerOptions() else showServerConfig()
+        })
+        gap(root, 8)
+        root.addView(primaryButton("AYUDA") { showContactDialog() })
+        gap(root, 15)
+        root.addView(text("Ventas, inventario y caja permanecen en cada teléfono SENE VENTAS.", 12, muted)
+            .apply { gravity = Gravity.CENTER })
+        gap(root, 8)
+        root.addView(text("SENE PATRÓN · Versión 0.5.0", 11, muted)
             .apply { gravity = Gravity.CENTER })
     }
 
-
-
+    private fun showOwnerOptions() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val options = mutableListOf("Actualizar avisos", "Pagar mensualidad · $80 MXN", "Configurar conexión")
+        val renewalId = prefs.getString("renewal_request_id", null)
+        if (!renewalId.isNullOrBlank()) options.add("Introducir código de renovación")
+        AlertDialog.Builder(this)
+            .setTitle("CONEXIÓN Y PAGOS")
+            .setItems(options.toTypedArray()) { _, which ->
+                when (options[which]) {
+                    "Actualizar avisos" -> refreshNotificationsFromServer(force = true)
+                    "Pagar mensualidad · $80 MXN" -> showRenewalDialog()
+                    "Configurar conexión" -> showServerConfig()
+                    "Introducir código de renovación" -> renewalId?.let { showRenewalCodeDialog(it) }
+                }
+            }
+            .setNegativeButton("CERRAR", null)
+            .show()
+    }
 
     private fun renderPayrollSettings(root: LinearLayout, team: String) {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
@@ -1081,26 +1017,57 @@ class MainActivity : Activity() {
         val number = if (team == "team1") "1" else "2"
         header(root, "Equipo $number")
         val intro = card()
-        intro.addView(kicker("CONFIGURACIÓN INDIVIDUAL"))
-        intro.addView(text("SENE VENTAS · EQUIPO $number", 20, ink, true))
-        intro.addView(text("Administra únicamente la información y las solicitudes correspondientes a este equipo.", 13, muted))
+        intro.addView(kicker("SENE VENTAS"))
+        intro.addView(text("Equipo $number", 21, ink, true))
+        intro.addView(text("Todo lo de este trabajador está reunido aquí. Desliza hacia abajo para consultar cada apartado.", 13, muted))
         root.addView(intro)
-        gap(root, 11)
+        gap(root, 10)
+
         root.addView(notificationCard(number))
+        gap(root, 10)
+
+        val requests = card()
+        requests.addView(kicker("AVISOS Y SOLICITUDES"))
+        renderRequestsInbox(requests, team)
+        renderCorrectionInbox(requests, team)
+        requests.addView(primaryButton("ACTUALIZAR SOLICITUDES") {
+            refreshTeamRequests(team, force = true)
+        })
+        root.addView(requests)
+        refreshTeamRequests(team)
+        gap(root, 10)
+
+        val work = card()
+        work.addView(kicker("ASISTENCIA Y PAGO"))
+        renderTeamReports(work, team)
+        work.addView(primaryButton("ACTUALIZAR ASISTENCIAS") {
+            refreshTeamReports(team, force = true)
+        })
+        gap(work, 7)
+        renderPayrollSettings(work, team)
+        work.addView(primaryButton("CONFIGURAR SUELDO Y FECHA DE PAGO") {
+            showPayrollSettingsDialog(team)
+        })
+        root.addView(work)
+        refreshTeamReports(team)
+        refreshPayrollSettings(team)
+        gap(root, 10)
+
+        val device = card()
+        device.addView(kicker("TELÉFONO DEL TRABAJADOR"))
+        device.addView(text("Consulta la vinculación o genera el código QR para conectar SENE VENTAS a este espacio.", 13, muted))
+        device.addView(primaryButton("GENERAR QR DE VINCULACIÓN") { showPairingQr() })
+        gap(device, 7)
+        device.addView(primaryButton("VER ESTADO DE SEGURIDAD") {
+            AlertDialog.Builder(this)
+                .setTitle("SEGURIDAD · EQUIPO $number")
+                .setMessage("La identidad del teléfono y sus eventos de seguridad se validan con el servidor SENE.")
+                .setPositiveButton("CERRAR", null)
+                .show()
+        })
+        root.addView(device)
         gap(root, 12)
-        val sections = listOf(
-            Triple("Horarios y asistencias", "Turnos, entradas, salidas y registros de asistencia", "schedule"),
-            Triple("Sueldo y día de pago", "Configura el sueldo y las fechas de nómina de este equipo", "payroll"),
-            Triple("Autorizaciones de corrección", "Revisa solicitudes puntuales de corrección de ventas", "requests"),
-            Triple("Seguridad del dispositivo", "Estado de seguridad, bloqueo y sustitución del teléfono", "security"),
-            Triple("Vinculación del equipo", "Identidad, estado de vínculo y datos del dispositivo", "link")
-        )
-        sections.forEachIndexed { index, item ->
-            root.addView(teamSectionCard(item.first, item.second, team + "_" + item.third))
-            if (index != sections.lastIndex) gap(root, 9)
-        }
-        gap(root, 12)
-        root.addView(primaryButton("VOLVER A EQUIPOS") { currentPage = "menu"; render() })
+        root.addView(primaryButton("VOLVER AL INICIO") { currentPage = "home"; render() })
     }
 
     private fun teamSectionCard(title: String, description: String, destination: String) = card().apply {
