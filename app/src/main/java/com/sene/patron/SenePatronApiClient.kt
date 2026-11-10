@@ -79,6 +79,26 @@ class SenePatronApiClient(context: Context, baseUrl: String) {
         return deviceSigned("PATRON_RENEWAL_REDEEM", "/v1/patron/renewals/redeem", body.toString(), patronDeviceId)
     }
 
+    /** Restaura sin costo la misma licencia en el mismo teléfono tras reinstalar. */
+    fun restoreSamePhone(
+        businessName: String,
+        registeredEmail: String,
+        registeredPhone: String
+    ): JSONObject {
+        val identity = PatronDeviceIdentity.get(app)
+        val body = JSONObject()
+            .put("businessName", businessName.trim())
+            .put("registeredEmail", registeredEmail.trim().lowercase())
+            .put("registeredPhone", registeredPhone.filter { it.isDigit() })
+            .put("installationId", identity.installationId)
+            .put("continuityId", identity.continuityId)
+            .put("publicKeyBase64", identity.publicKeyBase64)
+            .put("fingerprint", identity.fingerprint)
+        val result = bootstrapSigned("PATRON_RESTORE", "/v1/patron/restore", body.toString(), identity)
+        saveDevice(result)
+        return result
+    }
+
     fun recover(recoveryCode: String): JSONObject {
         val identity = PatronDeviceIdentity.get(app)
         val body = JSONObject()
