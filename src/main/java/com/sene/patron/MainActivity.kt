@@ -569,7 +569,7 @@ class MainActivity : Activity() {
                     correction.addView(primaryButton("AUTORIZAR UNA CORRECCIÓN") {
                         AlertDialog.Builder(this)
                             .setTitle("Autorizar corrección")
-                            .setMessage("El trabajador indicó el error en el motivo. Revisa el producto/código afectado y las cantidades que describe antes de autorizar. Si autorizas, el trabajador podrá corregir productos y cantidades de esta venta una sola vez. El cambio se aplicará únicamente en ese teléfono y no se enviarán al servidor los datos comerciales.")
+                            .setMessage("Por privacidad, el servidor solo muestra un aviso genérico: el texto con el producto/código y las cantidades permanece en el teléfono del trabajador y NO aparece aquí. Antes de autorizar, comunícate directamente con el trabajador y confirma exactamente qué producto, código y cantidad deben corregirse. Si autorizas, podrá modificar esta venta una sola vez. El cambio se aplicará únicamente en ese teléfono; los datos comerciales no se enviarán al servidor.")
                             .setPositiveButton("AUTORIZAR") { _, _ -> decideTeamCorrection(team, requestId, true) }
                             .setNegativeButton("RECHAZAR") { _, _ -> decideTeamCorrection(team, requestId, false) }
                             .setNeutralButton("CANCELAR", null)
