@@ -21,6 +21,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.util.Base64
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 
 class MainActivity : Activity() {
     private val bg = Color.rgb(244, 245, 250)
@@ -341,35 +349,28 @@ class MainActivity : Activity() {
             }.start()
         })
         gap(root, 9)
-        root.addView(primaryButton("GENERAR QR PARA VINCULAR EQUIPOS") {
+        root.addView(primaryButton("MOSTRAR / GENERAR QR PARA VINCULAR EQUIPOS") {
             Thread {
                 try {
-                    val result = SenePatronApiClient(this, base).createPairingToken(device)
-                    val payload = result.getString("qrPayload")
-                    val matrix = MultiFormatWriter().encode(payload, BarcodeFormat.QR_CODE, 720, 720)
-                    val bitmap = Bitmap.createBitmap(720, 720, Bitmap.Config.ARGB_8888)
-                    for (y in 0 until 720) for (x in 0 until 720) {
-                        bitmap.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
-                    }
-                    runOnUiThread {
-                        val image = ImageView(this).apply {
-                            setImageBitmap(bitmap)
-                            setPadding(dp(12), dp(12), dp(12), dp(12))
-                            adjustViewBounds = true
+                    val api = SenePatronApiClient(this, base)
+                    val state = api.session(device)
+                    val linkedCount = state.optInt("linkedVentasCount", 0).coerceIn(0, 2)
+                    if (linkedCount >= 2) {
+                        clearStoredPairingQr()
+                        runOnUiThread {
+                            Toast.makeText(this, "Los dos equipos ya están vinculados. El QR pendiente se eliminó tras la confirmación del servidor.", Toast.LENGTH_LONG).show()
                         }
-                        val content = LinearLayout(this).apply {
-                            orientation = LinearLayout.VERTICAL
-                            setPadding(dp(12), dp(8), dp(12), dp(8))
-                            addView(image, LinearLayout.LayoutParams(-1, dp(280)))
-                            addView(text("Usos restantes: " + result.optInt("remainingUses") +
-                                "\nSin vencimiento por tiempo. El QR permanece disponible hasta completar sus vinculaciones.", 12, muted))
-                            addView(text(payload, 10, muted))
+                    } else {
+                        val stored = readStoredPairingQr()
+                        val payload = stored ?: api.createPairingToken(device).getString("qrPayload").also {
+                            saveStoredPairingQr(it)
                         }
-                        AlertDialog.Builder(this).setTitle("QR DE VINCULACIÓN SENE VENTAS")
-                            .setView(content).setPositiveButton("CERRAR", null).show()
+                        runOnUiThread { showPairingQr(payload, 2 - linkedCount) }
                     }
                 } catch (e: Exception) {
-                    runOnUiThread { Toast.makeText(this, "No se pudo generar el QR: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show() }
+                    runOnUiThread {
+                        Toast.makeText(this, "No se pudo comprobar o recuperar el QR: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show()
+                    }
                 }
             }.start()
         })
@@ -897,4 +898,81 @@ class MainActivity : Activity() {
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    // El QR es una credencial: se conserva cifrado localmente y no se vuelve a
+    // solicitar uno nuevo al servidor mientras siga pendiente.
+    private fun saveStoredPairingQr(payload: String) {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val alias = "sene_patron_pairing_qr_v1"
+        val key = if (keyStore.containsAlias(alias)) {
+            (keyStore.getKey(alias, null) as SecretKey)
+        } else {
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            generator.init(
+                KeyGenParameterSpec.Builder(
+                    alias,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setRandomizedEncryptionRequired(true)
+                    .build()
+            )
+            generator.generateKey()
+        }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        val encrypted = cipher.doFinal(payload.toByteArray(Charsets.UTF_8))
+        val packed = cipher.iv + encrypted
+        getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
+            .putString("pending_pairing_qr_v1", Base64.encodeToString(packed, Base64.NO_WRAP))
+            .commit()
+    }
+
+    private fun readStoredPairingQr(): String? {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val packedText = prefs.getString("pending_pairing_qr_v1", null) ?: return null
+        return try {
+            val packed = Base64.decode(packedText, Base64.NO_WRAP)
+            if (packed.size <= 12) return null
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val key = keyStore.getKey("sene_patron_pairing_qr_v1", null) as? SecretKey ?: return null
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, packed.copyOfRange(0, 12)))
+            String(cipher.doFinal(packed.copyOfRange(12, packed.size)), Charsets.UTF_8)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun clearStoredPairingQr() {
+        getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
+            .remove("pending_pairing_qr_v1").commit()
+    }
+
+    private fun showPairingQr(payload: String, remaining: Int) {
+        try {
+            val matrix = MultiFormatWriter().encode(payload, BarcodeFormat.QR_CODE, 720, 720)
+            val bitmap = Bitmap.createBitmap(720, 720, Bitmap.Config.ARGB_8888)
+            for (y in 0 until 720) for (x in 0 until 720) {
+                bitmap.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
+            }
+            val image = ImageView(this).apply {
+                setImageBitmap(bitmap)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                adjustViewBounds = true
+            }
+            val content = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                addView(image, LinearLayout.LayoutParams(-1, dp(280)))
+                addView(text("Vinculaciones restantes estimadas: $remaining\\nQR guardado cifrado en este dispositivo. Se conservará hasta que el servidor confirme las vinculaciones.", 12, muted))
+            }
+            AlertDialog.Builder(this).setTitle("QR DE VINCULACIÓN SENE VENTAS")
+                .setView(content).setPositiveButton("CERRAR", null).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "No se pudo mostrar el QR: " + (e.message ?: "Error"), Toast.LENGTH_LONG).show()
+        }
+    }
+
+
 }
