@@ -908,9 +908,10 @@ class MainActivity : Activity() {
                     if (!isFinishing) render()
                 }
             } catch (_: Exception) {
+                // No volver a renderizar aquí: render() intenta actualizar notificaciones
+                // y provocaría un ciclo de reintentos continuo cuando la red falla.
                 runOnUiThread {
                     refreshingNotifications = false
-                    if (!isFinishing) render()
                 }
             }
         }.start()
