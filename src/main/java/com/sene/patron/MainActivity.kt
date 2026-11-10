@@ -998,14 +998,57 @@ class MainActivity : Activity() {
     }
 
     private fun showContactDialog() {
-        AlertDialog.Builder(this)
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.trim()?.takeIf { it.startsWith("https://") }
+        if (baseUrl == null) {
+            AlertDialog.Builder(this)
+                .setTitle("CONTACTOS OFICIALES SENE")
+                .setMessage("Primero configura la conexión HTTPS con el servidor SENE. Los contactos oficiales no se aceptan desde mensajes ni se guardan como números editables.")
+                .setPositiveButton("CERRAR", null)
+                .show()
+            return
+        }
+
+        val loading = AlertDialog.Builder(this)
             .setTitle("CONTACTOS OFICIALES SENE")
-            .setMessage(
-                "Por seguridad, los números oficiales de AYUDA y el correo de SENE solo se mostrarán cuando la aplicación pueda validar su firma digital con el servidor.\\n\\n" +
-                    "En este momento no hay contactos oficiales verificados disponibles. No utilices números o correos copiados de mensajes, capturas o versiones no verificadas."
-            )
-            .setPositiveButton("CERRAR", null)
-            .show()
+            .setMessage("Consultando el servidor y verificando la firma digital…")
+            .setNegativeButton("CANCELAR", null)
+            .create()
+        loading.show()
+        Thread {
+            try {
+                val contacts = SeneApiClient(this, baseUrl).officialSupportContacts()
+                val email = contacts.getString("officialEmail")
+                val phone1 = contacts.getString("helpPhone1")
+                val phone2 = contacts.getString("helpPhone2")
+                val revision = contacts.getLong("revision")
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    loading.dismiss()
+                    AlertDialog.Builder(this)
+                        .setTitle("CONTACTOS OFICIALES SENE · VERIFICADOS")
+                        .setMessage(
+                            "Correo oficial:\\n$email\\n\\n" +
+                                "AYUDA 1:\\n$phone1\\n\\n" +
+                                "AYUDA 2:\\n$phone2\\n\\n" +
+                                "Revisión digital: $revision\\n\\n" +
+                                "Estos datos fueron validados con la clave pública integrada en SENE PATRÓN."
+                        )
+                        .setPositiveButton("CERRAR", null)
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    loading.dismiss()
+                    AlertDialog.Builder(this)
+                        .setTitle("NO SE PUDIERON VERIFICAR LOS CONTACTOS")
+                        .setMessage("El servidor no respondió con contactos oficiales válidos o la firma digital no coincide. Por seguridad, no se mostrarán números ni correos alternativos.")
+                        .setPositiveButton("CERRAR", null)
+                        .show()
+                }
+            }
+        }.start()
     }
 
     private fun menuScreen(root: LinearLayout) {
