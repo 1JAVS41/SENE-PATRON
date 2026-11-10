@@ -464,6 +464,37 @@ jobs:
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
+      - name: Probar reposición pagada ligada al teléfono y traslado de mensualidad
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,status,max_devices,created_at,expires_at) VALUES ('license-paid-recovery','TIENDA REPOSICION','active',3,1,9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) VALUES ('patron-paid-old','license-paid-recovery','PATRON','old-install','old-continuity',x'01','old-fingerprint',1,'active',1);"
+          sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_payment_requests (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,created_at) VALUES ('paid-request','license-paid-recovery','patron-paid-old','new-install','new-fingerprint','titular@example.invalid','5211111111111','pending_payment',10);"
+          sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_requests (id,license_id,old_patron_device_id,code_hash,reason,status,created_at,created_by) VALUES ('paid-recovery','license-paid-recovery','patron-paid-old','paid-hash','Reposición SENE PATRÓN','pending',11,'operator');"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_payment_requests SET status='authorized',code_hash='paid-hash',authorized_at=12,payment_reference='folio-500' WHERE id='paid-request' AND status='pending_payment' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id='paid-recovery' AND code_hash='paid-hash' AND status='pending');"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM patron_recovery_payment_requests WHERE code_hash='paid-hash' AND status='authorized' AND installation_id='new-install' AND fingerprint='new-fingerprint';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM patron_recovery_payment_requests WHERE code_hash='paid-hash' AND status='authorized' AND installation_id='attacker-install';")" = "0"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_requests SET code_hash='reissued-hash' WHERE id='paid-recovery' AND status='pending' AND code_hash='paid-hash';"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_payment_requests SET code_hash='reissued-hash' WHERE id='paid-request' AND status='authorized' AND code_hash='paid-hash';"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM patron_recovery_payment_requests WHERE code_hash='paid-hash';")" = "0"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM patron_recovery_payment_requests WHERE code_hash='reissued-hash' AND installation_id='new-install' AND fingerprint='new-fingerprint';")" = "1"
+          sqlite3 "$DB_FILE" "INSERT INTO renewal_requests (id,license_id,patron_device_id,business_name,status,code_hash,payment_reference,created_at,authorized_at) VALUES ('open-renewal','license-paid-recovery','patron-paid-old','TIENDA REPOSICION','authorized','renewal-hash','folio-80',12,13);"
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='patron-paid-old' AND status='active';"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT 'patron-paid-new', 'license-paid-recovery','PATRON','new-install','new-continuity',x'02','new-fingerprint',1,'active',20 WHERE NOT EXISTS (SELECT 1 FROM devices WHERE license_id='license-paid-recovery' AND slot_number=1 AND status='active');"
+          sqlite3 "$DB_FILE" "UPDATE renewal_requests SET patron_device_id='patron-paid-new' WHERE id='open-renewal' AND status='authorized' AND EXISTS (SELECT 1 FROM devices WHERE id='patron-paid-new' AND status='active');"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_requests SET status='consumed',consumed_at=20 WHERE id='paid-recovery' AND code_hash='reissued-hash' AND status='pending' AND EXISTS (SELECT 1 FROM devices WHERE id='patron-paid-new' AND status='active');"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_payment_requests SET status='consumed',consumed_at=20 WHERE id='paid-request' AND code_hash='reissued-hash' AND status='authorized' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id='paid-recovery' AND status='consumed');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM patron_recovery_requests WHERE id='paid-recovery';")" = "consumed"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM patron_recovery_payment_requests WHERE id='paid-request';")" = "consumed"
+          test "$(sqlite3 "$DB_FILE" "SELECT patron_device_id FROM renewal_requests WHERE id='open-renewal';")" = "patron-paid-new"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-paid-recovery' AND slot_number=1 AND status='active';")" = "1"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar bandejas independientes de solicitudes y correcciones por equipo
         run: |
           set -euo pipefail
