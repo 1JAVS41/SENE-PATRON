@@ -420,7 +420,8 @@ class MainActivity : Activity() {
 
     private fun updateTeamStatus(button: TextView?, label: String, count: Int) {
         if (button == null) return
-        button.text = "$label\n$count notificaciones pendientes"
+        button.text = if (count > 0) "$label\n$count NOTIFICACIONES PENDIENTES"
+            else "$label\nSIN NOTIFICACIONES PENDIENTES"
         button.background = rounded(
             if (count > 0) Color.rgb(28, 151, 91) else Color.rgb(190, 45, 55),
             14
