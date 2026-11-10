@@ -617,8 +617,7 @@ class MainActivity : Activity() {
                 val latest = if (reports.length() > 0) reports.optJSONObject(0) else null
                 val report = latest?.optJSONObject("report")
                 // Las decisiones y cantidades vienen de D1, no del reporte enviado por el teléfono VENTAS.
-                val requests = reportInbox.optJSONArray("payrollEntries")
-                    ?: report?.optJSONArray("requests") ?: org.json.JSONArray()
+                val requests = reportInbox.optJSONArray("payrollEntries") ?: org.json.JSONArray()
                 val salaryCents = settings?.optLong("salaryCents", 0L) ?: 0L
                 var deductions = 0L
                 var approvedDeductions = 0
