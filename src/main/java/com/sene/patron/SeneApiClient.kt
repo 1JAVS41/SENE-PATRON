@@ -59,7 +59,7 @@ class SeneApiClient(context: Context, baseUrl: String) {
         val result = bootstrapSigned("PATRON_ACTIVATE", "/v1/patron/activate", body.toString(), identity)
         val registeredId = result.optString("deviceId")
         if (registeredId.isNotBlank()) {
-            check(prefs.edit().putString("device_id", registeredId).commit()) {
+            check(prefs.edit().putString("device_id", registeredId).remove("registration_request_id").commit()) {
                 "No se pudo guardar la vinculación de SENE PATRÓN"
             }
         }
