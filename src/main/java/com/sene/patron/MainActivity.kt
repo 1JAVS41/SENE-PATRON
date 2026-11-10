@@ -999,9 +999,10 @@ class MainActivity : Activity() {
 
     private fun showContactDialog() {
         AlertDialog.Builder(this)
-            .setTitle("DATOS DE CONTACTO")
+            .setTitle("CONTACTOS OFICIALES SENE")
             .setMessage(
-                "Teléfonos:\n3325142147\n3324860833\n\nCorreo electrónico:\nnagavs28@gmail.com"
+                "Por seguridad, los números oficiales de AYUDA y el correo de SENE solo se mostrarán cuando la aplicación pueda validar su firma digital con el servidor.\\n\\n" +
+                    "En este momento no hay contactos oficiales verificados disponibles. No utilices números o correos copiados de mensajes, capturas o versiones no verificadas."
             )
             .setPositiveButton("CERRAR", null)
             .show()
