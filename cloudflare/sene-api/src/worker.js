@@ -212,6 +212,7 @@ const CHALLENGE_TARGETS = {
   PATRON_NOTIFICATIONS: ["POST", "/v1/patron/notifications"],
   PATRON_DEVICES_LIST: ["POST", "/v1/patron/devices/list"],
   PATRON_PAYROLL_SETTINGS_GET: ["POST", "/v1/patron/payroll/settings/get"],
+  VENTAS_PAYROLL_SETTINGS_GET: ["POST", "/v1/ventas/payroll/settings/get"],
   PATRON_PAYROLL_SETTINGS_SET: ["POST", "/v1/patron/payroll/settings/set"],
   PATRON_REQUEST_DECISION: ["POST", "/v1/patron/requests/decision"],
   VENTAS_REQUEST_UPDATES: ["POST", "/v1/ventas/requests/updates"],
@@ -2019,6 +2020,43 @@ async function patronRequestsInbox(request, env) {
   });
 }
 
+async function ventasPayrollSettingsGet(request, env) {
+  const checked = await verifyBusinessProof(request, env, "VENTAS_PAYROLL_SETTINGS_GET");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const device = await env.DB.prepare(
+    "SELECT slot_number FROM devices WHERE id = ? AND license_id = ? AND device_type = 'VENTAS' AND status = 'active' LIMIT 1"
+  ).bind(ctx.deviceId, ctx.licenseId).first();
+  if (!device || ![2, 3].includes(Number(device.slot_number))) return json({ error: "DEVICE_SLOT_INVALID" }, 403);
+  const row = await env.DB.prepare(
+    "SELECT salary_cents, payment_day, payment_dates_json, updated_at FROM payroll_settings WHERE license_id = ? AND slot_number = ? LIMIT 1"
+  ).bind(ctx.licenseId, Number(device.slot_number)).first();
+  if (!row) return json({ configured: false, settings: null });
+  let paymentDates;
+  try { paymentDates = JSON.parse(row.payment_dates_json || "[]"); } catch { return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503); }
+  if (!Array.isArray(paymentDates) || paymentDates.some((date) =>
+    typeof date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date))) {
+    return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503);
+  }
+  return json({
+    configured: true,
+    settings: {
+      slot: Number(device.slot_number) === 2 ? "VENTAS_1" : "VENTAS_2",
+      salaryCents: Number(row.salary_cents),
+      paymentDay: row.payment_day === null ? null : Number(row.payment_day),
+      paymentDates,
+      updatedAt: Number(row.updated_at)
+    }
+  });
+}
+
 async function patronPayrollSettingsGet(request, env) {
   const checked = await verifyBusinessProof(request, env, "PATRON_PAYROLL_SETTINGS_GET");
   if (checked.response) return checked.response;
@@ -2469,6 +2507,7 @@ async function handle(request, env) {
 
   if (request.method === "POST" && url.pathname === "/v1/ventas/requests") return createWorkRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/requests/inbox") return patronRequestsInbox(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/ventas/payroll/settings/get") return ventasPayrollSettingsGet(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/payroll/settings/get") return patronPayrollSettingsGet(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/payroll/settings/set") return patronPayrollSettingsSet(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/notifications") return patronNotifications(request, env);
