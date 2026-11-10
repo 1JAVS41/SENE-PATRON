@@ -1025,10 +1025,10 @@ async function authorizePatronRegistration(request, env) {
       "UPDATE registration_requests SET status='authorized',license_id=?,code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment' AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND activation_code_hash=?)"
     ).bind(licenseId,codeHash,reference,now,requestId,licenseId,codeHash),
     env.DB.prepare(
-      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) SELECT ?,?,'SETUP',50000,'MXN','CONFIRMED',?,?,?,?,?,'operator' WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?)"
+      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) SELECT ?,?,'SETUP',50000,'MXN','CONFIRMED',?,?,?,?,'operator' WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?)"
     ).bind(crypto.randomUUID(),licenseId,reference,"registration-setup:"+requestId,now,now,requestId,licenseId,codeHash),
     env.DB.prepare(
-      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) SELECT ?,?,'FIRST_RENT',8000,'MXN','CONFIRMED',?,?,?,?,?,'operator' WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?)"
+      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) SELECT ?,?,'FIRST_RENT',8000,'MXN','CONFIRMED',?,?,?,?,'operator' WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?)"
     ).bind(crypto.randomUUID(),licenseId,reference,"registration-rent:"+requestId,now,now,requestId,licenseId,codeHash),
     env.DB.prepare(
       "UPDATE licenses SET setup_paid_at=?,first_rent_paid_at=? WHERE id=? AND status='pending' AND EXISTS (SELECT 1 FROM payments WHERE license_id=? AND payment_type='SETUP' AND idempotency_key=?) AND EXISTS (SELECT 1 FROM payments WHERE license_id=? AND payment_type='FIRST_RENT' AND idempotency_key=?)"
