@@ -798,11 +798,11 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("REGISTRO INICIAL · $580 MXN")
             .setMessage(
-                "Para registrar SENE PATRÓN y sus dos equipos SENE VENTAS:\\n\\n" +
-                "1. Realiza un pago total de $580 MXN ($500 de alta + $80 de primera mensualidad), usando los datos oficiales de pago proporcionados por SENE.\\n" +
-                "2. En el concepto escribe ÚNICAMENTE el nombre exacto de tu empresa.\\n" +
-                "3. Envía el comprobante a uno de los dos números oficiales del botón AYUDA por WhatsApp.\\n" +
-                "4. Después de enviar el comprobante, pulsa YA REALICÉ EL PAGO.\\n\\n" +
+                "Para registrar SENE PATRÓN y sus dos equipos SENE VENTAS:\n\n" +
+                "1. Realiza un pago total de $580 MXN ($500 de alta + $80 de primera mensualidad), usando los datos oficiales de pago proporcionados por SENE.\n" +
+                "2. En el concepto escribe ÚNICAMENTE el nombre exacto de tu empresa.\n" +
+                "3. Envía el comprobante a uno de los dos números oficiales del botón AYUDA por WhatsApp.\n" +
+                "4. Después de enviar el comprobante, pulsa YA REALICÉ EL PAGO.\n\n" +
                 "El servidor crea una sola solicitud. El código de activación se entrega a través de los números oficiales de AYUDA únicamente después de verificar el pago. No se activa la licencia antes de introducir el código."
             )
             .setView(field)
@@ -824,9 +824,9 @@ class MainActivity : Activity() {
                                     .setTitle("SOLICITUD DE REGISTRO RECIBIDA")
                                     .setMessage(
                                         "Empresa: " + result.optString("businessName", businessName) +
-                                        "\\nImporte: $580 MXN\\nConcepto: " +
+                                        "\nImporte: $580 MXN\nConcepto: " +
                                         result.optString("businessName", businessName) +
-                                        "\\n\\nLa solicitud quedó registrada. Conserva el comprobante y espera el código enviado por los canales oficiales de AYUDA. Cuando lo recibas, vuelve a VINCULAR SENE PATRÓN para introducirlo."
+                                        "\n\nLa solicitud quedó registrada. Conserva el comprobante y espera el código enviado por los canales oficiales de AYUDA. Cuando lo recibas, vuelve a VINCULAR SENE PATRÓN para introducirlo."
                                     )
                                     .setPositiveButton("CERRAR", null)
                                     .show()
