@@ -356,14 +356,14 @@ class MainActivity : Activity() {
                     val state = api.session(device)
                     val linkedCount = state.optInt("linkedVentasCount", 0).coerceIn(0, 2)
                     if (linkedCount >= 2) {
-                        clearStoredPairingQr()
+                        clearStoredPairingQr(device)
                         runOnUiThread {
                             Toast.makeText(this, "Los dos equipos ya están vinculados. El QR pendiente se eliminó tras la confirmación del servidor.", Toast.LENGTH_LONG).show()
                         }
                     } else {
-                        val stored = readStoredPairingQr()
+                        val stored = readStoredPairingQr(device)
                         val payload = stored ?: api.createPairingToken(device).getString("qrPayload").also {
-                            saveStoredPairingQr(it)
+                            saveStoredPairingQr(it, device)
                         }
                         runOnUiThread { showPairingQr(payload, 2 - linkedCount) }
                     }
@@ -901,7 +901,7 @@ class MainActivity : Activity() {
 
     // El QR es una credencial: se conserva cifrado localmente y no se vuelve a
     // solicitar uno nuevo al servidor mientras siga pendiente.
-    private fun saveStoredPairingQr(payload: String) {
+    private fun saveStoredPairingQr(payload: String, ownerDeviceId: String) {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         val alias = "sene_patron_pairing_qr_v1"
         val key = if (keyStore.containsAlias(alias)) {
@@ -923,14 +923,20 @@ class MainActivity : Activity() {
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val encrypted = cipher.doFinal(payload.toByteArray(Charsets.UTF_8))
         val packed = cipher.iv + encrypted
-        getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
+        val saved = getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
             .putString("pending_pairing_qr_v1", Base64.encodeToString(packed, Base64.NO_WRAP))
+            .putString("pending_pairing_qr_device_v1", ownerDeviceId)
             .commit()
+        check(saved) { "No se pudo guardar de forma segura el QR pendiente" }
     }
 
-    private fun readStoredPairingQr(): String? {
+    private fun readStoredPairingQr(ownerDeviceId: String): String? {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val packedText = prefs.getString("pending_pairing_qr_v1", null) ?: return null
+        val savedOwner = prefs.getString("pending_pairing_qr_device_v1", null)
+        check(savedOwner == ownerDeviceId) {
+            "El QR guardado pertenece a otra activación de SENE PATRÓN. No se reutilizará."
+        }
         val packed = Base64.decode(packedText, Base64.NO_WRAP)
         check(packed.size > 12) { "El QR local existe, pero está dañado. No se generará otro para evitar duplicar vinculaciones." }
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -941,9 +947,12 @@ class MainActivity : Activity() {
         String(cipher.doFinal(packed.copyOfRange(12, packed.size)), Charsets.UTF_8)
     }
 
-    private fun clearStoredPairingQr() {
-        getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
-            .remove("pending_pairing_qr_v1").commit()
+    private fun clearStoredPairingQr(ownerDeviceId: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val savedOwner = prefs.getString("pending_pairing_qr_device_v1", null)
+        if (savedOwner != ownerDeviceId) return
+        prefs.edit().remove("pending_pairing_qr_v1")
+            .remove("pending_pairing_qr_device_v1").commit()
     }
 
     private fun showPairingQr(payload: String, remaining: Int) {
