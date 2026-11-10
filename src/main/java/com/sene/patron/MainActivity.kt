@@ -645,7 +645,9 @@ class MainActivity : Activity() {
     }
 
 
-    private fun showPairingQr() {
+    private fun showPairingQr(team: String) {
+        val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+        val number = if (team == "team1") "1" else "2"
         val baseUrl = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
             .getString("server_base_url", null)?.takeIf { it.isNotBlank() }
         if (baseUrl == null) {
@@ -654,7 +656,7 @@ class MainActivity : Activity() {
         }
         Thread {
             try {
-                val result = SeneApiClient(this, baseUrl).createPairingToken()
+                val result = SeneApiClient(this, baseUrl).createPairingToken(slot)
                 val payload = result.optString("qrPayload")
                 if (payload.isBlank()) throw IllegalStateException("El servidor no devolvió el QR")
                 val matrix = QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, 640, 640)
@@ -675,20 +677,21 @@ class MainActivity : Activity() {
                         adjustViewBounds = true
                         scaleType = ImageView.ScaleType.FIT_CENTER
                     }, LinearLayout.LayoutParams(dp(280), dp(280)))
-                    content.addView(text("Escanea este QR desde SENE VENTAS. Usos restantes: " +
-                        result.optInt("remainingUses", 2) + "\nVence: " +
-                        java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale("es", "MX"))
-                            .format(java.util.Date(result.optLong("expiresAt", 0L) * 1000)), 13, muted))
+                    content.addView(text(
+                        "QR exclusivo de EQUIPO $number. Un solo uso, sin vencimiento por tiempo. " +
+                            "Si cierras la aplicación antes de vincularlo, se recuperará este mismo QR.",
+                        13, muted
+                    ))
                     AlertDialog.Builder(this)
-                        .setTitle("VINCULAR SENE VENTAS")
-                        .setMessage("QR de un solo proceso. No lo compartas con personas ajenas a tu negocio.")
+                        .setTitle("QR · EQUIPO $number")
+                        .setMessage("Escanea este código desde SENE VENTAS del teléfono que ocupará el espacio $number.")
                         .setView(content)
                         .setPositiveButton("CERRAR", null)
                         .show()
                 }
             } catch (error: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this, "No se pudo generar el QR: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "No se pudo recuperar o generar el QR: " + (error.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
@@ -1056,7 +1059,7 @@ class MainActivity : Activity() {
         val device = card()
         device.addView(kicker("TELÉFONO DEL TRABAJADOR"))
         device.addView(text("Consulta la vinculación o genera el código QR para conectar SENE VENTAS a este espacio.", 13, muted))
-        device.addView(primaryButton("GENERAR QR DE VINCULACIÓN") { showPairingQr() })
+        device.addView(primaryButton("GENERAR QR DE VINCULACIÓN · EQUIPO $number") { showPairingQr(team) })
         gap(device, 7)
         device.addView(primaryButton("VER ESTADO DE SEGURIDAD") {
             AlertDialog.Builder(this)
