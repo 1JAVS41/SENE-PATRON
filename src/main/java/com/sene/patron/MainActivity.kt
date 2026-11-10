@@ -1028,10 +1028,10 @@ class MainActivity : Activity() {
                     AlertDialog.Builder(this)
                         .setTitle("CONTACTOS OFICIALES SENE · VERIFICADOS")
                         .setMessage(
-                            "Correo oficial:\\n$email\\n\\n" +
-                                "AYUDA 1:\\n$phone1\\n\\n" +
-                                "AYUDA 2:\\n$phone2\\n\\n" +
-                                "Revisión digital: $revision\\n\\n" +
+                            "Correo oficial:\n$email\n\n" +
+                                "AYUDA 1:\n$phone1\n\n" +
+                                "AYUDA 2:\n$phone2\n\n" +
+                                "Revisión digital: $revision\n\n" +
                                 "Estos datos fueron validados con la clave pública integrada en SENE PATRÓN."
                         )
                         .setPositiveButton("CERRAR", null)
