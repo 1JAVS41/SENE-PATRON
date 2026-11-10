@@ -205,6 +205,7 @@ const CHALLENGE_TARGETS = {
   PATRON_RECOVERY: ["POST", "/v1/patron/recover"],
   PATRON_RESTORE: ["POST", "/v1/patron/restore"],
   VENTAS_PAIR: ["POST", "/v1/ventas/pair"],
+  VENTAS_RESTORE: ["POST", "/v1/ventas/restore"],
   DEVICE_AUTH: ["POST", "/v1/device/session"],
   PATRON_PAIRING_TOKEN: ["POST", "/v1/patron/pairing-tokens"],
   VENTAS_REQUEST: ["POST", "/v1/ventas/requests"],
@@ -828,6 +829,72 @@ async function createPairingToken(request, env) {
   }
   return json({ qrPayload: `SENEPAIR2:${token}`, slot, remainingUses: 1,
     createdAt: now, expiresAt: null, recovered: false }, 201);
+}
+
+async function restoreVentas(request, env) {
+  const proof = await verifySignedRequest(request, env, "VENTAS_RESTORE");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\s+/g, " ") : "";
+  const email = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
+  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\D/g, "") : "";
+  const identity = await validateBootstrapIdentity(body);
+  if (!identity || !businessName || businessName.length > 100 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || phone.length < 10 || phone.length > 15 ||
+      Object.keys(body).some((key) => !["businessName", "registeredEmail", "registeredPhone", "installationId", "continuityId", "publicKeyBase64", "fingerprint"].includes(key)) ||
+      identity.installationId !== proof.challenge.installation_id ||
+      identity.fingerprint !== String(proof.challenge.fingerprint).toLowerCase()) {
+    return json({ error: "INVALID_RESTORE_DETAILS" }, 400);
+  }
+  const normalized = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
+  const license = await env.DB.prepare(
+    "SELECT id,business_name,status,expires_at FROM licenses WHERE lower(trim(business_name))=lower(trim(?)) AND lower(trim(registered_email))=? AND registered_phone=? AND status IN ('active','expired') LIMIT 1"
+  ).bind(businessName, email, phone).first();
+  if (!license || license.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalized) {
+    return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
+  }
+  const oldDevice = await env.DB.prepare(
+    "SELECT id,slot_number FROM devices WHERE license_id=? AND device_type='VENTAS' AND status='active' AND continuity_id=? AND slot_number IN (2,3) LIMIT 1"
+  ).bind(license.id, identity.continuityId).first();
+  if (!oldDevice) return json({ error: "SAME_PHONE_NOT_VERIFIED" }, 409);
+  const pendingReplacement = await env.DB.prepare(
+    "SELECT id FROM replacement_requests WHERE license_id=? AND slot_number=? AND status='pending' LIMIT 1"
+  ).bind(license.id, Number(oldDevice.slot_number)).first();
+  if (pendingReplacement) return json({ error: "PAID_REPLACEMENT_PENDING" }, 409);
+
+  const newDeviceId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='VENTAS' AND slot_number=? AND status='active' AND continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM replacement_requests WHERE license_id=? AND slot_number=? AND status='pending')"
+      ).bind(oldDevice.id, license.id, Number(oldDevice.slot_number), identity.continuityId, license.id, license.id, Number(oldDevice.slot_number)),
+      env.DB.prepare(
+        "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND slot_number=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='revoked')"
+      ).bind(now, license.id, Number(oldDevice.slot_number), oldDevice.id),
+      env.DB.prepare(
+        "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT ?,?,?,?,?,?,?,?,'active',? FROM devices old WHERE old.id=? AND old.license_id=? AND old.status='revoked' AND old.slot_number=? AND old.continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=old.slot_number AND d.status='active')"
+      ).bind(newDeviceId, license.id, "VENTAS", identity.installationId, identity.continuityId, identity.publicKey, identity.fingerprint, Number(oldDevice.slot_number), now, oldDevice.id, license.id, Number(oldDevice.slot_number), identity.continuityId, license.id),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?, 'system','ventas_restore','ventas_device_restored',?,? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
+      ).bind(crypto.randomUUID(), license.id, newDeviceId, JSON.stringify({ oldDeviceId: oldDevice.id, slotNumber: Number(oldDevice.slot_number), samePhone: true }), now, newDeviceId)
+    ]);
+  } catch {
+    return json({ error: "VENTAS_RESTORE_CONFLICT" }, 409);
+  }
+  if ([0, 2, 3].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1)) {
+    return json({ error: "VENTAS_RESTORE_CONFLICT" }, 409);
+  }
+  return json({
+    deviceId: newDeviceId,
+    slot: Number(oldDevice.slot_number) === 2 ? "VENTAS_1" : "VENTAS_2",
+    businessName: license.business_name,
+    licenseStatus: license.status === "active" && Number(license.expires_at || 0) > now ? "ACTIVE" : "EXPIRED",
+    periodEndsAt: license.expires_at ?? null,
+    restored: true
+  }, 201);
 }
 
 async function pairVentas(request, env) {
@@ -2525,6 +2592,8 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/pairing-tokens") {
     return createPairingToken(request, env);
   }
+
+  if (request.method === "POST" && url.pathname === "/v1/ventas/restore") return restoreVentas(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/ventas/pair") {
     return pairVentas(request, env);
