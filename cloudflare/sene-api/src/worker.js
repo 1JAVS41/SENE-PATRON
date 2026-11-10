@@ -200,6 +200,7 @@ async function requireAdmin(request, env) {
 
 const CHALLENGE_TARGETS = {
   PATRON_ACTIVATE: ["POST", "/v1/patron/activate"],
+  PATRON_REGISTRATION_REQUEST: ["POST", "/v1/patron/registrations/request"],
   PATRON_RECOVERY: ["POST", "/v1/patron/recover"],
   VENTAS_PAIR: ["POST", "/v1/ventas/pair"],
   DEVICE_AUTH: ["POST", "/v1/device/session"],
@@ -281,7 +282,7 @@ async function issueChallenge(request, env) {
   let fingerprint = "";
   let deviceId = null;
 
-  if (purpose === "PATRON_ACTIVATE" || purpose === "VENTAS_PAIR" || purpose === "PATRON_RECOVERY") {
+  if (purpose === "PATRON_ACTIVATE" || purpose === "PATRON_REGISTRATION_REQUEST" || purpose === "VENTAS_PAIR" || purpose === "PATRON_RECOVERY") {
     const identity = await validateBootstrapIdentity(body);
     if (!identity) return json({ error: "INVALID_DEVICE_IDENTITY" }, 400);
     installationId = identity.installationId;
@@ -393,6 +394,14 @@ async function activatePatron(request, env) {
   }
 
   const codeHash = await sha256(activationCode);
+  const registration = await env.DB.prepare(
+    "SELECT id,license_id,installation_id,fingerprint,status FROM registration_requests WHERE code_hash=? LIMIT 1"
+  ).bind(codeHash).first();
+  if (registration && (registration.status !== "authorized" ||
+      registration.installation_id !== identity.installationId ||
+      registration.fingerprint !== identity.fingerprint)) {
+    return json({ error: "ACTIVATION_CODE_DEVICE_MISMATCH" }, 409);
+  }
   const deviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
@@ -410,6 +419,9 @@ async function activatePatron(request, env) {
             AND l.setup_paid_at IS NOT NULL
             AND l.first_rent_paid_at IS NOT NULL
             AND l.status = 'pending'
+            AND (NOT EXISTS (SELECT 1 FROM registration_requests rr WHERE rr.license_id = l.id)
+              OR EXISTS (SELECT 1 FROM registration_requests rr WHERE rr.license_id = l.id
+                AND rr.code_hash = ? AND rr.installation_id = ? AND rr.fingerprint = ? AND rr.status = 'authorized'))
             AND NOT EXISTS (
               SELECT 1 FROM devices d
                WHERE d.license_id = l.id AND d.slot_number = 1
@@ -417,7 +429,8 @@ async function activatePatron(request, env) {
             )`
       ).bind(
         deviceId, identity.installationId, body.continuityId.toLowerCase(),
-        identity.publicKey, identity.fingerprint, now, codeHash
+        identity.publicKey, identity.fingerprint, now, codeHash,
+        codeHash, identity.installationId, identity.fingerprint
       ),
       env.DB.prepare(
         `UPDATE licenses
@@ -436,12 +449,16 @@ async function activatePatron(request, env) {
             SET status = 'active', activated_at = COALESCE(activated_at, ?), expires_at = ?
           WHERE id = (SELECT license_id FROM devices WHERE id = ?)
             AND status = 'pending' AND setup_paid_at IS NOT NULL AND first_rent_paid_at IS NOT NULL`
-      ).bind(now, now + 30 * 86400, deviceId)
+      ).bind(now, now + 30 * 86400, deviceId),
+      env.DB.prepare(
+        "UPDATE registration_requests SET status='consumed',consumed_at=? WHERE code_hash=? AND license_id=(SELECT license_id FROM devices WHERE id=?) AND status='authorized'"
+      ).bind(now,codeHash,deviceId)
     ]);
 
     if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
         (results?.[1]?.meta?.changes ?? 0) !== 1 ||
-        (results?.[2]?.meta?.changes ?? 0) !== 1) {
+        (results?.[2]?.meta?.changes ?? 0) !== 1 ||
+        (registration && (results?.[3]?.meta?.changes ?? 0) !== 1)) {
       return json({ error: "ACTIVATION_CODE_INVALID" }, 409);
     }
   } catch {
@@ -828,6 +845,108 @@ async function renewalPatronContext(proof, env) {
   const quotaError = await consumeWeeklyQuota(env, deviceId);
   if (quotaError) return quotaError;
   return { deviceId, licenseId: row.license_id, deviceType: row.device_type, slotNumber: row.slot_number };
+}
+
+async function createPatronRegistrationRequest(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_REGISTRATION_REQUEST");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\\s+/g, " ") : "";
+  if (!businessName || businessName.length > 100 ||
+      Object.keys(body).some((key) => key !== "businessName") ||
+      !/^[0-9a-f-]{36}$/i.test(proof.challenge.installation_id) ||
+      !/^[0-9a-f]{64}$/i.test(proof.challenge.fingerprint || "")) {
+    return json({ error: "INVALID_BUSINESS_NAME_OR_IDENTITY" }, 400);
+  }
+  const normalizedName = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
+  const existingForDevice = await env.DB.prepare(
+    "SELECT id, business_name, status, created_at FROM registration_requests WHERE installation_id = ? AND fingerprint = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
+  ).bind(proof.challenge.installation_id, proof.challenge.fingerprint.toLowerCase()).first();
+  if (existingForDevice) {
+    if (existingForDevice.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalizedName) {
+      return json({ error: "DEVICE_HAS_DIFFERENT_PENDING_REGISTRATION" }, 409);
+    }
+    return json({ requestId: existingForDevice.id, businessName: existingForDevice.business_name,
+      status: existingForDevice.status, amountCents: 58000, currency: "MXN", duplicate: true });
+  }
+  const activeName = await env.DB.prepare(
+    "SELECT id FROM licenses WHERE lower(trim(business_name)) = lower(trim(?)) AND status IN ('pending','active','expired','suspended') LIMIT 1"
+  ).bind(businessName).first();
+  if (activeName) return json({ error: "BUSINESS_NAME_ALREADY_REGISTERED" }, 409);
+  const openName = await env.DB.prepare(
+    "SELECT id FROM registration_requests WHERE normalized_name = ? AND status IN ('pending_payment','authorized') LIMIT 1"
+  ).bind(normalizedName).first();
+  if (openName) return json({ error: "BUSINESS_NAME_REGISTRATION_PENDING" }, 409);
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at) VALUES (?,?,?,?,?,'pending_payment',?)"
+    ).bind(id,businessName,normalizedName,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),now).run();
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT id,status,created_at FROM registration_requests WHERE normalized_name = ? AND status IN ('pending_payment','authorized') LIMIT 1"
+    ).bind(normalizedName).first();
+    if (raced) return json({ error: "BUSINESS_NAME_REGISTRATION_PENDING", requestId: raced.id }, 409);
+    return json({ error: "REGISTRATION_REQUEST_FAILED" }, 503);
+  }
+  return json({
+    requestId: id, businessName, status: "pending_payment", createdAt: now,
+    amountCents: 58000, currency: "MXN", package: "1_PATRON_2_VENTAS",
+    instructions: "Realiza el pago inicial de $580 MXN. En el concepto escribe únicamente el nombre exacto de tu empresa. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp. Después pulsa YA REALICÉ EL PAGO. El código se entrega únicamente después de verificar el pago."
+  }, 201);
+}
+
+async function listOperatorRegistrations(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const rows = await env.DB.prepare(
+    "SELECT id,business_name,status,created_at,installation_id,fingerprint FROM registration_requests WHERE status='pending_payment' ORDER BY created_at ASC LIMIT 100"
+  ).all();
+  return json({ items: rows.results || [] });
+}
+
+async function authorizePatronRegistration(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const requestId = typeof body.requestId === "string" ? body.requestId : "";
+  const reference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0,120) : "";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference) return json({ error: "INVALID_REQUEST" }, 400);
+  const row = await env.DB.prepare(
+    "SELECT id,business_name,status FROM registration_requests WHERE id=? LIMIT 1"
+  ).bind(requestId).first();
+  if (!row || row.status !== "pending_payment") return json({ error: "REGISTRATION_NOT_PENDING" }, 409);
+  const licenseId = crypto.randomUUID();
+  const code = makeCode();
+  const codeHash = await sha256(code);
+  const now = Math.floor(Date.now() / 1000);
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO licenses (id,label,business_name,status,max_devices,activation_code_hash,created_at) VALUES (?,?,?,'pending',3,?,?)"
+    ).bind(licenseId,row.business_name,row.business_name,codeHash,now),
+    env.DB.prepare(
+      "UPDATE registration_requests SET status='authorized',license_id=?,code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment'"
+    ).bind(licenseId,codeHash,reference,now,requestId),
+    env.DB.prepare(
+      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) VALUES (?,?, 'SETUP',50000,'MXN','CONFIRMED',?,?,?,?,'operator')"
+    ).bind(crypto.randomUUID(),licenseId,reference,"registration-setup:"+requestId,now,now),
+    env.DB.prepare(
+      "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) VALUES (?,?, 'FIRST_RENT',8000,'MXN','CONFIRMED',?,?,?,?,'operator')"
+    ).bind(crypto.randomUUID(),licenseId,reference,"registration-rent:"+requestId,now,now),
+    env.DB.prepare(
+      "UPDATE licenses SET setup_paid_at=?,first_rent_paid_at=? WHERE id=? AND status='pending'"
+    ).bind(now,now,licenseId),
+    env.DB.prepare(
+      "INSERT INTO audit_log (id,license_id,actor_type,actor_id,event_type,details_json,created_at) VALUES (?,?,'operator','operator','patron_registration_authorized',?,?)"
+    ).bind(crypto.randomUUID(),licenseId,JSON.stringify({requestId,paymentReference:reference,totalCents:58000}),now)
+  ]);
+  if (results.some((item) => (item?.meta?.changes ?? 0) !== 1)) {
+    return json({ error: "REGISTRATION_AUTHORIZATION_CONFLICT" }, 409);
+  }
+  return json({ requestId, licenseId, businessName: row.business_name, activationCode: code,
+    paymentStatus: "CONFIRMED", totalCents: 58000, currency: "MXN",
+    note: "Código de un solo uso. Entregar exclusivamente a los números oficiales de AYUDA después de verificar el comprobante." }, 201);
 }
 
 async function createRenewalRequest(request, env) {
@@ -2045,6 +2164,9 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/patron/activate") {
     return activatePatron(request, env);
   }
+  if (request.method === "POST" && url.pathname === "/v1/patron/registrations/request") return createPatronRegistrationRequest(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/operator/registrations/pending") return listOperatorRegistrations(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/registrations/authorize") return authorizePatronRegistration(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/patron/recover") return recoverPatron(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/create") return createPatronRecovery(request, env);
