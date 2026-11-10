@@ -31,20 +31,20 @@ object PatronDeviceIdentity {
     @Synchronized
     fun get(context: Context): PatronIdentitySnapshot {
         val app = context.applicationContext
-        val pair = loadOrCreate(app)
-        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        var installationId = prefs.getString(ID_KEY, null)
-        if (installationId.isNullOrBlank()) {
-            installationId = UUID.randomUUID().toString()
-            check(prefs.edit().putString(ID_KEY, installationId).commit()) {
-                "No se pudo guardar el identificador de instalación"
-            }
-        }
         val androidId = Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID).orEmpty()
         check(androidId.isNotBlank() && !androidId.equals("9774d56d682e549c", true)) {
             "Android no proporcionó un identificador estable"
         }
-        val continuity = digestHex((app.packageName + "|" + androidId).toByteArray(Charsets.UTF_8))
+        // ANDROID_ID permite conservar la identidad lógica al reinstalar la APK
+        // en el mismo teléfono; la clave privada P-256 se mantiene protegida en Keystore.
+        val stableSeed = (app.packageName + "|" + androidId).toByteArray(Charsets.UTF_8)
+        val installationId = UUID.nameUUIDFromBytes(stableSeed).toString()
+        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        check(prefs.edit().putString(ID_KEY, installationId).commit()) {
+            "No se pudo guardar el identificador de instalación"
+        }
+        val pair = loadOrCreate(app)
+        val continuity = digestHex(stableSeed)
         val publicBytes = pair.public.encoded
         return PatronIdentitySnapshot(
             installationId = installationId,
