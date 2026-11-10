@@ -604,21 +604,13 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    // El contador de cada equipo representa solicitudes y correcciones pendientes
-    // que requieren atención. Se calcula con la respuesta del servidor, nunca se comparte
-    // entre Equipo 1 y Equipo 2.
-    private fun updateTeamNotificationCount(team: String, payload: JSONObject) {
-        val requests = payload.optJSONArray("items") ?: org.json.JSONArray()
-        val corrections = payload.optJSONArray("corrections") ?: org.json.JSONArray()
-        var pending = 0
-        for (index in 0 until requests.length()) {
-            if (requests.optJSONObject(index)?.optString("status") == "pending") pending++
-        }
-        for (index in 0 until corrections.length()) {
-            if (corrections.optJSONObject(index)?.optString("status") == "pending") pending++
-        }
+    // El servidor devuelve el número de avisos todavía no consultados por equipo.
+    // Usar pendingByTeam evita volver a contar solicitudes que ya fueron vistas.
+    private fun updateTeamNotificationCount(payload: JSONObject) {
+        val counts = payload.optJSONObject("pendingByTeam") ?: return
         getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
-            .putInt("notifications_$team", pending)
+            .putInt("notifications_team1", counts.optInt("VENTAS_1", 0).coerceAtLeast(0))
+            .putInt("notifications_team2", counts.optInt("VENTAS_2", 0).coerceAtLeast(0))
             .apply()
     }
 
@@ -640,7 +632,7 @@ class MainActivity : Activity() {
                     .putLong("requests_updated_$team", System.currentTimeMillis())
                     .putBoolean("requests_refreshing_$team", false)
                     .apply()
-                updateTeamNotificationCount(team, result)
+                updateTeamNotificationCount(result)
                 runOnUiThread { if (!isFinishing && (currentPage == "${team}_requests" || currentPage == "team1" || currentPage == "team2" || currentPage == "menu")) render() }
             } catch (error: Exception) {
                 prefs.edit().putBoolean("requests_refreshing_$team", false).apply()
