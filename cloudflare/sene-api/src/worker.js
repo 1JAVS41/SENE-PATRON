@@ -1652,13 +1652,16 @@ async function patronNotifications(request, env) {
   if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
+  // El contador representa pendientes reales, no solo avisos sin leer.
+  // Abrir una bandeja marca elementos como vistos, pero no debe volver rojo
+  // el equipo mientras sigan existiendo solicitudes o correcciones pendientes.
   const rows = await env.DB.prepare(
-    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests w WHERE w.ventas_device_id = d.id AND w.status = 'pending' AND w.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS unseen_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
+    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests w WHERE w.ventas_device_id = d.id AND w.status = 'pending') + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending') AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
   ).bind(ctx.licenseId).all();
   const pendingByTeam = { VENTAS_1: 0, VENTAS_2: 0 };
   for (const row of (rows.results || [])) {
-    if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.unseen_count);
-    if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.unseen_count);
+    if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.pending_count);
+    if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.pending_count);
   }
   return json({ pendingByTeam, serverTime: Math.floor(Date.now() / 1000) });
 }
