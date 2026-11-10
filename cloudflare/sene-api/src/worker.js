@@ -942,11 +942,17 @@ async function createPatronRecoveryPaymentRequest(request, env) {
   if (!license || license.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalized) return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
   const oldPatron = await env.DB.prepare("SELECT id FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' LIMIT 1").bind(license.id).first();
   if (!oldPatron) return json({ error: "REGISTERED_PATRON_NOT_FOUND" }, 409);
-  const existing = await env.DB.prepare("SELECT id,status,created_at,installation_id,fingerprint FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
+  const existing = await env.DB.prepare("SELECT id,status,created_at,installation_id,fingerprint,registered_email,registered_phone FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
   if (existing) {
     if (existing.installation_id !== proof.challenge.installation_id ||
-        String(existing.fingerprint).toLowerCase() !== String(proof.challenge.fingerprint).toLowerCase()) {
+        existing.registered_email !== email || existing.registered_phone !== phone) {
       return json({ error: "RECOVERY_REQUEST_BOUND_TO_OTHER_DEVICE" }, 409);
+    }
+    if (String(existing.fingerprint).toLowerCase() !== String(proof.challenge.fingerprint).toLowerCase()) {
+      const rebound = await env.DB.prepare(
+        "UPDATE patron_recovery_payment_requests SET fingerprint=? WHERE id=? AND installation_id=? AND fingerprint=? AND status IN ('pending_payment','authorized')"
+      ).bind(proof.challenge.fingerprint.toLowerCase(), existing.id, proof.challenge.installation_id, existing.fingerprint).run();
+      if ((rebound.meta?.changes ?? 0) !== 1) return json({ error: "RECOVERY_IDENTITY_REBIND_CONFLICT" }, 409);
     }
     return json({ requestId:existing.id,status:existing.status,createdAt:existing.created_at,amountCents:50000,currency:"MXN",duplicate:true });
   }
@@ -954,11 +960,17 @@ async function createPatronRecoveryPaymentRequest(request, env) {
   try {
     await env.DB.prepare("INSERT INTO patron_recovery_payment_requests (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,created_at) VALUES (?,?,?,?,?,?,?,'pending_payment',?)").bind(id,license.id,oldPatron.id,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),email,phone,now).run();
   } catch {
-    const raced=await env.DB.prepare("SELECT id,status,created_at,installation_id,fingerprint FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
+    const raced=await env.DB.prepare("SELECT id,status,created_at,installation_id,fingerprint,registered_email,registered_phone FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
     if(raced) {
       if (raced.installation_id !== proof.challenge.installation_id ||
-          String(raced.fingerprint).toLowerCase() !== String(proof.challenge.fingerprint).toLowerCase()) {
+          raced.registered_email !== email || raced.registered_phone !== phone) {
         return json({ error: "RECOVERY_REQUEST_BOUND_TO_OTHER_DEVICE" }, 409);
+      }
+      if (String(raced.fingerprint).toLowerCase() !== String(proof.challenge.fingerprint).toLowerCase()) {
+        const rebound = await env.DB.prepare(
+          "UPDATE patron_recovery_payment_requests SET fingerprint=? WHERE id=? AND installation_id=? AND fingerprint=? AND status IN ('pending_payment','authorized')"
+        ).bind(proof.challenge.fingerprint.toLowerCase(), raced.id, proof.challenge.installation_id, raced.fingerprint).run();
+        if ((rebound.meta?.changes ?? 0) !== 1) return json({ error: "RECOVERY_IDENTITY_REBIND_CONFLICT" }, 409);
       }
       return json({requestId:raced.id,status:raced.status,createdAt:raced.created_at,amountCents:50000,currency:"MXN",duplicate:true});
     }
