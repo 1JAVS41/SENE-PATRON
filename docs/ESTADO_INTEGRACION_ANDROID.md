@@ -9,10 +9,10 @@
 ## SENE VENTAS
 - Rama de integración: `fix/ventas-cloudflare-client`; el proyecto Android compila desde `app/src/main`.
 - Cliente HTTPS firmado con pairing QR, sesión, solicitudes operativas, historial de respuestas, reportes de cierre y nómina, y solicitud/consumo de permisos de corrección.
-- La pantalla de inicio y el menú de ventas ya permiten configurar el servidor, escanear QR `SENEPAIR2`, verificar sesión, restaurar gratuitamente el mismo equipo tras reinstalar, enviar solicitudes al patrón y consultar/generar reportes de día de pago.
+- La pantalla de inicio y el menú de ventas ya permiten configurar el servidor, escanear QR `SENEPAIR2`, verificar sesión, restaurar gratuitamente el mismo equipo tras reinstalar, enviar solicitudes operativas y consultar/generar reportes de día de pago.
 - El reporte de cierre final se sincroniza con PATRÓN; los cortes periódicos de dos horas permanecen locales/WhatsApp para no consumir la cuota remota semanal.
-- El envío de nómina por WhatsApp se habilita únicamente cuando la sesión del servidor confirma que es la fecha de pago configurada. La configuración de sueldo y el historial se consultan por slot.
-- La interfaz para solicitar y aplicar una corrección local de venta autorizada todavía requiere integración completa; el cliente API ya contiene los métodos firmados, pero no se debe afirmar que ese flujo está terminado.
+- El envío de nómina por WhatsApp se habilita únicamente cuando la sesión del servidor confirma que es la fecha de pago configurada. El periodo parte del último reporte guardado en servidor y el mismo reporte se reutiliza si el usuario vuelve a abrir WhatsApp.
+- La solicitud de corrección de venta ya permite seleccionar una venta, elegir motivo, guardar el plan/hash local y compartir el detalle por WhatsApp; el servidor conserva solo motivo, hash y autorización. **Todavía falta la pantalla para aplicar el cambio autorizado a venta, caja e inventario y consumir el grant de un solo uso.**
 - Las compilaciones más recientes para los cambios de QR, restauración, solicitudes y nómina están en ejecución; esperar el resultado del run de la cabeza de rama antes de entregar APK. Los builds previos no validan todos los cambios recientes.
 
 ## Worker Cloudflare
