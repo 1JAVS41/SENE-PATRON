@@ -1006,7 +1006,7 @@ async function authorizePatronRegistration(request, env) {
     return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   }
   const row = await env.DB.prepare(
-    "SELECT id,business_name,status FROM registration_requests WHERE id=? LIMIT 1"
+    "SELECT id,business_name,registered_email,registered_phone,status FROM registration_requests WHERE id=? LIMIT 1"
   ).bind(requestId).first();
   if (!row || row.status !== "pending_payment") return json({ error: "REGISTRATION_NOT_PENDING" }, 409);
   const licenseId = crypto.randomUUID();
