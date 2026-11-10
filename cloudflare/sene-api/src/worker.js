@@ -524,6 +524,7 @@ async function recoverPatron(request, env) {
   if ([0, 2, 3, 4].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1)) {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
+  await env.DB.prepare("UPDATE patron_recovery_payment_requests SET status = 'consumed', consumed_at = ? WHERE code_hash = ? AND status = 'authorized'").bind(now, codeHash).run();
   return json({
     deviceId: newDeviceId,
     slot: "PATRON",
