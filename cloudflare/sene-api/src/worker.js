@@ -201,6 +201,7 @@ async function requireAdmin(request, env) {
 const CHALLENGE_TARGETS = {
   PATRON_ACTIVATE: ["POST", "/v1/patron/activate"],
   PATRON_REGISTRATION_REQUEST: ["POST", "/v1/patron/registrations/request"],
+  PATRON_RECOVERY_REQUEST: ["POST", "/v1/patron/recovery/request"],
   PATRON_RECOVERY: ["POST", "/v1/patron/recover"],
   VENTAS_PAIR: ["POST", "/v1/ventas/pair"],
   DEVICE_AUTH: ["POST", "/v1/device/session"],
@@ -863,18 +864,20 @@ async function createPatronRegistrationRequest(request, env) {
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\s+/g, " ") : "";
-  if (!businessName || businessName.length > 100 ||
-      Object.keys(body).some((key) => key !== "businessName") ||
+  const registeredEmail = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
+  const registeredPhone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\D/g, "") : "";
+  if (!businessName || businessName.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registeredEmail) || registeredPhone.length < 10 || registeredPhone.length > 15 ||
+      Object.keys(body).some((key) => !["businessName","registeredEmail","registeredPhone"].includes(key)) ||
       !/^[0-9a-f-]{36}$/i.test(proof.challenge.installation_id) ||
       !/^[0-9a-f]{64}$/i.test(proof.challenge.fingerprint || "")) {
     return json({ error: "INVALID_BUSINESS_NAME_OR_IDENTITY" }, 400);
   }
   const normalizedName = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
   const existingForDevice = await env.DB.prepare(
-    "SELECT id, business_name, status, created_at FROM registration_requests WHERE installation_id = ? AND fingerprint = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
+    "SELECT id, business_name, registered_email, registered_phone, status, created_at FROM registration_requests WHERE installation_id = ? AND fingerprint = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
   ).bind(proof.challenge.installation_id, proof.challenge.fingerprint.toLowerCase()).first();
   if (existingForDevice) {
-    if (existingForDevice.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalizedName) {
+    if (existingForDevice.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalizedName || existingForDevice.registered_email !== registeredEmail || existingForDevice.registered_phone !== registeredPhone) {
       return json({ error: "DEVICE_HAS_DIFFERENT_PENDING_REGISTRATION" }, 409);
     }
     return json({ requestId: existingForDevice.id, businessName: existingForDevice.business_name,
@@ -892,8 +895,8 @@ async function createPatronRegistrationRequest(request, env) {
   const now = Math.floor(Date.now() / 1000);
   try {
     await env.DB.prepare(
-      "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at) VALUES (?,?,?,?,?,'pending_payment',?)"
-    ).bind(id,businessName,normalizedName,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),now).run();
+      "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at,registered_email,registered_phone) VALUES (?,?,?,?,?,'pending_payment',?,?,?)"
+    ).bind(id,businessName,normalizedName,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),now,registeredEmail,registeredPhone).run();
   } catch {
     const raced = await env.DB.prepare(
       "SELECT id,status,created_at FROM registration_requests WHERE normalized_name = ? AND status IN ('pending_payment','authorized') LIMIT 1"
@@ -927,7 +930,7 @@ async function requireOfficialHelpRecipient(env, suppliedPhone) {
 async function listOperatorRegistrations(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
   const rows = await env.DB.prepare(
-    "SELECT id,business_name,status,created_at,installation_id,fingerprint FROM registration_requests WHERE status='pending_payment' ORDER BY created_at ASC LIMIT 100"
+    "SELECT id,business_name,registered_email,registered_phone,status,created_at,installation_id,fingerprint FROM registration_requests WHERE status='pending_payment' ORDER BY created_at ASC LIMIT 100"
   ).all();
   return json({ items: rows.results || [] });
 }
@@ -953,8 +956,8 @@ async function authorizePatronRegistration(request, env) {
   const now = Math.floor(Date.now() / 1000);
   const results = await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO licenses (id,label,business_name,status,max_devices,activation_code_hash,created_at) VALUES (?,?,?,'pending',3,?,?)"
-    ).bind(licenseId,row.business_name,row.business_name,codeHash,now),
+      "INSERT INTO licenses (id,label,business_name,registered_email,registered_phone,status,max_devices,activation_code_hash,created_at) VALUES (?,?,?,?,?,'pending',3,?,?)"
+    ).bind(licenseId,row.business_name,row.business_name,row.registered_email,row.registered_phone,codeHash,now),
     env.DB.prepare(
       "UPDATE registration_requests SET status='authorized',license_id=?,code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment'"
     ).bind(licenseId,codeHash,reference,now,requestId),
