@@ -381,6 +381,7 @@ jobs:
           sqlite3 "$DB_FILE" "UPDATE official_support_contacts SET official_email='cambio@example.invalid', revision=2, updated_at=200, updated_by='operator-approved' WHERE id=1 AND revision=1;"
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM official_support_contacts_audit;")" = "2"
           test "$(sqlite3 "$DB_FILE" "SELECT action FROM official_support_contacts_audit WHERE revision=2;")" = "AUTHORIZED_UPDATE"
+          if sqlite3 "$DB_FILE" "INSERT INTO official_support_contacts_audit (revision, action, official_email, help_phone_1, help_phone_2, actor, created_at) VALUES (99, 'AUTHORIZED_UPDATE', 'forged@example.invalid', '+5266666666666', '+5277777777777', 'attacker', 999);" 2>/dev/null; then exit 1; fi
           if sqlite3 "$DB_FILE" "UPDATE official_support_contacts_audit SET actor='tampered' WHERE revision=1;" 2>/dev/null; then exit 1; fi
           if sqlite3 "$DB_FILE" "DELETE FROM official_support_contacts_audit WHERE revision=1;" 2>/dev/null; then exit 1; fi
           if sqlite3 "$DB_FILE" "DELETE FROM official_support_contacts WHERE id=1;" 2>/dev/null; then exit 1; fi
