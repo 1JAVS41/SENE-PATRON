@@ -2106,7 +2106,14 @@ async function ventasPayrollSettingsGet(request, env) {
   const row = await env.DB.prepare(
     "SELECT salary_cents, payment_day, payment_dates_json, updated_at FROM payroll_settings WHERE license_id = ? AND slot_number = ? LIMIT 1"
   ).bind(ctx.licenseId, Number(device.slot_number)).first();
-  if (!row) return json({ configured: false, settings: null });
+  const lastReport = await env.DB.prepare(
+    "SELECT period_key, created_at FROM payroll_reports WHERE ventas_device_id = ? ORDER BY created_at DESC LIMIT 1"
+  ).bind(ctx.deviceId).first();
+  if (!row) return json({
+    configured: false, settings: null,
+    lastReportPeriodKey: lastReport?.period_key || null,
+    lastReportCreatedAt: Number(lastReport?.created_at || 0)
+  });
   let paymentDates;
   try { paymentDates = JSON.parse(row.payment_dates_json || "[]"); } catch { return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503); }
   if (!Array.isArray(paymentDates) || paymentDates.some((date) =>
@@ -2121,7 +2128,9 @@ async function ventasPayrollSettingsGet(request, env) {
       paymentDay: row.payment_day === null ? null : Number(row.payment_day),
       paymentDates,
       updatedAt: Number(row.updated_at)
-    }
+    },
+    lastReportPeriodKey: lastReport?.period_key || null,
+    lastReportCreatedAt: Number(lastReport?.created_at || 0)
   });
 }
 
