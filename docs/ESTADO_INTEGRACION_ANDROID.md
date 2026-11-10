@@ -1,30 +1,31 @@
-# Estado de integración Android SENE (2026-11-09)
+# Estado de integración Android SENE (2026-11-10)
 
 ## SENE PATRÓN
-- Se añadió `PatronDeviceIdentity.kt`: identidad P-256 propia, clave privada en Android Keystore, ID de instalación, continuityId y fingerprint.
-- Se añadió `SeneApiClient.kt`: HTTPS obligatorio, challenge firmado y métodos para activar PATRÓN, consultar sesión, emitir QR, consultar solicitudes, decidir solicitudes, consultar reportes, consultar/decidir correcciones, solicitar/canjear renovación y solicitar reemplazo y recuperar un PATRÓN perdido.
-- Tras activar correctamente, el cliente guarda el deviceId remoto en preferencias locales.
-- Se retiraron el plugin Google Services y las dependencias Firebase que no se utilizaban en este módulo. La integración se prepara para Cloudflare Workers + D1.
-- La interfaz principal todavía no invoca el cliente: faltan la configuración del endpoint HTTPS definitivo, pantallas de activación/vinculación y la conexión de botones/equipos a las respuestas del servidor.
+- Identidad P-256 en Android Keystore; la identidad lógica de instalación se deriva de `ANDROID_ID` y del paquete para mantenerse estable tras reinstalar en el mismo teléfono.
+- Cliente HTTPS obligatorio con retos firmados, hash del cuerpo y consumo de reto de un solo uso.
+- La interfaz ya conecta el registro inicial de $580 MXN, introducción del código de activación, renovación de $80 MXN, introducción del código de renovación, reposición pagada de $500 MXN y canje del código de reposición.
+- AYUDA obtiene contactos firmados digitalmente; muestra opciones para reposición de teléfono perdido y restauración gratuita en el mismo teléfono cuando la continuidad criptográfica y los datos registrados coinciden.
+- Tras activar, recuperar o restaurar, el cliente guarda el deviceId remoto y consulta la sesión/licencia.
+- Los módulos de equipos, notificaciones, solicitudes, correcciones, reportes y nómina conservan las llamadas del cliente HTTPS firmado.
+- La reemisión de códigos se realiza por endpoints privados de operador; los secretos de operador no se incluyen en la APK.
 
 ## SENE VENTAS
-- Se añadió `SeneApiClient.kt` en la rama `sene-ventas-preparacion-patron`.
-- Incluye pairing QR, sesión, solicitudes de trabajador, recuperación de respuestas, reporte de cierre, reporte de nómina y solicitud/consumo de corrección.
-- El cursor de respuestas usa el campo `since` exigido por el Worker.
-- La UI aún no invoca el cliente; falta configurar el endpoint, enlazar el flujo QR y conectar los formularios/cola de envío sin modificar las funciones comerciales locales.
+- El cliente HTTPS firmado de la rama `sene-ventas-preparacion-patron` incluye pairing QR, sesión, solicitudes de trabajador, recuperación de respuestas, reportes de cierre y nómina, y solicitud/consumo de corrección.
+- El cursor de respuestas usa `since` conforme al contrato del Worker.
+- La integración E2E con el Worker de producción sigue pendiente; los datos comerciales permanecen locales.
 
-## Compilaciones verificadas
-- SENE PATRÓN: GitHub Actions run 42712521622 — success. Artifact `SENE PATRON-online`.
-- SENE VENTAS: GitHub Actions run 42712485704 — success. Artifact `SENE VENTAS-online`.
-- Son compilaciones de validación del código de esas ramas. No equivalen a APK finales conectadas ni a pruebas E2E.
+## Compilación y pruebas
+- El workflow Android automático está configurado para compilar el proyecto y generar el icono con el logotipo original.
+- GitHub Actions está creando los runs, pero actualmente los jobs terminan sin asignación de runner (`runner_id=0`, sin pasos ni logs). Por eso no hay una compilación reciente verificable ni APK que entregar.
+- El workflow Cloudflare contiene comprobaciones de sintaxis, migraciones SQLite y pruebas de licencia, pagos, códigos de un solo uso, reposición pagada, restauración en el mismo teléfono y transferencia de mensualidad; los jobs recientes tampoco han podido ejecutarse por falta de runner.
+- Las comprobaciones estáticas del Worker y la correspondencia de rutas/propósitos del cliente sí se han realizado, pero no sustituyen CI ni E2E.
 
-## Bloqueos para finalizar
-1. El Worker remoto sigue siendo la plantilla Hello World y la D1 real solo tiene la migración 0001.
-2. No se ha compartido la URL exacta `workers.dev` del Worker; no inventarla ni fijarla en las APK.
-3. Faltan pruebas E2E del Worker en un entorno Cloudflare de pruebas y aplicación controlada de migraciones 0002–0008.
-4. Integrar el cliente en las pantallas, colas offline/idempotencia y estados de licencia/contadores.
-5. Pruebas reales de vinculación, renovación, solicitudes, notificaciones, reportes, permisos de corrección y reemplazo en ambos equipos.
-6. Probar funcionamiento offline y confirmar que ventas, caja, inventario y gastos siguen locales.
-7. Generar y verificar las APK finales con nombres `SENE VENTAS-online.apk` y `SENE PATRON-online.apk`.
+## Pendientes antes de producción
+1. Habilitar/recuperar la ejecución de GitHub Actions para obtener runners y validar compilación y pruebas.
+2. Confirmar la URL HTTPS exacta del Worker; no inventarla ni fijarla en las APK.
+3. Crear un entorno Cloudflare de pruebas y aplicar allí todas las migraciones en orden; no tocar la D1 real todavía.
+4. Probar E2E activación, renovación, reposición, restauración del mismo teléfono, QR, vinculación de ambos equipos, solicitudes, correcciones y nómina.
+5. Probar los flujos offline y verificar que ventas, caja, inventario y gastos sigan locales.
+6. Generar e instalar las APK finales, con sus nombres acordados: `SENE VENTAS-online.apk` y `SENE PATRON-online.apk`.
 
 No desplegar el Worker ni ejecutar migraciones en la D1 real sin autorización explícita.
