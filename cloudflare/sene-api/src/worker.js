@@ -578,6 +578,10 @@ async function restorePatron(request, env) {
     "SELECT id FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? LIMIT 1"
   ).bind(license.id, identity.continuityId).first();
   if (!oldPatron) return json({ error: "SAME_PHONE_NOT_VERIFIED" }, 409);
+  const pendingRecovery = await env.DB.prepare(
+    "SELECT id FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1"
+  ).bind(license.id).first();
+  if (pendingRecovery) return json({ error: "PAID_RECOVERY_REQUEST_PENDING" }, 409);
 
   const newDeviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
