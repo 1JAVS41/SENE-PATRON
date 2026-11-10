@@ -1023,6 +1023,7 @@ class MainActivity : Activity() {
                                 "Revisión digital: $revision\n\n" +
                                 "Estos datos fueron validados con la clave pública integrada en SENE PATRÓN."
                         )
+                        .setNeutralButton("PERDÍ MI EQUIPO SENE PATRÓN") { _, _ -> showPatronRecoveryDialog() }
                         .setPositiveButton("CERRAR", null)
                         .show()
                 }
@@ -1040,6 +1041,33 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    private fun showPatronRecoveryDialog() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.trim()?.takeIf { it.startsWith("https://") }
+        if (baseUrl == null) { showServerConfig(); return }
+        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        fun field(hintText: String, type: Int): EditText = EditText(this).apply { hint = hintText; inputType = type; setSingleLine(true); setPadding(dp(12), dp(10), dp(12), dp(10)); form.addView(this) }
+        val company = field("Nombre exacto de la empresa registrada", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+        val email = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        val phone = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
+        val instructions = text("REPOSICIÓN DE SENE PATRÓN · $500 MXN\n\n1. Realiza el pago de $500 MXN con el concepto exacto: Reposición SENE PATRÓN.\n2. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\n3. Después pulsa YA REALICÉ EL PAGO.\n\nEl servidor comprobará que empresa, correo y teléfono coincidan con los datos registrados. Tras verificar el pago, el código de reposición se entregará únicamente por los números oficiales de AYUDA.", 14, ink, false)
+        form.addView(instructions)
+        AlertDialog.Builder(this).setTitle("PERDÍ MI EQUIPO SENE PATRÓN").setView(form)
+            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+                val name = company.text?.toString()?.trim().orEmpty()
+                val mail = email.text?.toString()?.trim().orEmpty()
+                val number = phone.text?.toString()?.trim().orEmpty()
+                if (name.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(mail).matches() || number.filter { it.isDigit() }.length !in 10..15) {
+                    Toast.makeText(this, "Completa los datos registrados correctamente", Toast.LENGTH_LONG).show(); return@setPositiveButton
+                }
+                Thread {
+                    try {
+                        val result = SeneApiClient(this, baseUrl).requestPatronRecovery(name, mail, number)
+                        runOnUiThread { AlertDialog.Builder(this).setTitle("SOLICITUD DE REPOSICIÓN RECIBIDA").setMessage("Folio: ${result.optString("requestId")}\n\nEstado: ${result.optString("status", "pendiente de verificación")}\n\nImporte: $500 MXN\n\nEl código se entregará después de verificar el comprobante, exclusivamente por los números oficiales de AYUDA.").setPositiveButton("ACEPTAR", null).show() }
+                    } catch (error: Exception) { runOnUiThread { Toast.makeText(this, error.message ?: "No se pudo enviar la solicitud", Toast.LENGTH_LONG).show() } }
+                }.start()
+            }.setNegativeButton("CANCELAR", null).show()
+    }
     private fun menuScreen(root: LinearLayout) {
         header(root, "Menú de administración")
         val intro = card()
