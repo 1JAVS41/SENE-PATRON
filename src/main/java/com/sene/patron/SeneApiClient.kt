@@ -123,6 +123,32 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return result
     }
 
+    /** Recupera la vinculación tras reinstalar en el mismo teléfono físico. */
+    fun restorePatron(businessName: String, registeredEmail: String, registeredPhone: String): JSONObject {
+        val name = businessName.trim().replace(Regex("\\s+"), " ")
+        val email = registeredEmail.trim().lowercase()
+        val phone = registeredPhone.filter { it.isDigit() }
+        require(name.isNotBlank() && name.length <= 100 &&
+            android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() &&
+            phone.length in 10..15) { "Revisa los datos registrados de la empresa" }
+        val identity = PatronDeviceIdentity.get(app)
+        val body = JSONObject()
+            .put("businessName", name)
+            .put("registeredEmail", email)
+            .put("registeredPhone", phone)
+            .put("installationId", identity.installationId)
+            .put("continuityId", identity.continuityId)
+            .put("publicKeyBase64", identity.publicKeyBase64)
+            .put("fingerprint", identity.fingerprint)
+        val result = bootstrapSigned("PATRON_RESTORE", "/v1/patron/restore", body.toString(), identity)
+        val registeredId = result.optString("deviceId")
+        check(registeredId.isNotBlank()) { "El servidor no devolvió la nueva vinculación" }
+        check(prefs.edit().putString("device_id", registeredId).commit()) {
+            "No se pudo guardar la vinculación recuperada"
+        }
+        return session().put("restored", true)
+    }
+
     fun createPairingToken(slot: String, operation: String = "NEW", deviceId: String = storedDeviceId()
         ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject {
         require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
