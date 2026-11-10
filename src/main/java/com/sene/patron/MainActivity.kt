@@ -482,6 +482,13 @@ class MainActivity : Activity() {
                 val correction = card()
                 correction.addView(text("Venta: " + item.optString("saleId"), 15, ink, true))
                 correction.addView(text("Motivo: " + item.optString("reason"), 13, muted))
+                val reasons = item.optJSONArray("reasons")
+                if (reasons != null && reasons.length() > 1) {
+                    correction.addView(text("Categorías: " + (0 until reasons.length()).joinToString(", ") { reasons.optString(it) }, 12, muted))
+                }
+                if (item.optBoolean("cashImpact", false)) {
+                    correction.addView(text("Cambio de caja: " + item.optString("cashReason"), 12, muted))
+                }
                 correction.addView(text("Estado: $status", 11, muted))
                 if (status == "pending") {
                     gap(correction, 7)
