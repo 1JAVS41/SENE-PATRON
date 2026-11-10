@@ -501,6 +501,31 @@ jobs:
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
+      - name: Probar restauración sin costo en el mismo teléfono tras reinstalar
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,registered_email,registered_phone,status,max_devices,created_at,expires_at) VALUES ('license-same-phone','TIENDA MISMO TELEFONO','titular@example.invalid','5211111111111','active',3,1,9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) VALUES ('patron-before-reinstall','license-same-phone','PATRON','old-install','same-continuity',x'01','old-fingerprint',1,'active',1);"
+          sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash,license_id,patron_device_id,remaining_uses,created_at,expires_at) VALUES ('same-phone-old-qr','license-same-phone','patron-before-reinstall',1,2,9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO renewal_requests (id,license_id,patron_device_id,business_name,status,code_hash,created_at,authorized_at) VALUES ('same-phone-renewal','license-same-phone','patron-before-reinstall','TIENDA MISMO TELEFONO','authorized','same-phone-renewal-hash',3,4);"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-same-phone' AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id='same-continuity';")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-same-phone' AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id='different-phone';")" = "0"
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='patron-before-reinstall' AND status='active' AND continuity_id='same-continuity';"
+          sqlite3 "$DB_FILE" "UPDATE pairing_tokens SET revoked_at=10 WHERE license_id='license-same-phone' AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id='patron-before-reinstall' AND status='revoked');"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT 'patron-after-reinstall','license-same-phone','PATRON','stable-install-id','same-continuity',x'02','new-fingerprint',1,'active',11 FROM devices old WHERE old.id='patron-before-reinstall' AND old.status='revoked' AND old.continuity_id='same-continuity' AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=1 AND d.status='active');"
+          sqlite3 "$DB_FILE" "UPDATE renewal_requests SET patron_device_id='patron-after-reinstall' WHERE id='same-phone-renewal' AND status='authorized' AND EXISTS (SELECT 1 FROM devices WHERE id='patron-after-reinstall' AND status='active');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-before-reinstall';")" = "revoked"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-after-reinstall';")" = "active"
+          test "$(sqlite3 "$DB_FILE" "SELECT patron_device_id FROM renewal_requests WHERE id='same-phone-renewal';")" = "patron-after-reinstall"
+          test "$(sqlite3 "$DB_FILE" "SELECT revoked_at FROM pairing_tokens WHERE token_hash='same-phone-old-qr';")" = "10"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE license_id='license-same-phone' AND slot_number=1 AND status='active';")" = "1"
+          test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar bandejas independientes de solicitudes y correcciones por equipo
         run: |
           set -euo pipefail
