@@ -2042,7 +2042,7 @@ async function ventasPayrollSettingsGet(request, env) {
   let paymentDates;
   try { paymentDates = JSON.parse(row.payment_dates_json || "[]"); } catch { return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503); }
   if (!Array.isArray(paymentDates) || paymentDates.some((date) =>
-    typeof date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date))) {
+    typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
     return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503);
   }
   return json({
