@@ -707,7 +707,7 @@ class MainActivity : Activity() {
     }
 
 
-    private fun showPatronRecoveryDialog() {
+    private fun showPatronRecoveryCodeDialog() {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)
         if (baseUrl.isNullOrBlank()) {
