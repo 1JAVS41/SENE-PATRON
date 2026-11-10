@@ -362,7 +362,7 @@ class MainActivity : Activity() {
                             setPadding(dp(12), dp(8), dp(12), dp(8))
                             addView(image, LinearLayout.LayoutParams(-1, dp(280)))
                             addView(text("Usos restantes: " + result.optInt("remainingUses") +
-                                "\nVálido hasta (UTC): " + result.optLong("expiresAt"), 12, muted))
+                                "\nSin vencimiento por tiempo. El QR permanece disponible hasta completar sus vinculaciones.", 12, muted))
                             addView(text(payload, 10, muted))
                         }
                         AlertDialog.Builder(this).setTitle("QR DE VINCULACIÓN SENE VENTAS")
