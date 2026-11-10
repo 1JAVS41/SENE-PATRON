@@ -232,7 +232,7 @@ class MainActivity : Activity() {
             }
         })
         gap(root, 9)
-        root.addView(primaryButton("RECUPERAR PATRÓN EN UN TELÉFONO NUEVO") {
+        root.addView(primaryButton("RECUPERAR PATRÓN (REINSTALACIÓN O TELÉFONO NUEVO)") {
             val value = base.text.toString().trim().trimEnd('/')
             val recovery = recoveryCode.text.toString().trim()
             val uri = Uri.parse(value)
