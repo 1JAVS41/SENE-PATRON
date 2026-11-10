@@ -297,3 +297,6 @@ Este flujo está en GitHub, pero no está desplegado ni probado E2E contra Cloud
 - `POST /v1/patron/payroll/settings/set`: PATRÓN guarda sueldo y fechas para un solo equipo.
 - `POST /v1/ventas/payroll-reports`: el Worker comprueba la fecha local de `America/Mexico_City` contra la configuración del slot de origen antes de aceptar el reporte. Si no corresponde, devuelve `PAYROLL_NOT_DUE`; si no hay configuración, `PAYROLL_NOT_CONFIGURED`.
 - La identidad del slot procede del dispositivo firmado, nunca del campo enviado por VENTAS.
+
+
+Los reportes de nómina conservan el historial reciente en `requests` y separan el conjunto del periodo en `payrollRequestIds`. PATRÓN calcula únicamente descuentos de solicitudes incluidas en ese conjunto para evitar repetir descuentos en pagos posteriores. Los reintentos idempotentes devuelven el reporte original almacenado.
