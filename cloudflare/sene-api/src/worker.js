@@ -1211,33 +1211,47 @@ async function createCorrectionRequest(request, env) {
     "Devolución", "Ajuste de precio", "Eliminación de producto",
     "Corrección de cantidad", "Producto equivocado", "Producto omitido", "Otro"
   ]);
+  const allowedCashReasons = new Set([
+    "Devolución al cliente", "Diferencia por precio vigente", "Cantidad corregida",
+    "Producto eliminado o incorrecto", "Producto omitido", "Otro"
+  ]);
+  const reasons = Array.isArray(body.reasons) ? [...new Set(body.reasons)] : [reason];
+  const planHash = typeof body.planHash === "string" ? body.planHash.toLowerCase() : "";
+  const cashImpact = body.cashImpact === true;
+  const cashReason = typeof body.cashReason === "string" ? body.cashReason.trim() : "";
   const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey : "";
-  // El servidor solo acepta categorías predefinidas, nunca descripciones comerciales libres.
+  // El servidor recibe categorías y hash; nunca renglones, precios, cantidades ni importes.
   if (!saleId || saleId.length > 120 || !allowedReasons.has(reason) ||
+      !reasons.length || reasons.length > 7 || reasons.some((item) => !allowedReasons.has(item)) ||
+      !/^[a-f0-9]{64}$/.test(planHash) ||
+      (cashImpact ? !allowedCashReasons.has(cashReason) : cashReason !== "") ||
       !/^[0-9a-f-]{36}$/i.test(idempotencyKey)) return json({ error: "INVALID_REQUEST" }, 400);
   const existing = await env.DB.prepare(
-    "SELECT id, status, created_at, sale_id FROM correction_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
+    "SELECT id, status, created_at, sale_id, plan_hash FROM correction_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
   ).bind(ctx.deviceId, idempotencyKey).first();
-  if (existing) return json({ requestId: existing.id, saleId: existing.sale_id, status: existing.status, createdAt: existing.created_at, duplicate: true });
+  if (existing) {
+    if (existing.plan_hash !== planHash) return json({ error: "IDEMPOTENCY_PLAN_MISMATCH" }, 409);
+    return json({ requestId: existing.id, saleId: existing.sale_id, status: existing.status, createdAt: existing.created_at, planHash: existing.plan_hash, duplicate: true });
+  }
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   try {
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO correction_requests (id, license_id, ventas_device_id, sale_id, reason, status, created_at, idempotency_key) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)"
-      ).bind(id, ctx.licenseId, ctx.deviceId, saleId, reason, now, idempotencyKey),
+        "INSERT INTO correction_requests (id, license_id, ventas_device_id, sale_id, reason, reasons_json, cash_impact, cash_reason, plan_hash, status, created_at, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)"
+      ).bind(id, ctx.licenseId, ctx.deviceId, saleId, reason, JSON.stringify(reasons), cashImpact ? 1 : 0, cashReason || null, planHash, now, idempotencyKey),
       env.DB.prepare(
         "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) VALUES (?, ?, ?, 'ventas', ?, 'correction_requested', ?, ?)"
-      ).bind(crypto.randomUUID(), ctx.licenseId, ctx.deviceId, ctx.deviceId, JSON.stringify({ requestId: id, saleId }), now)
+      ).bind(crypto.randomUUID(), ctx.licenseId, ctx.deviceId, ctx.deviceId, JSON.stringify({ requestId: id, saleId, reasons, cashImpact, cashReason: cashReason || null }), now)
     ]);
   } catch {
     const raced = await env.DB.prepare(
-      "SELECT id, status, created_at, sale_id FROM correction_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
+      "SELECT id, status, created_at, sale_id, plan_hash FROM correction_requests WHERE ventas_device_id = ? AND idempotency_key = ? LIMIT 1"
     ).bind(ctx.deviceId, idempotencyKey).first();
-    if (raced) return json({ requestId: raced.id, saleId: raced.sale_id, status: raced.status, createdAt: raced.created_at, duplicate: true });
+    if (raced && raced.plan_hash === planHash) return json({ requestId: raced.id, saleId: raced.sale_id, status: raced.status, createdAt: raced.created_at, planHash: raced.plan_hash, duplicate: true });
     return json({ error: "CORRECTION_REQUEST_CONFLICT" }, 409);
   }
-  return json({ requestId: id, saleId, status: "pending", createdAt: now }, 201);
+  return json({ requestId: id, saleId, status: "pending", createdAt: now, planHash }, 201);
 }
 
 async function patronCorrectionsInbox(request, env) {
@@ -1256,7 +1270,7 @@ async function patronCorrectionsInbox(request, env) {
     "UPDATE correction_requests SET seen_at = ? WHERE status = 'pending' AND seen_at IS NULL AND ventas_device_id IN (SELECT id FROM devices WHERE license_id = ? AND slot_number = ? AND status = 'active')"
   ).bind(now, ctx.licenseId, slot).run();
   const rows = await env.DB.prepare(
-    "SELECT r.id, r.sale_id, r.reason, r.status, r.created_at, r.decided_at FROM correction_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND d.slot_number = ? AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
+    "SELECT r.id, r.sale_id, r.reason, r.reasons_json, r.cash_impact, r.cash_reason, r.plan_hash, r.status, r.created_at, r.decided_at FROM correction_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND d.slot_number = ? AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
   ).bind(ctx.licenseId, slot, status).all();
   const counts = await env.DB.prepare(
     "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests w WHERE w.ventas_device_id = d.id AND w.status = 'pending' AND w.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
@@ -1267,8 +1281,10 @@ async function patronCorrectionsInbox(request, env) {
     if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.pending_count);
   }
   return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", pendingByTeam, items: (rows.results || []).map((r) => ({
-    requestId: r.id, saleId: r.sale_id, reason: r.reason, status: r.status,
-    createdAt: r.created_at, decidedAt: r.decided_at
+    requestId: r.id, saleId: r.sale_id, reason: r.reason,
+    reasons: (() => { try { return JSON.parse(r.reasons_json || "[]"); } catch { return [r.reason]; } })(),
+    cashImpact: Number(r.cash_impact) === 1, cashReason: r.cash_reason || "",
+    planHash: r.plan_hash, status: r.status, createdAt: r.created_at, decidedAt: r.decided_at
   })) });
 }
 
@@ -1284,7 +1300,7 @@ async function decideCorrectionRequest(request, env) {
   const decision = body.decision === "approve" ? "approved" : body.decision === "reject" ? "rejected" : "";
   if (!/^[0-9a-f-]{36}$/i.test(requestId) || !decision) return json({ error: "INVALID_REQUEST" }, 400);
   const row = await env.DB.prepare(
-    "SELECT id, license_id, ventas_device_id, sale_id FROM correction_requests WHERE id = ? AND license_id = ? AND status = 'pending' LIMIT 1"
+    "SELECT id, license_id, ventas_device_id, sale_id, plan_hash FROM correction_requests WHERE id = ? AND license_id = ? AND status = 'pending' LIMIT 1"
   ).bind(requestId, ctx.licenseId).first();
   if (!row) return json({ error: "CORRECTION_NOT_PENDING" }, 409);
   const now = Math.floor(Date.now() / 1000);
@@ -1296,7 +1312,7 @@ async function decideCorrectionRequest(request, env) {
       ).bind(decision, now, requestId, ctx.licenseId)
     ];
     if (decision === "approved") statements.push(env.DB.prepare(
-      "INSERT INTO correction_grants (id, request_id, license_id, ventas_device_id, sale_id, uses_allowed, uses_consumed, created_at) SELECT ?, id, license_id, ventas_device_id, sale_id, 1, 0, ? FROM correction_requests WHERE id = ? AND status = 'approved' AND decided_at = ?"
+      "INSERT INTO correction_grants (id, request_id, license_id, ventas_device_id, sale_id, plan_hash, uses_allowed, uses_consumed, created_at) SELECT ?, id, license_id, ventas_device_id, sale_id, plan_hash, 1, 0, ? FROM correction_requests WHERE id = ? AND status = 'approved' AND decided_at = ?"
     ).bind(grantId, now, requestId, now));
     statements.push(env.DB.prepare(
       "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'patron', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM correction_requests WHERE id = ? AND status = ? AND decided_at = ?)"
@@ -1309,7 +1325,7 @@ async function decideCorrectionRequest(request, env) {
   } catch {
     return json({ error: "CORRECTION_DECISION_CONFLICT" }, 409);
   }
-  return json({ requestId, saleId: row.sale_id, status: decision, grantId, usesAllowed: decision === "approved" ? 1 : 0, decidedAt: now });
+  return json({ requestId, saleId: row.sale_id, status: decision, grantId, planHash: row.plan_hash, usesAllowed: decision === "approved" ? 1 : 0, decidedAt: now });
 }
 
 async function consumeCorrectionGrant(request, env) {
