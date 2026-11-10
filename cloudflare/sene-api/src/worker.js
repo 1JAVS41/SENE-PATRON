@@ -858,6 +858,65 @@ async function renewalPatronContext(proof, env) {
   return { deviceId, licenseId: row.license_id, deviceType: row.device_type, slotNumber: row.slot_number };
 }
 
+async function createPatronRecoveryPaymentRequest(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_RECOVERY_REQUEST");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+  let body; try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\s+/g, " ") : "";
+  const email = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
+  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\D/g, "") : "";
+  if (!businessName || businessName.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || phone.length < 10 || phone.length > 15 ||
+      Object.keys(body).some((key) => !["businessName","registeredEmail","registeredPhone"].includes(key)) ||
+      !/^[0-9a-f-]{36}$/i.test(proof.challenge.installation_id) || !/^[0-9a-f]{64}$/i.test(proof.challenge.fingerprint || "")) return json({ error: "INVALID_RECOVERY_DETAILS" }, 400);
+  const normalized = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
+  const license = await env.DB.prepare("SELECT id,business_name,registered_email,registered_phone FROM licenses WHERE lower(trim(business_name))=lower(trim(?)) AND lower(trim(registered_email))=? AND registered_phone=? AND status IN ('active','expired') LIMIT 1").bind(businessName,email,phone).first();
+  if (!license || license.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalized) return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
+  const oldPatron = await env.DB.prepare("SELECT id FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' LIMIT 1").bind(license.id).first();
+  if (!oldPatron) return json({ error: "REGISTERED_PATRON_NOT_FOUND" }, 409);
+  const existing = await env.DB.prepare("SELECT id,status,created_at FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
+  if (existing) return json({ requestId:existing.id,status:existing.status,createdAt:existing.created_at,amountCents:50000,currency:"MXN",duplicate:true });
+  const id=crypto.randomUUID(), now=Math.floor(Date.now()/1000);
+  try {
+    await env.DB.prepare("INSERT INTO patron_recovery_payment_requests (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,created_at) VALUES (?,?,?,?,?,?,?,'pending_payment',?)").bind(id,license.id,oldPatron.id,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),email,phone,now).run();
+  } catch {
+    const raced=await env.DB.prepare("SELECT id,status,created_at FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized') LIMIT 1").bind(license.id).first();
+    if(raced) return json({requestId:raced.id,status:raced.status,createdAt:raced.created_at,amountCents:50000,currency:"MXN",duplicate:true});
+    return json({error:"RECOVERY_REQUEST_FAILED"},503);
+  }
+  return json({requestId:id,status:"pending_payment",createdAt:now,amountCents:50000,currency:"MXN",businessName:license.business_name,
+    instructions:"Reposición de SENE PATRÓN: realiza un pago de $500 MXN. En el concepto escribe únicamente: Reposición SENE PATRÓN. Envía el comprobante a uno de los números oficiales del botón AYUDA por WhatsApp. Después pulsa YA REALICÉ EL PAGO. El código se entrega únicamente después de verificar el pago."},201);
+}
+
+async function listOperatorPatronRecoveryPayments(request, env) {
+  if (!(await requireOperator(request, env))) return json({error:"UNAUTHORIZED"},401);
+  const rows=await env.DB.prepare("SELECT r.id,r.license_id,l.business_name,r.registered_email,r.registered_phone,r.created_at,r.installation_id,r.fingerprint FROM patron_recovery_payment_requests r JOIN licenses l ON l.id=r.license_id WHERE r.status='pending_payment' ORDER BY r.created_at ASC LIMIT 100").all();
+  return json({items:rows.results||[]});
+}
+
+async function authorizePatronRecoveryPayment(request, env) {
+  if (!(await requireOperator(request, env))) return json({error:"UNAUTHORIZED"},401);
+  let body; try { body=await request.json(); } catch { return json({error:"INVALID_REQUEST"},400); }
+  const requestId=typeof body.requestId==="string"?body.requestId:"";
+  const reference=typeof body.paymentReference==="string"?body.paymentReference.trim().slice(0,120):"";
+  const deliveryPhone=typeof body.deliveryPhone==="string"?body.deliveryPhone.trim():"";
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)||!reference||!deliveryPhone) return json({error:"INVALID_REQUEST"},400);
+  if (!(await requireOfficialHelpRecipient(env,deliveryPhone))) return json({error:"UNOFFICIAL_CODE_RECIPIENT"},403);
+  const row=await env.DB.prepare("SELECT * FROM patron_recovery_payment_requests WHERE id=? LIMIT 1").bind(requestId).first();
+  if (!row||row.status!=="pending_payment") return json({error:"RECOVERY_NOT_PENDING"},409);
+  const oldPatron=await env.DB.prepare("SELECT id FROM devices WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' LIMIT 1").bind(row.old_patron_device_id,row.license_id).first();
+  if (!oldPatron) return json({error:"OLD_PATRON_DEVICE_NOT_FOUND"},409);
+  const code=makeCode(), hash=await sha256(code), now=Math.floor(Date.now()/1000), recoveryId=crypto.randomUUID();
+  const results=await env.DB.batch([
+    env.DB.prepare("INSERT INTO patron_recovery_requests (id,license_id,old_patron_device_id,code_hash,reason,status,created_at,created_by) VALUES (?,?,?,?,?,'pending',?,'operator')").bind(recoveryId,row.license_id,row.old_patron_device_id,hash,"Reposición SENE PATRÓN",now),
+    env.DB.prepare("UPDATE patron_recovery_payment_requests SET status='authorized',code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment'").bind(hash,reference,now,requestId),
+    env.DB.prepare("INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) VALUES (?,?, 'PATRON_REPLACEMENT',50000,'MXN','CONFIRMED',?,?,?,?,'operator')").bind(crypto.randomUUID(),row.license_id,reference,"patron-recovery:"+requestId,now,now),
+    env.DB.prepare("INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) VALUES (?,?,?,'operator','operator','patron_recovery_payment_authorized',?,?)").bind(crypto.randomUUID(),row.license_id,row.old_patron_device_id,JSON.stringify({requestId,recoveryRequestId:recoveryId,paymentReference:reference,amountCents:50000}),now)
+  ]);
+  if (results.some(x=>(x?.meta?.changes??0)!==1)) return json({error:"RECOVERY_AUTHORIZATION_CONFLICT"},409);
+  return json({requestId,recoveryRequestId:recoveryId,recoveryCode:code,amountCents:50000,currency:"MXN",
+    note:"Código de un solo uso. Entregar exclusivamente por los números oficiales de AYUDA tras verificar el pago."},201);
+}
+
 async function createPatronRegistrationRequest(request, env) {
   const proof = await verifySignedRequest(request, env, "PATRON_REGISTRATION_REQUEST");
   if (!proof.ok) return json({ error: proof.error }, proof.status);
@@ -2206,6 +2265,9 @@ async function handle(request, env) {
     return activatePatron(request, env);
   }
   if (request.method === "POST" && url.pathname === "/v1/patron/registrations/request") return createPatronRegistrationRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/recovery/request") return createPatronRecoveryPaymentRequest(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/operator/patron-recovery-payments/pending") return listOperatorPatronRecoveryPayments(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery-payments/authorize") return authorizePatronRecoveryPayment(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/registrations/pending") return listOperatorRegistrations(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/registrations/authorize") return authorizePatronRegistration(request, env);
 
