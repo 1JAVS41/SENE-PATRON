@@ -1730,9 +1730,12 @@ async function saveReport(request, env, purpose, table, keyField, keyName) {
     if (!isPaymentDate) return json({ error: "PAYROLL_NOT_DUE", nextPaymentDay: settings.payment_day ?? null });
   }
   const existing = await env.DB.prepare(
-    "SELECT id, created_at FROM " + table + " WHERE ventas_device_id = ? AND " + keyName + " = ? LIMIT 1"
+    "SELECT id, created_at, report_json FROM " + table + " WHERE ventas_device_id = ? AND " + keyName + " = ? LIMIT 1"
   ).bind(ctx.deviceId, key).first();
-  if (existing) return json({ reportId: existing.id, createdAt: existing.created_at, duplicate: true });
+  if (existing) return json({
+    reportId: existing.id, createdAt: existing.created_at, duplicate: true,
+    report: JSON.parse(existing.report_json)
+  });
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   try {
@@ -1741,9 +1744,12 @@ async function saveReport(request, env, purpose, table, keyField, keyName) {
     ).bind(id, ctx.licenseId, ctx.deviceId, key, reportJson, now).run();
   } catch {
     const raced = await env.DB.prepare(
-      "SELECT id, created_at FROM " + table + " WHERE ventas_device_id = ? AND " + keyName + " = ? LIMIT 1"
+      "SELECT id, created_at, report_json FROM " + table + " WHERE ventas_device_id = ? AND " + keyName + " = ? LIMIT 1"
     ).bind(ctx.deviceId, key).first();
-    if (raced) return json({ reportId: raced.id, createdAt: raced.created_at, duplicate: true });
+    if (raced) return json({
+      reportId: raced.id, createdAt: raced.created_at, duplicate: true,
+      report: JSON.parse(raced.report_json)
+    });
     return json({ error: "SERVICE_UNAVAILABLE" }, 503);
   }
   return json({ reportId: id, createdAt: now }, 201);
