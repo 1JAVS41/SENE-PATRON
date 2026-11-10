@@ -427,11 +427,15 @@ class MainActivity : Activity() {
                     val settingKey = if (team == "team1") "VENTAS_1" else "VENTAS_2"
                     salaryCents = settingsPayload.optJSONObject(settingKey)?.optLong("salaryCents", 0L) ?: 0L
                 }
-                val requests = payrollData.optJSONArray("requests") ?: org.json.JSONArray()
+                // Solo el servidor entrega las decisiones verificadas de D1. El arreglo
+                // "requests" dentro del reporte enviado por VENTAS es informativo y no confiable.
+                val verifiedRequests = if (i == 0) {
+                    payload.optJSONArray("payrollEntries") ?: org.json.JSONArray()
+                } else org.json.JSONArray()
                 var authorizedDeductions = 0L
                 var approvedCount = 0
-                for (requestIndex in 0 until requests.length()) {
-                    val request = requests.optJSONObject(requestIndex) ?: continue
+                for (requestIndex in 0 until verifiedRequests.length()) {
+                    val request = verifiedRequests.optJSONObject(requestIndex) ?: continue
                     if (request.optString("status") != "approved") continue
                     approvedCount++
                     val deduction = request.optJSONObject("decisionDetails")?.optJSONObject("deduction")
@@ -443,15 +447,19 @@ class MainActivity : Activity() {
                 val payrollCard = card()
                 payrollCard.addView(text("Nómina · " + payrollItem.optString("periodKey"), 15, ink, true))
                 payrollCard.addView(text("Trabajador: " + payrollData.optString("worker", "Sin nombre"), 12, muted))
-                payrollCard.addView(text("Solicitudes incluidas: ${requests.length()} · Aprobadas: $approvedCount", 12, muted))
-                if (salaryCents > 0L) {
-                    payrollCard.addView(text("Sueldo base del periodo: " + String.format(java.util.Locale.US, "$%.2f MXN", salaryCents / 100.0), 13, ink, true))
-                    payrollCard.addView(text("Descuentos autorizados: " + String.format(java.util.Locale.US, "$%.2f MXN", authorizedDeductions / 100.0), 13, muted))
-                    payrollCard.addView(text("Pago estimado: " + String.format(java.util.Locale.US, "$%.2f MXN", netCents / 100.0), 16, success, true))
+                if (i == 0) {
+                    payrollCard.addView(text("Solicitudes verificadas: ${verifiedRequests.length()} · Aprobadas: $approvedCount", 12, muted))
+                    if (salaryCents > 0L) {
+                        payrollCard.addView(text("Sueldo base del periodo: " + String.format(java.util.Locale.US, "$%.2f MXN", salaryCents / 100.0), 13, ink, true))
+                        payrollCard.addView(text("Descuentos autorizados: " + String.format(java.util.Locale.US, "$%.2f MXN", authorizedDeductions / 100.0), 13, muted))
+                        payrollCard.addView(text("Pago estimado preliminar: " + String.format(java.util.Locale.US, "$%.2f MXN", netCents / 100.0), 16, success, true))
+                    } else {
+                        payrollCard.addView(text("Configura el sueldo base para calcular el pago estimado.", 12, red, true))
+                    }
+                    payrollCard.addView(text("Detalle basado en decisiones verificadas por SENE PATRÓN: " + verifiedRequests.toString(), 11, muted))
                 } else {
-                    payrollCard.addView(text("Configura el sueldo base para calcular el pago estimado.", 12, red, true))
+                    payrollCard.addView(text("Reporte histórico. El detalle de decisiones verificadas se consulta en el reporte más reciente.", 12, muted))
                 }
-                payrollCard.addView(text("Detalle de solicitudes: " + requests.toString(), 11, muted))
                 root.addView(payrollCard)
                 if (i != payroll.length() - 1) gap(root, 7)
             }
