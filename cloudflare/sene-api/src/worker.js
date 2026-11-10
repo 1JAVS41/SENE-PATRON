@@ -1881,9 +1881,9 @@ function validateOfficialContacts(body) {
   const helpPhone1 = body.helpPhone1.trim();
   const helpPhone2 = body.helpPhone2.trim();
   if (officialEmail.length > 254 ||
-      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(officialEmail) ||
-      !/^\\+[1-9][0-9]{7,14}$/.test(helpPhone1) ||
-      !/^\\+[1-9][0-9]{7,14}$/.test(helpPhone2) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(officialEmail) ||
+      !/^\+[1-9][0-9]{7,14}$/.test(helpPhone1) ||
+      !/^\+[1-9][0-9]{7,14}$/.test(helpPhone2) ||
       helpPhone1 === helpPhone2) return null;
   return { officialEmail, helpPhone1, helpPhone2 };
 }
