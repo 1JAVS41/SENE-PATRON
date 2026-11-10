@@ -1496,8 +1496,9 @@ async function patronRequestsInbox(request, env) {
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const slot = body.slot === "VENTAS_1" || body.slot === "VENTAS_2" ? body.slot : null;
+  if (!slot) return json({ error: "INVALID_TEAM_SLOT" }, 400);
   const status = body.status === "all" ? "all" : "pending";
-  const slotNumber = slot === "VENTAS_1" ? 2 : slot === "VENTAS_2" ? 3 : null;
+  const slotNumber = slot === "VENTAS_1" ? 2 : 3;
   if (slotNumber !== null) {
     const now = Math.floor(Date.now() / 1000);
     await env.DB.prepare(
