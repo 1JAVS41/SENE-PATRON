@@ -890,10 +890,10 @@ async function pairVentas(request, env) {
     "SELECT slot_number, license_id FROM devices WHERE id = ? LIMIT 1"
   ).bind(deviceId).first();
   const license = await env.DB.prepare(
-    "SELECT expires_at FROM licenses WHERE id = ? LIMIT 1"
+    "SELECT business_name, expires_at FROM licenses WHERE id = ? LIMIT 1"
   ).bind(registered.license_id).first();
   return json({ deviceId, slot: registered.slot_number === 2 ? "VENTAS_1" : "VENTAS_2",
-    licenseStatus: "ACTIVE", periodEndsAt: license.expires_at }, 201);
+    businessName: license.business_name, licenseStatus: "ACTIVE", periodEndsAt: license.expires_at }, 201);
 }
 
 function constantTimeTextEqual(a, b) {
