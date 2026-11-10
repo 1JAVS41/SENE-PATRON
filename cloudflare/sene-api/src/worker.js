@@ -1689,11 +1689,20 @@ async function ventasRequestUpdates(request, env) {
   const rows = await env.DB.prepare(
     "SELECT id, request_type, status, decision_json, created_at, decided_at FROM work_requests WHERE ventas_device_id = ? AND decided_at IS NOT NULL AND decided_at > ? ORDER BY decided_at ASC LIMIT 100"
   ).bind(ctx.deviceId, since).all();
-  return json({ items: (rows.results || []).map((r) => ({
-    requestId: r.id, type: r.request_type, status: r.status,
-    decisionDetails: r.decision_json ? JSON.parse(r.decision_json) : {},
-    createdAt: r.created_at, decidedAt: r.decided_at
-  })) });
+  const correctionRows = await env.DB.prepare(
+    "SELECT id, sale_id, reason, status, created_at, decided_at FROM correction_requests WHERE ventas_device_id = ? AND decided_at IS NOT NULL AND decided_at > ? ORDER BY decided_at ASC LIMIT 100"
+  ).bind(ctx.deviceId, since).all();
+  return json({
+    items: (rows.results || []).map((r) => ({
+      requestId: r.id, type: r.request_type, status: r.status,
+      decisionDetails: r.decision_json ? JSON.parse(r.decision_json) : {},
+      createdAt: r.created_at, decidedAt: r.decided_at
+    })),
+    corrections: (correctionRows.results || []).map((r) => ({
+      requestId: r.id, saleId: r.sale_id, reason: r.reason,
+      status: r.status, createdAt: r.created_at, decidedAt: r.decided_at
+    }))
+  });
 }
 
 async function saveReport(request, env, purpose, table, keyField, keyName) {
