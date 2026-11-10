@@ -468,6 +468,7 @@ class MainActivity : Activity() {
                     kinds.add("correction"); records.add(item)
                 }
                 val counts = result.optJSONObject("pendingByTeam") ?: org.json.JSONObject()
+                val unseenCount = counts.optInt(slot, 0)
                 val pendingCount = labels.size
                 val message = if (pendingCount == 0) "No hay solicitudes pendientes para este equipo." else
                     "Solicitudes pendientes en esta bandeja: " + pendingCount + "\nSelecciona una solicitud para revisar y responder."
