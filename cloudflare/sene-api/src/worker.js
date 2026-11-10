@@ -203,6 +203,7 @@ const CHALLENGE_TARGETS = {
   PATRON_REGISTRATION_REQUEST: ["POST", "/v1/patron/registrations/request"],
   PATRON_RECOVERY_REQUEST: ["POST", "/v1/patron/recovery/request"],
   PATRON_RECOVERY: ["POST", "/v1/patron/recover"],
+  PATRON_RESTORE: ["POST", "/v1/patron/restore"],
   VENTAS_PAIR: ["POST", "/v1/ventas/pair"],
   DEVICE_AUTH: ["POST", "/v1/device/session"],
   PATRON_PAIRING_TOKEN: ["POST", "/v1/patron/pairing-tokens"],
@@ -252,7 +253,7 @@ async function validateBootstrapIdentity(body) {
       false,
       ["verify"]
     );
-    return { installationId, fingerprint, publicKey };
+    return { installationId, continuityId, fingerprint, publicKey };
   } catch {
     return null;
   }
@@ -283,7 +284,7 @@ async function issueChallenge(request, env) {
   let fingerprint = "";
   let deviceId = null;
 
-  if (purpose === "PATRON_ACTIVATE" || purpose === "PATRON_REGISTRATION_REQUEST" || purpose === "PATRON_RECOVERY_REQUEST" || purpose === "VENTAS_PAIR" || purpose === "PATRON_RECOVERY") {
+  if (purpose === "PATRON_ACTIVATE" || purpose === "PATRON_REGISTRATION_REQUEST" || purpose === "PATRON_RECOVERY_REQUEST" || purpose === "PATRON_RESTORE" || purpose === "VENTAS_PAIR" || purpose === "PATRON_RECOVERY") {
     const identity = await validateBootstrapIdentity(body);
     if (!identity) return json({ error: "INVALID_DEVICE_IDENTITY" }, 400);
     installationId = identity.installationId;
@@ -547,6 +548,70 @@ async function recoverPatron(request, env) {
     licenseStatus: recovery.license_status !== "active" || !recovery.expires_at || recovery.expires_at <= now ? "EXPIRED" : "ACTIVE",
     periodEndsAt: recovery.expires_at ?? null,
     recovered: true
+  }, 201);
+}
+
+async function restorePatron(request, env) {
+  const proof = await verifySignedRequest(request, env, "PATRON_RESTORE");
+  if (!proof.ok) return json({ error: proof.error }, proof.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\\s+/g, " ") : "";
+  const email = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
+  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\\D/g, "") : "";
+  const identity = await validateBootstrapIdentity(body);
+  if (!identity || !businessName || businessName.length > 100 ||
+      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || phone.length < 10 || phone.length > 15 ||
+      Object.keys(body).some((key) => !["businessName", "registeredEmail", "registeredPhone", "installationId", "continuityId", "publicKeyBase64", "fingerprint"].includes(key)) ||
+      identity.installationId !== proof.challenge.installation_id ||
+      identity.fingerprint !== String(proof.challenge.fingerprint).toLowerCase()) {
+    return json({ error: "INVALID_RESTORE_DETAILS" }, 400);
+  }
+  const normalized = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
+  const license = await env.DB.prepare(
+    "SELECT id,business_name,status,expires_at FROM licenses WHERE lower(trim(business_name))=lower(trim(?)) AND lower(trim(registered_email))=? AND registered_phone=? AND status IN ('active','expired') LIMIT 1"
+  ).bind(businessName, email, phone).first();
+  if (!license || license.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalized) {
+    return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
+  }
+  const oldPatron = await env.DB.prepare(
+    "SELECT id FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? LIMIT 1"
+  ).bind(license.id, identity.continuityId).first();
+  if (!oldPatron) return json({ error: "SAME_PHONE_NOT_VERIFIED" }, 409);
+
+  const newDeviceId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=?"
+      ).bind(oldPatron.id, license.id, identity.continuityId),
+      env.DB.prepare(
+        "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='revoked')"
+      ).bind(now, license.id, oldPatron.id),
+      env.DB.prepare(
+        "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT ?,?,?,?,?,?, ?,1,'active',? FROM devices old WHERE old.id=? AND old.license_id=? AND old.status='revoked' AND old.continuity_id=? AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=1 AND d.status='active')"
+      ).bind(newDeviceId, license.id, "PATRON", identity.installationId, identity.continuityId, identity.publicKey, identity.fingerprint, now, oldPatron.id, license.id, identity.continuityId),
+      env.DB.prepare(
+        "UPDATE renewal_requests SET patron_device_id=? WHERE license_id=? AND patron_device_id=? AND status IN ('pending_payment','authorized') AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
+      ).bind(newDeviceId, license.id, oldPatron.id, newDeviceId),
+      env.DB.prepare(
+        "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?, 'system','patron_restore','patron_device_restored',?,? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
+      ).bind(crypto.randomUUID(), license.id, newDeviceId, JSON.stringify({ oldDeviceId: oldPatron.id, samePhone: true }), now, newDeviceId)
+    ]);
+  } catch {
+    return json({ error: "PATRON_RESTORE_CONFLICT" }, 409);
+  }
+  if ([0, 2, 4].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1)) {
+    return json({ error: "PATRON_RESTORE_CONFLICT" }, 409);
+  }
+  return json({
+    deviceId: newDeviceId,
+    slot: "PATRON",
+    licenseStatus: license.status === "active" && Number(license.expires_at || 0) > now ? "ACTIVE" : "EXPIRED",
+    periodEndsAt: license.expires_at ?? null,
+    restored: true
   }, 201);
 }
 
@@ -2305,6 +2370,7 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/operator/registrations/authorize") return authorizePatronRegistration(request, env);
 
   if (request.method === "POST" && url.pathname === "/v1/patron/recover") return recoverPatron(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/restore") return restorePatron(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/create") return createPatronRecovery(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/patron-recovery/pending") return listPatronRecoveries(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery/reissue-code") return reissuePatronRecoveryCode(request, env);
