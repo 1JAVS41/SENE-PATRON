@@ -931,17 +931,14 @@ class MainActivity : Activity() {
     private fun readStoredPairingQr(): String? {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val packedText = prefs.getString("pending_pairing_qr_v1", null) ?: return null
-        return try {
-            val packed = Base64.decode(packedText, Base64.NO_WRAP)
-            if (packed.size <= 12) return null
-            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            val key = keyStore.getKey("sene_patron_pairing_qr_v1", null) as? SecretKey ?: return null
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, packed.copyOfRange(0, 12)))
-            String(cipher.doFinal(packed.copyOfRange(12, packed.size)), Charsets.UTF_8)
-        } catch (_: Exception) {
-            null
-        }
+        val packed = Base64.decode(packedText, Base64.NO_WRAP)
+        check(packed.size > 12) { "El QR local existe, pero está dañado. No se generará otro para evitar duplicar vinculaciones." }
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val key = keyStore.getKey("sene_patron_pairing_qr_v1", null) as? SecretKey
+            ?: throw IllegalStateException("No está disponible la llave segura del QR guardado. Recupera el dispositivo antes de generar otro.")
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, packed.copyOfRange(0, 12)))
+        String(cipher.doFinal(packed.copyOfRange(12, packed.size)), Charsets.UTF_8)
     }
 
     private fun clearStoredPairingQr() {
