@@ -642,7 +642,9 @@ async function createPairingToken(request, env) {
 
   const token = randomHex(32);
   const tokenHash = await sha256(token);
-  const expiresAt = now + 86400; // QR valid for 24 hours; activation code remains non-expiring.
+  // Pairing QR has no time-based expiry. It remains valid until its uses are consumed or it is revoked.
+  // Keep the legacy NOT NULL column compatible with existing D1 schemas using a year-9999 sentinel.
+  const expiresAt = 253402300799;
   try {
     await env.DB.prepare(
       `INSERT INTO pairing_tokens
