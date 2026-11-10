@@ -1,0 +1,54 @@
+name: Android build SENE PATRÓN
+
+on:
+  push:
+    branches:
+      - sene-cloudflare-backend
+    paths:
+      - "src/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/android-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assemble-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Instalar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar plataforma y herramientas Android
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Instalar Gradle 8.9
+        run: |
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+
+      - name: Compilar APK de depuración
+        run: gradle --no-daemon assembleDebug
+
+      - name: Publicar APK de depuración para pruebas
+        uses: actions/upload-artifact@v4
+        with:
+          name: SENE-PATRON-debug
+          path: build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
