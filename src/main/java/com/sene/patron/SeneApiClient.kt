@@ -87,9 +87,10 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return result
     }
 
-    fun createPairingToken(deviceId: String = storedDeviceId()
+    fun createPairingToken(slot: String, deviceId: String = storedDeviceId()
         ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")): JSONObject {
-        val body = JSONObject().put("uses", 2)
+        require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
+        val body = JSONObject().put("slot", slot).put("operation", "NEW")
         return deviceSigned("PATRON_PAIRING_TOKEN", "/v1/patron/pairing-tokens", body.toString(), deviceId)
     }
 
