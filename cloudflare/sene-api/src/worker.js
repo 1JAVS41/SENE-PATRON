@@ -519,6 +519,11 @@ async function recoverPatron(request, env) {
       env.DB.prepare(
         "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT ?, r.license_id, 'PATRON', ?, ?, ?, ?, 1, 'active', ? FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id JOIN devices old ON old.id = r.old_patron_device_id WHERE r.id = ? AND r.code_hash = ? AND r.status = 'pending' AND old.status = 'revoked' AND l.status IN ('active','expired') AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id = r.license_id AND d.slot_number = 1 AND d.status = 'active')"
       ).bind(newDeviceId, identity.installationId, body.continuityId.toLowerCase(), identity.publicKey, identity.fingerprint, now, recovery.id, codeHash),
+      // Conserva cualquier solicitud de mensualidad abierta y su código pagado,
+      // trasladándolos al nuevo dispositivo PATRÓN dentro de la misma transacción.
+      env.DB.prepare(
+        "UPDATE renewal_requests SET patron_device_id = ? WHERE license_id = ? AND patron_device_id = ? AND status IN ('pending_payment','authorized') AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'active')"
+      ).bind(newDeviceId, recovery.license_id, recovery.old_patron_device_id, newDeviceId),
       env.DB.prepare(
         "UPDATE patron_recovery_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND code_hash = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND status = 'active')"
       ).bind(now, recovery.id, codeHash, newDeviceId),
