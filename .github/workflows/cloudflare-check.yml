@@ -177,6 +177,25 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM patron_recovery_requests WHERE license_id='license-recovery' AND status='pending';")" = "1"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
+      - name: Verificar que el código de reposición se consume una sola vez
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do sqlite3 "$DB_FILE" < "$migration"; done
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,status,max_devices,created_at,expires_at) VALUES ('license-one-use','TIENDA UN SOLO USO','active',3,1,9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) VALUES ('patron-before','license-one-use','PATRON','install-before','continuity-before',x'01','fingerprint-before',1,'active',1);"
+          sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_requests (id,license_id,old_patron_device_id,code_hash,reason,status,created_at,created_by) VALUES ('recovery-once','license-one-use','patron-before','one-use-hash','Reposición SENE PATRÓN','pending',10,'operator');"
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='patron-before' AND status='active';"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT 'patron-after','license-one-use','PATRON','install-after','continuity-after',x'02','fingerprint-after',1,'active',20 WHERE EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id='recovery-once' AND code_hash='one-use-hash' AND status='pending') AND NOT EXISTS (SELECT 1 FROM devices WHERE license_id='license-one-use' AND slot_number=1 AND status='active');"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_requests SET status='consumed',consumed_at=20 WHERE id='recovery-once' AND code_hash='one-use-hash' AND status='pending' AND EXISTS (SELECT 1 FROM devices WHERE id='patron-after' AND status='active');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM patron_recovery_requests WHERE id='recovery-once';")" = "consumed"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-before';")" = "revoked"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE id='patron-after' AND status='active' AND slot_number=1;")" = "1"
+          sqlite3 "$DB_FILE" "UPDATE devices SET status='revoked' WHERE id='patron-after' AND status='active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id='recovery-once' AND code_hash='one-use-hash' AND status='pending');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-after';")" = "active"
+          test "$(sqlite3 "$DB_FILE" "SELECT consumed_at FROM patron_recovery_requests WHERE id='recovery-once';")" = "20"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar límite semanal atómico de 20 operaciones
         run: |
           set -euo pipefail
