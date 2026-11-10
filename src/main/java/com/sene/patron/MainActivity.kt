@@ -133,60 +133,32 @@ class MainActivity : Activity() {
         header(root, "Inicio")
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val linked = !prefs.getString("device_id", null).isNullOrBlank()
-        val status = prefs.getString("license_status", "").orEmpty()
-        val count = prefs.getInt("linked_ventas_count", -1)
-
-        val summary = card()
-        summary.addView(kicker("TU NEGOCIO"))
-        summary.addView(horizontal(
-            "Licencia SENE",
-            when (status) {
-                "active" -> "ACTIVA"
-                "expired" -> "VENCIDA"
-                "suspended" -> "SUSPENDIDA"
-                else -> if (linked) "POR CONFIRMAR" else "SIN VINCULAR"
-            },
-            ink,
-            when (status) {
-                "active" -> success
-                "expired", "suspended" -> red
-                else -> muted
-            }
-        ))
-        gap(summary, 5)
-        summary.addView(text(
-            if (count >= 0) "$count de 2 equipos SENE VENTAS vinculados"
-            else "Puedes administrar hasta dos teléfonos SENE VENTAS.",
-            13, muted
-        ))
-        root.addView(summary)
-        gap(root, 16)
-
-        root.addView(text("TUS EQUIPOS", 12, muted, true))
-        gap(root, 7)
-        root.addView(teamMenuCard("EQUIPO 1", "Avisos, personal, pagos y teléfono", "team1"))
-        gap(root, 10)
-        root.addView(teamMenuCard("EQUIPO 2", "Avisos, personal, pagos y teléfono", "team2"))
-        gap(root, 15)
-
         val registrationRequest = prefs.getString("registration_request_id", null)
-        root.addView(primaryButton(
-            if (linked) "CONEXIÓN Y PAGOS"
-            else if (!registrationRequest.isNullOrBlank()) "INTRODUCIR CÓDIGO DE ACTIVACIÓN"
-            else "VINCULAR SENE PATRÓN"
-        ) {
-            if (linked) showOwnerOptions()
-            else if (!registrationRequest.isNullOrBlank()) showActivationDialog()
-            else showRegistrationDialog()
+
+        root.addView(primaryButton("VINCULAR SENE PATRÓN") {
+            when {
+                linked -> showOwnerOptions()
+                !registrationRequest.isNullOrBlank() -> showActivationDialog()
+                else -> showRegistrationDialog()
+            }
         })
-        gap(root, 8)
+        gap(root, 12)
+        root.addView(primaryButton("EQUIPO-1") {
+            currentPage = "team1"
+            render()
+        })
+        gap(root, 12)
+        root.addView(primaryButton("EQUIPO-2") {
+            currentPage = "team2"
+            render()
+        })
+        gap(root, 12)
+        root.addView(primaryButton("PAGAR MENSUALIDAD") {
+            if (linked) showRenewalDialog()
+            else Toast.makeText(this, "Primero debes vincular SENE PATRÓN", Toast.LENGTH_LONG).show()
+        })
+        gap(root, 12)
         root.addView(primaryButton("AYUDA") { showContactDialog() })
-        gap(root, 15)
-        root.addView(text("Ventas, inventario y caja permanecen en cada teléfono SENE VENTAS.", 12, muted)
-            .apply { gravity = Gravity.CENTER })
-        gap(root, 8)
-        root.addView(text("SENE PATRÓN · Versión 0.5.0", 11, muted)
-            .apply { gravity = Gravity.CENTER })
     }
 
     private fun showOwnerOptions() {
