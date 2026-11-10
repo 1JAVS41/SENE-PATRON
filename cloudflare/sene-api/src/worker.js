@@ -1690,7 +1690,7 @@ async function ventasRequestUpdates(request, env) {
     "SELECT id, request_type, status, decision_json, created_at, decided_at FROM work_requests WHERE ventas_device_id = ? AND decided_at IS NOT NULL AND decided_at > ? ORDER BY decided_at ASC LIMIT 100"
   ).bind(ctx.deviceId, since).all();
   const correctionRows = await env.DB.prepare(
-    "SELECT id, sale_id, reason, status, created_at, decided_at FROM correction_requests WHERE ventas_device_id = ? AND decided_at IS NOT NULL AND decided_at > ? ORDER BY decided_at ASC LIMIT 100"
+    "SELECT r.id, r.sale_id, r.reason, r.status, r.created_at, r.decided_at, g.id AS grant_id FROM correction_requests r LEFT JOIN correction_grants g ON g.request_id = r.id WHERE r.ventas_device_id = ? AND r.decided_at IS NOT NULL AND r.decided_at > ? ORDER BY r.decided_at ASC LIMIT 100"
   ).bind(ctx.deviceId, since).all();
   return json({
     items: (rows.results || []).map((r) => ({
@@ -1699,7 +1699,7 @@ async function ventasRequestUpdates(request, env) {
       createdAt: r.created_at, decidedAt: r.decided_at
     })),
     corrections: (correctionRows.results || []).map((r) => ({
-      requestId: r.id, saleId: r.sale_id, reason: r.reason,
+      requestId: r.id, saleId: r.sale_id, reason: r.reason, grantId: r.grant_id || null,
       status: r.status, createdAt: r.created_at, decidedAt: r.decided_at
     }))
   });
