@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - sene-cloudflare-backend
+      - 'fix/**'
     paths:
       - "src/**"
       - "build.gradle.kts"
@@ -30,6 +31,8 @@ jobs:
 
       - name: Instalar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Generar icono con el logotipo original SENE
         run: |
@@ -44,10 +47,8 @@ jobs:
           icon.save('src/main/res/drawable-nodpi/ic_launcher_patron.png')
           PY
 
-      - name: Instalar plataforma y herramientas Android
-        run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Instalar licencias Android
+        run: yes | sdkmanager --licenses >/dev/null
 
       - name: Instalar Gradle 8.9
         run: |
@@ -58,10 +59,15 @@ jobs:
       - name: Compilar APK de depuración
         run: gradle --no-daemon assembleDebug
 
-      - name: Publicar APK de depuración para pruebas
+      - name: Preparar APK con nombre oficial
+        run: |
+          mkdir -p dist
+          cp build/outputs/apk/debug/*.apk "dist/SENE PATRON-online.apk"
+
+      - name: Publicar APK oficial para pruebas
         uses: actions/upload-artifact@v4
         with:
-          name: SENE-PATRON-debug
-          path: build/outputs/apk/debug/*.apk
+          name: SENE PATRON-online
+          path: "dist/SENE PATRON-online.apk"
           if-no-files-found: error
           retention-days: 14
