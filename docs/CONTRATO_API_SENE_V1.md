@@ -136,6 +136,8 @@ El campo `payroll` solo se devuelve para VENTAS y permite que la APK habilite el
 
 **Estado real:** los cuatro endpoints están implementados en el Worker de la rama. VENTAS ya asigna un `saleId` local estable a cada ticket nuevo, permite elegir una venta y enviar el motivo con clave de idempotencia; las solicitudes quedan en cola local si no hay conexión. `POST /v1/ventas/requests/updates` devuelve ahora también las decisiones de corrección para que VENTAS actualice su historial. PATRÓN dispone de bandeja y decisión por equipo. Aún falta E2E en Cloudflare y la operación local que ejecutará el trabajador después de recibir autorización; por seguridad la APK todavía no consume el grant ni modifica ticket, caja o inventario. El Worker sigue sin desplegarse.
 
+La consulta firmada `POST /v1/ventas/requests/updates` también devuelve las decisiones de corrección de ese dispositivo. Para cada corrección decidida incluye `requestId`, `saleId`, `reason`, `status`, `createdAt`, `decidedAt` y `grantId` (nulo si fue rechazada). El `grantId` solo se entrega al dispositivo VENTAS propietario de la solicitud, para permitir la futura operación autorizada; no modifica por sí mismo los datos locales.
+
 ### `POST /v1/ventas/corrections`
 Solo VENTAS autenticado. Cuerpo:
 ```json
