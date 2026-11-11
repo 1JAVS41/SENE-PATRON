@@ -275,6 +275,7 @@ class MainActivity : Activity() {
         root.addView(registrationCard)
         val savedExpiry = prefs.getLong("registration_expires_at", 0L)
         val savedOffset = prefs.getLong("registration_server_offset", 0L)
+        lateinit var registrationButton: TextView
         val countdownHandler = android.os.Handler(mainLooper)
         val countdownTick = object : Runnable {
             override fun run() {
@@ -286,12 +287,12 @@ class MainActivity : Activity() {
                     registrationCountdown.text = "REALIZA EL PAGO ANTES DE: %02d:%02d:%02d\nConserva el nombre de tu empresa.".format(hours, minutes, seconds)
                 } else if (savedExpiry > 0L) {
                     registrationCountdown.text = "La reserva de 48 horas venció. Solicita un nuevo registro; el servidor volverá a validar si el nombre está disponible."
+                    registrationButton.isEnabled = true
                 }
                 if (savedExpiry > 0L && remaining > 0L) countdownHandler.postDelayed(this, 1000L)
             }
         }
         countdownHandler.post(countdownTick)
-        lateinit var registrationButton: TextView
         registrationButton = primaryButton("SOLICITAR ACTIVACIÓN · $580 MXN") {
             val server = base.text.toString().trim().trimEnd('/')
             val name = businessName.text.toString().trim()
