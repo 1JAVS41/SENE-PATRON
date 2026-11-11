@@ -755,6 +755,24 @@ jobs:
           db.execute("""UPDATE replacement_payment_requests SET status='consumed',consumed_at=7
               WHERE id='payment-r' AND status='authorized' AND code_hash='one-time-hash'""")
           assert db.execute("SELECT changes()").fetchone()[0] == 0
+          # Rejection cancels a pending authorization hold but leaves the old phone active.
+          db.execute("""INSERT INTO devices
+              (id,license_id,device_type,installation_id,continuity_id,public_key,
+               fingerprint,slot_number,status,created_at)
+              VALUES ('ventas-old2','lic-replacement','VENTAS','ventas-i2','ventas-c2',x'04',
+                      'fp-old2',3,'active',7)""")
+          db.execute("""INSERT INTO replacement_requests
+              (id,license_id,old_device_id,slot_number,reason,status,created_at)
+              VALUES ('request-reject','lic-replacement','ventas-old2',3,'daño','pending',8)""")
+          db.execute("""INSERT INTO replacement_payment_requests
+              (id,replacement_request_id,license_id,old_device_id,slot_number,status,created_at)
+              VALUES ('payment-reject','request-reject','lic-replacement','ventas-old2',3,'pending_payment',8)""")
+          db.execute("""UPDATE replacement_requests SET status='rejected',decided_at=9,decided_by='operator'
+              WHERE id='request-reject' AND status='pending'""")
+          db.execute("""UPDATE replacement_payment_requests SET status='cancelled'
+              WHERE replacement_request_id='request-reject' AND status IN ('pending_payment','authorized')""")
+          assert db.execute("SELECT status FROM devices WHERE id='ventas-old2'").fetchone()[0] == 'active'
+          assert db.execute("SELECT status FROM replacement_payment_requests WHERE id='payment-reject'").fetchone()[0] == 'cancelled'
           assert db.execute("PRAGMA foreign_key_check").fetchall() == []
           assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
           print("Paid replacement lifecycle: OK")
