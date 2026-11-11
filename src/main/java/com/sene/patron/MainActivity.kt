@@ -938,7 +938,6 @@ class MainActivity : Activity() {
                                 "SENE PATRÓN vinculado. Estado: " + result.optString("licenseStatus"),
                                 Toast.LENGTH_LONG
                             ).show()
-                            lastNotificationRefreshAt = 0L
                             render()
                         }
                     } catch (error: Exception) {
@@ -1062,7 +1061,6 @@ class MainActivity : Activity() {
                         val result = SeneApiClient(this, baseUrl).redeemRenewal(requestId, code)
                         runOnUiThread {
                             Toast.makeText(this, "Licencia renovada por 30 días", Toast.LENGTH_LONG).show()
-                            lastNotificationRefreshAt = 0L
                             render()
                         }
                     } catch (error: Exception) {
@@ -1171,7 +1169,6 @@ class MainActivity : Activity() {
                     try {
                         val result = SeneApiClient(this, baseUrl).restorePatron(name, mail, number)
                         runOnUiThread {
-                            lastNotificationRefreshAt = 0L
                             Toast.makeText(this,
                                 "Vinculación restaurada en este teléfono. Estado: " + result.optString("licenseStatus"),
                                 Toast.LENGTH_LONG).show()
