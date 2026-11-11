@@ -274,13 +274,17 @@ class MainActivity : Activity() {
         registrationCard.addView(registrationCountdown)
         root.addView(registrationCard)
         val savedExpiry = prefs.getLong("registration_expires_at", 0L)
+        val savedRegistrationStatus = prefs.getString("registration_status", "none") ?: "none"
         val savedOffset = prefs.getLong("registration_server_offset", 0L)
         lateinit var registrationButton: TextView
         val countdownHandler = android.os.Handler(mainLooper)
         val countdownTick = object : Runnable {
             override fun run() {
                 val remaining = savedExpiry - (System.currentTimeMillis() / 1000L + savedOffset)
-                if (savedExpiry > 0L && remaining > 0L) {
+                if (savedRegistrationStatus == "authorized") {
+                    registrationCountdown.text = "PAGO CONFIRMADO. Introduce el código que te entregó SENE para activar tu empresa."
+                    registrationButton.isEnabled = false
+                } else if (savedExpiry > 0L && remaining > 0L) {
                     val hours = remaining / 3600L
                     val minutes = (remaining % 3600L) / 60L
                     val seconds = remaining % 60L
@@ -310,6 +314,7 @@ class MainActivity : Activity() {
                         val serverTime = result.optLong("serverTime", System.currentTimeMillis() / 1000L)
                         val expiresAt = result.optLong("expiresAt", result.optLong("createdAt") + 48L * 3600L)
                         prefs.edit().putString("registration_request_id", result.getString("requestId"))
+                            .putString("registration_status", result.optString("status", "pending_payment"))
                             .putLong("registration_expires_at", expiresAt)
                             .putLong("registration_server_offset", serverTime - System.currentTimeMillis() / 1000L)
                             .apply()
@@ -329,8 +334,8 @@ class MainActivity : Activity() {
                 }.start()
             }
         }
-        registrationButton.isEnabled = savedExpiry == 0L ||
-            (savedExpiry - (System.currentTimeMillis() / 1000L + savedOffset)) <= 0L
+        registrationButton.isEnabled = savedRegistrationStatus != "authorized" &&
+            (savedExpiry == 0L || (savedExpiry - (System.currentTimeMillis() / 1000L + savedOffset)) <= 0L)
         registrationCard.addView(registrationButton)
         countdownHandler.post(countdownTick)
         gap(root, 12)
