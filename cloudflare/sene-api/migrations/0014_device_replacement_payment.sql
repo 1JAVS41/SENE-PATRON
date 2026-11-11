@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS replacement_payment_requests (
   slot_number INTEGER NOT NULL CHECK (slot_number IN (2, 3)),
   status TEXT NOT NULL CHECK (status IN ('pending_payment', 'authorized', 'consumed', 'cancelled')),
   code_hash TEXT UNIQUE,
+  encrypted_code TEXT,
+  delivery_phone TEXT,
   payment_reference TEXT,
   created_at INTEGER NOT NULL,
   authorized_at INTEGER,
