@@ -1090,12 +1090,12 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("REPOSICIÓN · EQUIPO $number")
             .setMessage(
-                "REPOSICIÓN SENE · $500 MXN\\n\\n" +
-                    "1. Crea primero el folio de reposición.\\n" +
-                    "2. Realiza el pago de $500 MXN.\\n" +
-                    "3. En el concepto escribe exactamente:\\n$business\\n" +
-                    "4. Envía el comprobante a los números oficiales de AYUDA por WhatsApp.\\n" +
-                    "5. Espera la validación y el código de un solo uso.\\n\\n" +
+                "REPOSICIÓN SENE · $500 MXN\n\n" +
+                    "1. Crea primero el folio de reposición.\n" +
+                    "2. Realiza el pago de $500 MXN.\n" +
+                    "3. En el concepto escribe exactamente:\n$business\n" +
+                    "4. Envía el comprobante a los números oficiales de AYUDA por WhatsApp.\n" +
+                    "5. Espera la validación y el código de un solo uso.\n\n" +
                     "El teléfono anterior seguirá activo hasta que el código sea canjeado."
             )
             .setView(reasonField)
