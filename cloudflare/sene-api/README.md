@@ -60,11 +60,11 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 1. `node --check` para detectar errores de sintaxis.
 2. Migraciones 0001–0015 sobre SQLite temporal e `integrity_check`.
-3. Prueba del límite semanal de 20 operaciones y rechazo de la número 21.
-4. Pruebas de renovación, pago inicial de $580 y activación por 30 días.
-5. Pruebas de historial y reemplazo de dispositivos, unicidad de solicitudes pendientes, revocación e invalidación de QR.
-6. Prueba del permiso de corrección de un solo uso.
-7. Prueba de que el código de activación no se consume si falta confirmar la primera renta.
+3. Prueba de autorización de reposición pagada de PATRÓN, almacenamiento cifrado y rechazo de reintento que intentaría sustituir el código.\n4. Prueba del límite semanal de 20 operaciones y rechazo de la número 21.
+5. Pruebas de renovación, pago inicial de $580 y activación por 30 días.
+6. Pruebas de historial y reemplazo de dispositivos, unicidad de solicitudes pendientes, revocación e invalidación de QR.
+7. Prueba del permiso de corrección de un solo uso.
+8. Prueba de que el código de activación no se consume si falta confirmar la primera renta.
 
 Último resultado comprobado al actualizar este documento: CI exitoso para el commit `44bf26d9b875d1749c2f91a6ea5c15543f9cfefa` (incluye migraciones 0001–0015 y panel de reposiciones). Estas pruebas SQLite no sustituyen pruebas de extremo a extremo contra Workers/D1 reales.
 
