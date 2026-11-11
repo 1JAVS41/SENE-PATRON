@@ -1697,7 +1697,21 @@ async function authorizeOperatorReplacement(request, env) {
     "SELECT p.*,r.status AS request_status FROM replacement_payment_requests p JOIN replacement_requests r ON r.id=p.replacement_request_id WHERE p.replacement_request_id=? LIMIT 1"
   ).bind(requestId).first();
   if (!row) return json({ error: "REPLACEMENT_NOT_FOUND" }, 404);
-  if (row.status === "authorized") return json({ error: "REPLACEMENT_ALREADY_AUTHORIZED" }, 409);
+  if (row.status === "authorized") {
+    if (row.payment_reference !== paymentReference ||
+        normalizeOfficialPhone(row.delivery_phone || "") !== normalizeOfficialPhone(deliveryPhone) ||
+        !row.encrypted_code) {
+      return json({ error: "REPLACEMENT_ALREADY_AUTHORIZED" }, 409);
+    }
+    try {
+      const existingCode = await decryptPairingToken(row.encrypted_code, env);
+      return json({ requestId, authorizationCode: existingCode, amountCents: 50000,
+        currency: "MXN", reused: true,
+        note: "Se reutilizó el mismo código de un solo uso. Entregar únicamente al número oficial AYUDA." });
+    } catch {
+      return json({ error: "REPLACEMENT_CODE_RECOVERY_FAILED" }, 503);
+    }
+  }
   if (row.status !== "pending_payment" || row.request_status !== "pending") return json({ error: "REPLACEMENT_NOT_PENDING" }, 409);
   const oldDevice = await env.DB.prepare(
     "SELECT id FROM devices WHERE id=? AND license_id=? AND device_type='VENTAS' AND slot_number=? AND status='active' LIMIT 1"
@@ -1706,11 +1720,15 @@ async function authorizeOperatorReplacement(request, env) {
 
   const code = makeCode();
   const codeHash = await sha256(code);
+  let encryptedCode;
+  try { encryptedCode = await encryptPairingToken(code, env); }
+  catch { return json({ error: "REPLACEMENT_CODE_ENCRYPTION_NOT_CONFIGURED" }, 503); }
+  const normalizedDeliveryPhone = normalizeOfficialPhone(deliveryPhone);
   const now = Math.floor(Date.now()/1000);
   const results = await env.DB.batch([
     env.DB.prepare(
-      "UPDATE replacement_payment_requests SET status='authorized',code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment' AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
-    ).bind(codeHash,paymentReference,now,row.id,row.old_device_id),
+      "UPDATE replacement_payment_requests SET status='authorized',code_hash=?,encrypted_code=?,delivery_phone=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment' AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
+    ).bind(codeHash,encryptedCode,normalizedDeliveryPhone,paymentReference,now,row.id,row.old_device_id),
     env.DB.prepare(
       "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?,'operator','operator','device_replacement_payment_authorized',?,? WHERE EXISTS (SELECT 1 FROM replacement_payment_requests WHERE id=? AND status='authorized' AND code_hash=?)"
     ).bind(crypto.randomUUID(),row.license_id,row.old_device_id,JSON.stringify({requestId,amountCents:50000,paymentReference}),now,row.id,codeHash)
