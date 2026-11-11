@@ -961,12 +961,12 @@ class MainActivity : Activity() {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val nowElapsed = SystemClock.elapsedRealtime()
         val lastRefreshElapsed = prefs.getLong("notifications_refresh_elapsed", 0L)
-        // El tiempo monotónico persiste entre cierres de la app y evita consultas
-        // repetidas al reabrirla. Tras reiniciar el teléfono el contador vuelve a cero,
-        // por lo que se permite una nueva sincronización. El botón manual omite el límite.
+        // El tiempo monotónico persiste entre cierres de la app y aplica un intervalo
+        // de 48 horas. Tras reiniciar el teléfono el contador vuelve a cero, por lo que
+        // se permite una nueva sincronización. El botón manual omite el límite.
         if (refreshingNotifications ||
             (!force && lastRefreshElapsed > 0L && nowElapsed >= lastRefreshElapsed &&
-                nowElapsed - lastRefreshElapsed < 86_400_000L)) return
+                nowElapsed - lastRefreshElapsed < 172_800_000L)) return
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         if (prefs.getString("device_id", null).isNullOrBlank()) return
         refreshingNotifications = true
