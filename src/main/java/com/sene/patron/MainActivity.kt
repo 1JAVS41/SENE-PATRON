@@ -1007,11 +1007,11 @@ class MainActivity : Activity() {
             .setTitle("PAGAR MENSUALIDAD")
             .setMessage(
                 "RENOVACIÓN SENE · $80 MXN\n\n" +
-                    "1. Realiza el pago de $80 MXN.\n" +
-                    "2. En el concepto escribe exactamente:\n$business\n" +
-                    "3. Envía la captura del comprobante a los números oficiales de Ayuda por WhatsApp.\n" +
-                    "4. Después pulsa YA REALICÉ EL PAGO para enviar la solicitud y espera la confirmación del pago y el código de autorización.\n\n" +
-                    "La licencia se renueva 30 días cuando introduces el código correcto."
+                    "1. Pulsa CREAR SOLICITUD para obtener tu folio.\\n" +
+                    "2. Realiza el pago de $80 MXN.\\n" +
+                    "3. En el concepto escribe exactamente:\\n$business\\n" +
+                    "4. Envía la captura del comprobante a los números oficiales de Ayuda por WhatsApp.\\n\\n" +
+                    "Espera la validación del pago y el código de autorización. La licencia se renueva 30 días cuando introduces el código correcto."
             )
             .setPositiveButton("CREAR SOLICITUD") { _, _ ->
                 Thread {
@@ -1278,10 +1278,10 @@ class MainActivity : Activity() {
         val company = field("Nombre exacto de la empresa registrada", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
         val email = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
         val phone = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
-        val instructions = text("REPOSICIÓN DE SENE PATRÓN · $500 MXN\n\n1. Realiza el pago de $500 MXN con el concepto exacto: Reposición SENE PATRÓN.\n2. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\n3. Después pulsa YA REALICÉ EL PAGO.\n\nEl servidor comprobará que empresa, correo y teléfono coincidan con los datos registrados. Tras verificar el pago, el código de reposición se entregará únicamente por los números oficiales de AYUDA.", 14, ink, false)
+        val instructions = text("REPOSICIÓN DE SENE PATRÓN · $500 MXN\\n\\n1. Pulsa CREAR SOLICITUD DE PAGO para obtener tu folio.\\n2. Realiza el pago de $500 MXN con el concepto exacto: Reposición SENE PATRÓN.\\n3. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\\n\\nEl servidor comprobará que empresa, correo y teléfono coincidan con los datos registrados. La solicitud queda pendiente hasta validar el pago. Después, el código de un solo uso se entregará únicamente por los números oficiales de AYUDA.", 14, ink, false)
         form.addView(instructions)
         AlertDialog.Builder(this).setTitle("PERDÍ MI EQUIPO SENE PATRÓN").setView(form)
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+            .setPositiveButton("CREAR SOLICITUD DE PAGO") { _, _ ->
                 val name = company.text?.toString()?.trim().orEmpty()
                 val mail = email.text?.toString()?.trim().orEmpty()
                 val number = phone.text?.toString()?.trim().orEmpty()
