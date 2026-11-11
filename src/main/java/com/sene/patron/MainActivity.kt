@@ -1013,7 +1013,7 @@ class MainActivity : Activity() {
                     "4. Después pulsa YA REALICÉ EL PAGO para enviar la solicitud y espera la confirmación del pago y el código de autorización.\n\n" +
                     "La licencia se renueva 30 días cuando introduces el código correcto."
             )
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+            .setPositiveButton("CREAR SOLICITUD") { _, _ ->
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestRenewal()
@@ -1088,7 +1088,7 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("REPOSICIÓN · EQUIPO $number")
-            .setMessage("Costo fijo: $500 MXN. Realiza el pago y envía el comprobante a AYUDA oficial. El teléfono anterior seguirá activo hasta que el código de un solo uso sea canjeado.")
+            .setMessage("Costo fijo: $500 MXN. Primero crea el folio; después realiza el pago y envía el comprobante a AYUDA oficial. El teléfono anterior seguirá activo hasta canjear el código.")
             .setView(reasonField)
             .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
                 val reason = reasonField.text?.toString()?.trim().orEmpty()
@@ -1109,7 +1109,7 @@ class MainActivity : Activity() {
                         prefs.edit().putString("ventas_replacement_request_$number", requestId).commit()
                         runOnUiThread {
                             AlertDialog.Builder(this).setTitle("SOLICITUD REGISTRADA")
-                                .setMessage("Folio: " + requestId + "\n\nImporte: $500 MXN\nEstado: " + result.optString("status") + "\n\nConserva el mismo folio. No vuelvas a pagar si ya existe una solicitud.")
+                                .setMessage("Folio: " + requestId + "\n\nImporte: $500 MXN\nSiguiente paso: realiza el pago y envía el comprobante a AYUDA oficial.\nEstado: " + result.optString("status") + "\n\nConserva el mismo folio. No vuelvas a pagar si ya existe una solicitud.")
                                 .setPositiveButton("CERRAR", null).show()
                             render()
                         }
