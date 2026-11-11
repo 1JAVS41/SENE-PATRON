@@ -721,8 +721,11 @@ jobs:
           assert db.execute("SELECT status FROM devices WHERE id='ventas-old'").fetchone()[0] == 'active'
           assert db.execute("SELECT status FROM replacement_payment_requests WHERE id='payment-r'").fetchone()[0] == 'pending_payment'
           db.execute("""UPDATE replacement_payment_requests
-              SET status='authorized',code_hash='one-time-hash',payment_reference='transfer-500',authorized_at=4
+              SET status='authorized',code_hash='one-time-hash',encrypted_code='encrypted-one-time-code',
+                  delivery_phone='5211111111111',payment_reference='transfer-500',authorized_at=4
               WHERE id='payment-r' AND status='pending_payment'""")
+          saved_code = db.execute("SELECT encrypted_code,delivery_phone FROM replacement_payment_requests WHERE id='payment-r'").fetchone()
+          assert saved_code == ('encrypted-one-time-code','5211111111111')
           assert db.execute("SELECT status FROM devices WHERE id='ventas-old'").fetchone()[0] == 'active'
           db.execute("""UPDATE replacement_payment_requests SET status='consumed',consumed_at=5
               WHERE id='payment-r' AND status='authorized' AND code_hash='one-time-hash'
