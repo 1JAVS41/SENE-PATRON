@@ -7,6 +7,7 @@ on:
       - fix/patron-gradle-toolchain
     paths:
       - "src/**"
+      - "app/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
@@ -90,11 +91,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publicar APK de depuración para pruebas
+      - name: Preparar APK con nombre oficial
+        if: success()
+        run: |
+          mkdir -p dist
+          APK="$(find build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          cp "$APK" "dist/SENE PATRON-online.apk"
+
+      - name: Publicar APK para pruebas
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SENE-PATRON-debug
-          path: build/outputs/apk/debug/*.apk
+          name: SENE PATRON-online
+          path: "dist/SENE PATRON-online.apk"
           if-no-files-found: error
           retention-days: 14
