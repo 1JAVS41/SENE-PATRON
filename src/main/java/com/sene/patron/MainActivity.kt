@@ -1314,7 +1314,7 @@ class MainActivity : Activity() {
                 root.addView(info("VÍNCULO · EQUIPO $teamNumber",
                     "Genera un QR temporal para vincular el teléfono SENE VENTAS que ocupará este espacio. Cada QR permite dos vinculaciones y vence en 24 horas."))
                 gap(root, 9)
-                root.addView(primaryButton("GENERAR QR DE VINCULACIÓN") { showPairingQr() })
+                root.addView(primaryButton("GENERAR QR DE VINCULACIÓN") { showPairingQr(teamHome) })
             }
         }
         gap(root, 11)
