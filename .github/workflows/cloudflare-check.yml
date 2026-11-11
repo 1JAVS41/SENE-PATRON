@@ -250,6 +250,25 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT registered_email FROM licenses WHERE id='legacy-license';")" = "titular@example.invalid"
           test "$(sqlite3 "$DB_FILE" "PRAGMA integrity_check;")" = "ok"
 
+      - name: Probar código de reposición PATRÓN cifrado y recuperable
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do
+            sqlite3 "$DB_FILE" < "$migration"
+          done
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM pragma_table_info('patron_recovery_payment_requests') WHERE name IN ('encrypted_code','delivery_phone');")" = "2"
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,status,max_devices,created_at,expires_at) VALUES ('license-patron-paid','TIENDA PATRON PAGO','active',3,1,9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) VALUES ('patron-paid-old','license-patron-paid','PATRON','install-paid-old','continuity-paid-old',x'01','fingerprint-paid-old',1,'active',1);"
+          sqlite3 "$DB_FILE" "INSERT INTO patron_recovery_payment_requests (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,created_at) VALUES ('patron-paid-request','license-patron-paid','patron-paid-old','install-paid-new','fingerprint-paid-new','owner@example.invalid','5211111111111','pending_payment',10);"
+          sqlite3 "$DB_FILE" "UPDATE patron_recovery_payment_requests SET status='authorized',code_hash='paid-code-hash',encrypted_code='aes-gcm-ciphertext',delivery_phone='5212222222222',payment_reference='PAY-500',authorized_at=20 WHERE id='patron-paid-request' AND status='pending_payment' AND EXISTS (SELECT 1 FROM devices WHERE id='patron-paid-old' AND status='active');"
+          test "$(sqlite3 "$DB_FILE" "SELECT status || ':' || code_hash || ':' || encrypted_code || ':' || delivery_phone FROM patron_recovery_payment_requests WHERE id='patron-paid-request';")" = "authorized:paid-code-hash:aes-gcm-ciphertext:5212222222222"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM devices WHERE id='patron-paid-old';")" = "active"
+          retry="$(sqlite3 "$DB_FILE" "UPDATE patron_recovery_payment_requests SET code_hash='different-code',encrypted_code='different-ciphertext' WHERE id='patron-paid-request' AND status='pending_payment'; SELECT changes();")"
+          test "$retry" = "0"
+          test "$(sqlite3 "$DB_FILE" "SELECT code_hash || ':' || encrypted_code FROM patron_recovery_payment_requests WHERE id='patron-paid-request';")" = "paid-code-hash:aes-gcm-ciphertext"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar restricciones de recuperación de PATRÓN
         run: |
           set -euo pipefail
