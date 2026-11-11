@@ -50,7 +50,7 @@ El panel pide `OPERATOR_TOKEN` en cada sesión y lo mantiene únicamente en memo
 
 ## Estado de despliegue
 
-**El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0013 todavía no se aplican allí.
+**El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0014 todavía no se aplican allí.
 
 No desplegar ni aplicar migraciones remotas hasta completar revisión y pruebas E2E en un entorno de pruebas, y recibir autorización explícita.
 
@@ -73,9 +73,9 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 - Base D1: `sene-licencias`.
 - ID: `22f73e97-e43e-44f1-870b-58fad88e7028`.
 - Binding del Worker: `DB`.
-- Migraciones versionadas: 0001 a 0013 (con numeración repetida en algunos prefijos; se aplican por nombre de archivo).
+- Migraciones versionadas: 0001 a 0014 (con numeración repetida en algunos prefijos; se aplican por nombre de archivo).
 - La migración 0001 ya se aplicó manualmente a la D1 real. **No volver a ejecutarla.**
-- Las migraciones 0002–0013 solo se han probado en CI sobre SQLite temporal.
+- Las migraciones 0002–0014 solo se han probado en CI sobre SQLite temporal.
 
 ## Pendientes antes de producción
 
