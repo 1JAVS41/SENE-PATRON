@@ -1670,6 +1670,12 @@ async function listOperatorReplacements(request, env) {
 
 async function decideOperatorReplacement(request, env, decision) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  // Approval without verified $500 payment and one-time code is forbidden.
+  // Keep the legacy route retired so it cannot revoke the old device early.
+  if (decision === "approve") return json({
+    error: "PAYMENT_WORKFLOW_REQUIRED",
+    message: "La reposición requiere validar el pago de $500 MXN y emitir un código de un solo uso."
+  }, 410);
   let body;
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
