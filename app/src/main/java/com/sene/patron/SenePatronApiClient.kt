@@ -37,6 +37,16 @@ class SenePatronApiClient(context: Context, baseUrl: String) {
         return result
     }
 
+    fun requestRegistration(businessName: String, registeredEmail: String, registeredPhone: String): JSONObject {
+        val identity = PatronDeviceIdentity.get(app)
+        val body = JSONObject()
+            .put("businessName", businessName.trim())
+            .put("registeredEmail", registeredEmail.trim())
+            .put("registeredPhone", registeredPhone.filter { it.isDigit() })
+        return bootstrapSigned("PATRON_REGISTRATION_REQUEST",
+            "/v1/patron/registrations/request", body.toString(), identity)
+    }
+
     fun session(deviceId: String = storedDeviceId()
         ?: throw IllegalStateException("SENE PATRÓN todavía no está activado")): JSONObject =
         deviceSigned("DEVICE_AUTH", "/v1/device/session", "{}", deviceId)
