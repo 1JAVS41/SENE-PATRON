@@ -693,3 +693,66 @@ jobs:
           test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM work_requests w JOIN devices d ON d.id=w.ventas_device_id WHERE d.license_id='license-ventas-restore' AND d.slot_number=2;")" = "1"
           test -z "$(sqlite3 "$DB_FILE" 'PRAGMA foreign_key_check;')"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
+      - name: Probar invariantes de reposición pagada de $500 MXN
+        run: |
+          python3 - <<'PY'
+          import pathlib, sqlite3, tempfile
+          db = sqlite3.connect(":memory:")
+          db.execute("PRAGMA foreign_keys=ON")
+          for migration in sorted(pathlib.Path("cloudflare/sene-api/migrations").glob("*.sql")):
+              db.executescript(migration.read_text())
+          db.execute("""INSERT INTO licenses
+              (id,business_name,status,max_devices,created_at,expires_at)
+              VALUES ('lic-replacement','TIENDA PRUEBA','active',3,1,9999999999)""")
+          db.executemany("""INSERT INTO devices
+              (id,license_id,device_type,installation_id,continuity_id,public_key,
+               fingerprint,slot_number,status,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?)""", [
+              ('patron-r','lic-replacement','PATRON','patron-i','patron-c',b'1','fp-p',1,'active',1),
+              ('ventas-old','lic-replacement','VENTAS','ventas-i','ventas-c',b'2','fp-old',2,'active',2)
+          ])
+          db.execute("""INSERT INTO replacement_requests
+              (id,license_id,old_device_id,slot_number,reason,status,created_at)
+              VALUES ('request-r','lic-replacement','ventas-old',2,'equipo perdido','pending',3)""")
+          db.execute("""INSERT INTO replacement_payment_requests
+              (id,replacement_request_id,license_id,old_device_id,slot_number,status,created_at)
+              VALUES ('payment-r','request-r','lic-replacement','ventas-old',2,'pending_payment',3)""")
+          assert db.execute("SELECT status FROM devices WHERE id='ventas-old'").fetchone()[0] == 'active'
+          assert db.execute("SELECT status FROM replacement_payment_requests WHERE id='payment-r'").fetchone()[0] == 'pending_payment'
+          db.execute("""UPDATE replacement_payment_requests
+              SET status='authorized',code_hash='one-time-hash',payment_reference='transfer-500',authorized_at=4
+              WHERE id='payment-r' AND status='pending_payment'""")
+          assert db.execute("SELECT status FROM devices WHERE id='ventas-old'").fetchone()[0] == 'active'
+          db.execute("""UPDATE replacement_payment_requests SET status='consumed',consumed_at=5
+              WHERE id='payment-r' AND status='authorized' AND code_hash='one-time-hash'
+              AND EXISTS (SELECT 1 FROM devices WHERE id='ventas-old' AND status='active')""")
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          db.execute("""UPDATE devices SET status='revoked'
+              WHERE id='ventas-old' AND status='active'
+              AND EXISTS (SELECT 1 FROM replacement_payment_requests WHERE id='payment-r' AND status='consumed')""")
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          db.execute("""UPDATE replacement_requests SET status='approved',decided_at=5,decided_by='operator'
+              WHERE id='request-r' AND status='pending'
+              AND EXISTS (SELECT 1 FROM replacement_payment_requests WHERE id='payment-r' AND status='consumed')
+              AND EXISTS (SELECT 1 FROM devices WHERE id='ventas-old' AND status='revoked')""")
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          db.execute("""INSERT INTO devices
+              (id,license_id,device_type,installation_id,continuity_id,public_key,
+               fingerprint,slot_number,status,created_at)
+              SELECT 'ventas-new',license_id,'VENTAS','ventas-new-i','ventas-new-c',x'03',
+                     'fp-new',2,'active',6
+              FROM replacement_requests WHERE id='request-r' AND status='approved'
+                AND NOT EXISTS (SELECT 1 FROM devices WHERE license_id='lic-replacement'
+                                AND slot_number=2 AND status='active')""")
+          assert db.execute("SELECT status FROM devices WHERE id='ventas-old'").fetchone()[0] == 'revoked'
+          assert db.execute("SELECT status FROM devices WHERE id='ventas-new'").fetchone()[0] == 'active'
+          assert db.execute("""SELECT COUNT(*) FROM devices
+              WHERE license_id='lic-replacement' AND slot_number=2 AND status='active'""").fetchone()[0] == 1
+          db.execute("""UPDATE replacement_payment_requests SET status='consumed',consumed_at=7
+              WHERE id='payment-r' AND status='authorized' AND code_hash='one-time-hash'""")
+          assert db.execute("SELECT changes()").fetchone()[0] == 0
+          assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+          assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+          print("Paid replacement lifecycle: OK")
+          PY
