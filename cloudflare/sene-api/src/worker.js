@@ -1118,7 +1118,7 @@ async function createPatronRegistrationRequest(request, env) {
     const existingExpiresAt = Number(existingForDevice.created_at) + 48 * 60 * 60;
     return json({ requestId: existingForDevice.id, businessName: existingForDevice.business_name,
       status: existingForDevice.status, createdAt: Number(existingForDevice.created_at),
-      expiresAt: existingExpiresAt, reservationSeconds: 48 * 60 * 60,
+      expiresAt: existingExpiresAt, serverTime: now, reservationSeconds: 48 * 60 * 60,
       amountCents: 58000, currency: "MXN", duplicate: true });
   }
   const activeName = await env.DB.prepare(
@@ -1144,7 +1144,7 @@ async function createPatronRegistrationRequest(request, env) {
   }
   return json({
     requestId: id, businessName, status: "pending_payment", createdAt: now,
-    expiresAt, reservationSeconds: 48 * 60 * 60,
+    expiresAt, serverTime: now, reservationSeconds: 48 * 60 * 60,
     amountCents: 58000, currency: "MXN", package: "1_PATRON_2_VENTAS",
     instructions: "Realiza el pago inicial de $580 MXN. En el concepto escribe únicamente el nombre exacto de tu empresa. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp. Después pulsa YA REALICÉ EL PAGO. El código se entrega únicamente después de verificar el pago."
   }, 201);
