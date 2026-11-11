@@ -1786,61 +1786,43 @@ async function redeemReplacement(request, env) {
 
 async function decideOperatorReplacement(request, env, decision) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
-  // Approval without verified $500 payment and one-time code is forbidden.
-  // Keep the legacy route retired so it cannot revoke the old device early.
-  if (decision === "approve") return json({
+  if (decision !== "reject") return json({
     error: "PAYMENT_WORKFLOW_REQUIRED",
-    message: "La reposición requiere validar el pago de $500 MXN y emitir un código de un solo uso."
+    message: "La aprobación requiere validar el pago de $500 MXN y emitir un código de un solo uso."
   }, 410);
   let body;
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId)) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) ||
+      Object.keys(body).some((key) => key !== "requestId")) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
   const row = await env.DB.prepare(
     "SELECT id, license_id, old_device_id, slot_number FROM replacement_requests WHERE id = ? AND status = 'pending' LIMIT 1"
   ).bind(requestId).first();
   if (!row) return json({ error: "REPLACEMENT_NOT_PENDING" }, 409);
   const now = Math.floor(Date.now() / 1000);
   try {
-    let results;
-    if (decision === "approve") {
-      results = await env.DB.batch([
-        env.DB.prepare(
-          "UPDATE devices SET status = 'revoked' WHERE id = ? AND license_id = ? AND slot_number = ? AND device_type = 'VENTAS' AND status = 'active'"
-        ).bind(row.old_device_id, row.license_id, row.slot_number),
-        env.DB.prepare(
-          "UPDATE replacement_requests SET status = 'approved', decided_at = ?, decided_by = 'operator' WHERE id = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked')"
-        ).bind(now, requestId, row.old_device_id),
-        env.DB.prepare(
-          "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL AND (slot_number = ? OR slot_number IS NULL)"
-        ).bind(now, row.license_id, row.slot_number),
-        env.DB.prepare(
-          "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'operator', 'operator', 'device_replacement_approved', ?, ? WHERE EXISTS (SELECT 1 FROM replacement_requests WHERE id = ? AND status = 'approved')"
-        ).bind(crypto.randomUUID(), row.license_id, row.old_device_id, JSON.stringify({ requestId, slotNumber: row.slot_number }), now, requestId)
-      ]);
-      if ((results?.[0]?.meta?.changes ?? 0) !== 1 || (results?.[1]?.meta?.changes ?? 0) !== 1) {
-        return json({ error: "REPLACEMENT_CONFLICT" }, 409);
-      }
-      return json({ requestId, status: "approved", revokedDeviceId: row.old_device_id, slot: row.slot_number === 2 ? "VENTAS_1" : "VENTAS_2", nextStep: "El PATRÓN debe generar un QR nuevo; el equipo sustituto se vincula ocupando el espacio liberado." });
-    }
-    results = await env.DB.batch([
+    const results = await env.DB.batch([
       env.DB.prepare(
-        "UPDATE replacement_requests SET status = 'rejected', decided_at = ?, decided_by = 'operator' WHERE id = ? AND status = 'pending'"
+        "UPDATE replacement_requests SET status='rejected',decided_at=?,decided_by='operator' WHERE id=? AND status='pending'"
       ).bind(now, requestId),
       env.DB.prepare(
-        "UPDATE replacement_payment_requests SET status='cancelled' WHERE replacement_request_id=? AND status='pending_payment'"
+        "UPDATE replacement_payment_requests SET status='cancelled' WHERE replacement_request_id=? AND status IN ('pending_payment','authorized')"
       ).bind(requestId),
       env.DB.prepare(
-        "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, old_device_id, 'operator', 'operator', 'device_replacement_rejected', ?, ? FROM replacement_requests WHERE id = ? AND status = 'rejected' AND decided_at = ?"
+        "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,old_device_id,'operator','operator','device_replacement_rejected',?,? FROM replacement_requests WHERE id=? AND status='rejected' AND decided_at=?"
       ).bind(crypto.randomUUID(), row.license_id, JSON.stringify({ requestId }), now, requestId, now)
     ]);
-    if ((results?.[0]?.meta?.changes ?? 0) !== 1) return json({ error: "REPLACEMENT_CONFLICT" }, 409);
-    return json({ requestId, status: "rejected" });
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+        (results?.[2]?.meta?.changes ?? 0) !== 1) {
+      return json({ error: "REPLACEMENT_CONFLICT" }, 409);
+    }
+    return json({ requestId, status: "rejected", paymentCancelled: (results?.[1]?.meta?.changes ?? 0) === 1 });
   } catch {
     return json({ error: "SERVICE_UNAVAILABLE" }, 503);
   }
 }
-
 
 async function createCorrectionRequest(request, env) {
   const checked = await verifyBusinessProof(request, env, "VENTAS_CORRECTION_CREATE");
