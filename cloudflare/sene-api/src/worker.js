@@ -1797,7 +1797,7 @@ async function patronCorrectionsInbox(request, env) {
     "SELECT r.id, r.sale_id, r.reason, r.reasons_json, r.cash_impact, r.cash_reason, r.plan_hash, r.status, r.created_at, r.decided_at FROM correction_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND d.slot_number = ? AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
   ).bind(ctx.licenseId, slot, status).all();
   const counts = await env.DB.prepare(
-    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests w WHERE w.ventas_device_id = d.id AND w.status = 'pending' AND w.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
+    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests w WHERE w.ventas_device_id = d.id AND w.status = 'pending') + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending') AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
   ).bind(ctx.licenseId).all();
   const pendingByTeam = { VENTAS_1: 0, VENTAS_2: 0 };
   for (const row of (counts.results || [])) {
@@ -2092,7 +2092,7 @@ async function patronRequestsInbox(request, env) {
     "SELECT r.id, r.sale_id, r.reason, r.status, r.created_at, r.decided_at FROM correction_requests r JOIN devices d ON d.id = r.ventas_device_id WHERE r.license_id = ? AND d.slot_number = ? AND (? = 'all' OR r.status = 'pending') ORDER BY r.created_at DESC LIMIT 100"
   ).bind(ctx.licenseId, slotNumber, status).all();
   const counts = await env.DB.prepare(
-    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests r WHERE r.ventas_device_id = d.id AND r.status = 'pending' AND r.seen_at IS NULL) + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending' AND c.seen_at IS NULL) AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
+    "SELECT d.slot_number, (SELECT COUNT(*) FROM work_requests r WHERE r.ventas_device_id = d.id AND r.status = 'pending') + (SELECT COUNT(*) FROM correction_requests c WHERE c.ventas_device_id = d.id AND c.status = 'pending') AS pending_count FROM devices d WHERE d.license_id = ? AND d.device_type = 'VENTAS' AND d.status = 'active' ORDER BY d.slot_number"
   ).bind(ctx.licenseId).all();
   const pendingByTeam = { VENTAS_1: 0, VENTAS_2: 0 };
   for (const row of (counts.results || [])) {
