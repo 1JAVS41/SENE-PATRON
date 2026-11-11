@@ -1742,8 +1742,8 @@ async function redeemReplacement(request, env) {
   const now=Math.floor(Date.now()/1000);
   const results=await env.DB.batch([
     env.DB.prepare(
-      "UPDATE replacement_payment_requests SET status='consumed',consumed_at=? WHERE id=? AND status='authorized' AND code_hash=?"
-    ).bind(now,row.id,codeHash),
+      "UPDATE replacement_payment_requests SET status='consumed',consumed_at=? WHERE id=? AND status='authorized' AND code_hash=? AND EXISTS (SELECT 1 FROM devices WHERE id=? AND license_id=? AND device_type='VENTAS' AND slot_number=? AND status='active')"
+    ).bind(now,row.id,codeHash,row.old_device_id,ctx.licenseId,row.slot_number),
     env.DB.prepare(
       "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='VENTAS' AND slot_number=? AND status='active' AND EXISTS (SELECT 1 FROM replacement_payment_requests WHERE id=? AND status='consumed')"
     ).bind(row.old_device_id,ctx.licenseId,row.slot_number,row.id),
@@ -1751,13 +1751,17 @@ async function redeemReplacement(request, env) {
       "UPDATE replacement_requests SET status='approved',decided_at=?,decided_by='operator' WHERE id=? AND status='pending' AND EXISTS (SELECT 1 FROM replacement_payment_requests WHERE id=? AND status='consumed') AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='revoked')"
     ).bind(now,requestId,row.id,row.old_device_id),
     env.DB.prepare(
-      "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND revoked_at IS NULL AND (slot_number=? OR slot_number IS NULL)"
-    ).bind(now,ctx.licenseId,row.slot_number),
+      "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND revoked_at IS NULL AND (slot_number=? OR slot_number IS NULL) AND EXISTS (SELECT 1 FROM replacement_requests WHERE id=? AND status='approved')"
+    ).bind(now,ctx.licenseId,row.slot_number,requestId),
     env.DB.prepare(
       "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?,'patron',?,'device_replacement_code_redeemed',?,? WHERE EXISTS (SELECT 1 FROM replacement_requests WHERE id=? AND status='approved')"
     ).bind(crypto.randomUUID(),ctx.licenseId,row.old_device_id,ctx.deviceId,JSON.stringify({requestId,slotNumber:row.slot_number}),now,requestId)
   ]);
-  if (results.some((x)=>(x?.meta?.changes??0)!==1)) return json({error:"REPLACEMENT_REDEEM_CONFLICT"},409);
+  // Pairing-token revocation may legitimately affect zero rows when no token is open.
+  // The payment, old device, request, and audit records must each change exactly once.
+  if ([0,1,2,4].some((index)=>(results[index]?.meta?.changes??0)!==1)) {
+    return json({error:"REPLACEMENT_REDEEM_CONFLICT"},409);
+  }
   return json({requestId,status:"consumed",slot:row.slot_number===2?"VENTAS_1":"VENTAS_2",
     oldDeviceRevoked:true,nextStep:"Genera un QR de reemplazo para el mismo espacio y vincula el nuevo equipo."});
 }
