@@ -337,6 +337,48 @@ class MainActivity : Activity() {
         registrationButton.isEnabled = savedRegistrationStatus != "authorized" &&
             (savedExpiry == 0L || (savedExpiry - (System.currentTimeMillis() / 1000L + savedOffset)) <= 0L)
         registrationCard.addView(registrationButton)
+        registrationCard.addView(primaryButton("SOLICITAR REPOSICIÓN DE PATRÓN · $500 MXN") {
+            val server = base.text.toString().trim().trimEnd('/')
+            val name = businessName.text.toString().trim()
+            val email = registeredEmail.text.toString().trim()
+            val phone = registeredPhone.text.toString().filter { it.isDigit() }
+            if (!server.startsWith("https://") || Uri.parse(server).host.isNullOrBlank() ||
+                name.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
+                phone.length !in 10..15) {
+                Toast.makeText(this, "Completa servidor, nombre de empresa, correo y teléfono registrados.", Toast.LENGTH_LONG).show()
+            } else {
+                prefs.edit().putString("server_base_url", server).putString("registration_business_name", name)
+                    .putString("registration_email", email).putString("registration_phone", phone).apply()
+                Toast.makeText(this, "Verificando datos y creando o recuperando tu solicitud de $500 MXN…", Toast.LENGTH_LONG).show()
+                Thread {
+                    try {
+                        val result = SenePatronApiClient(this, server)
+                            .requestRecoveryPayment(name, email, phone)
+                        val folio = result.optString("requestId")
+                        check(folio.isNotBlank()) { "El servidor no devolvió el folio de reposición." }
+                        val instructions = result.optString("instructions",
+                            "Realiza el pago de $500 MXN y envía el comprobante a AYUDA oficial. El código se entrega después de validar el pago.")
+                        runOnUiThread {
+                            AlertDialog.Builder(this)
+                                .setTitle(if (result.optBoolean("duplicate")) "SOLICITUD EXISTENTE" else "SOLICITUD DE REPOSICIÓN REGISTRADA")
+                                .setMessage("Folio: $folio\nEstado: " + result.optString("status", "pending_payment") +
+                                    "\nImporte: $500 MXN\n\n" + instructions +
+                                    "\n\nLa solicitud y su folio se reutilizarán si vuelves a consultar desde este mismo teléfono.")
+                                .setPositiveButton("ENTENDIDO", null)
+                                .show()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            val detail = (e as? SenePatronApiException)?.responseBody.orEmpty()
+                            val error = try { org.json.JSONObject(detail).optString("error", detail) }
+                                catch (_: Exception) { detail }
+                            Toast.makeText(this, "No se pudo solicitar la reposición: " +
+                                error.ifBlank { e.message ?: "Error de conexión" }, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+        })
         countdownHandler.post(countdownTick)
         gap(root, 12)
         root.addView(primaryButton("GUARDAR DIRECCIÓN") {
