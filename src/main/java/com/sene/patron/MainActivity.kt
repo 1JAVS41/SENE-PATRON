@@ -681,34 +681,17 @@ class MainActivity : Activity() {
     }
 
     private fun showServerConfig() {
-        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
-        val field = EditText(this).apply {
-            hint = "https://tu-worker.workers.dev"
-            setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-            setText(prefs.getString("server_base_url", ""))
-            setPadding(dp(16), dp(13), dp(16), dp(13))
-        }
+        // La URL del servidor es configuración interna de SENE; nunca debe
+        // solicitarse al dueño desde Vincular o Generar QR.
         AlertDialog.Builder(this)
-            .setTitle("CONEXIÓN SEGURA SENE")
-            .setMessage("Introduce la dirección HTTPS del servidor SENE. No uses una dirección de prueba Hello World.")
-            .setView(field)
-            .setPositiveButton("GUARDAR") { _, _ ->
-                val value = field.text?.toString()?.trim()?.trimEnd('/').orEmpty()
-                val uri = android.net.Uri.parse(value)
-                if (!value.startsWith("https://") || uri.host.isNullOrBlank() || value.any { it.isWhitespace() }) {
-                    Toast.makeText(this, "Dirección HTTPS no válida", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
-                }
-                if (!prefs.edit().putString("server_base_url", value).commit()) {
-                    Toast.makeText(this, "No se pudo guardar la dirección", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
-                }
-                Toast.makeText(this, "Dirección guardada", Toast.LENGTH_SHORT).show()
-                if (prefs.getString("device_id", null).isNullOrBlank()) showRegistrationDialog()
-                else refreshNotificationsFromServer(force = true)
-            }
-            .setNegativeButton("CANCELAR", null)
+            .setTitle("SERVIDOR SENE EN PREPARACIÓN")
+            .setMessage(
+                "La conexión oficial todavía no está habilitada. " +
+                "No escribas ni uses direcciones de prueba. " +
+                "Vincular SENE PATRÓN y generar los QR estarán disponibles " +
+                "cuando el servidor oficial quede publicado y configurado por SENE."
+            )
+            .setPositiveButton("ENTENDIDO", null)
             .show()
     }
 
