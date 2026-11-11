@@ -28,14 +28,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Preparar Android SDK 35
-        uses: maxim-lobanov/setup-android@v1
-        with:
-          api-level: 35
-          build-tools: 35.0.0
-
-      - name: Aceptar licencias Android
-        run: yes | sdkmanager --licenses >/dev/null
+      - name: Preparar Android SDK del runner
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x | sort -V | tail -n 1)"
+          fi
+          test -n "$SDKMANAGER"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Generar icono con el logotipo original SENE
         run: |
