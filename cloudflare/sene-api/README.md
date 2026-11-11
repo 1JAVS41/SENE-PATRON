@@ -36,6 +36,18 @@ SENE VENTAS ya incluye cliente HTTPS firmado, vinculación QR, solicitudes de tr
 
 **Importante:** la interfaz Android y el cliente firmado no hacen que el servicio esté operativo por sí solos. La API aún no está desplegada en Cloudflare y la D1 real todavía no tiene las migraciones 0002–0013. No introducir la URL de Hello World como servidor productivo ni activar equipos hasta completar el entorno de pruebas.
 
+## Panel privado de reposiciones
+
+La ruta `/operator/replacements` muestra la bandeja de reposiciones de VENTAS y permite:
+- consultar solicitudes pendientes de pago y pagos ya autorizados;
+- registrar la referencia del pago y solicitar la autorización;
+- emitir o recuperar el mismo código de un solo uso tras validar el pago;
+- copiar el código para entregarlo manualmente solo al número oficial AYUDA.
+
+El panel pide `OPERATOR_TOKEN` en cada sesión y lo mantiene únicamente en memoria del navegador; no lo guarda en almacenamiento local. El Worker vuelve a validar el token en cada endpoint y verifica que el teléfono destino sea un contacto AYUDA oficial. El código se conserva cifrado en D1 para permitir recuperar la misma autorización si se pierde la respuesta.
+
+**El panel no envía WhatsApp automáticamente.** El operador debe copiar el código y entregarlo por el canal oficial AYUDA. Nunca configurar `OPERATOR_TOKEN` en una APK ni compartirlo con clientes.
+
 ## Estado de despliegue
 
 **El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0013 todavía no se aplican allí.
