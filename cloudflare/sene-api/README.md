@@ -38,10 +38,10 @@ SENE VENTAS ya incluye cliente HTTPS firmado, vinculación QR, solicitudes de tr
 
 ## Panel privado de reposiciones
 
-La ruta `/operator/replacements` muestra la bandeja de reposiciones de VENTAS y permite:
-- consultar solicitudes pendientes de pago y pagos ya autorizados;
+La ruta `/operator/replacements` muestra las bandejas de reposición de VENTAS y SENE PATRÓN y permite:
+- consultar solicitudes pendientes de pago y pagos ya autorizados de ambos tipos de equipo;
 - registrar la referencia del pago y solicitar la autorización;
-- emitir o recuperar el mismo código de un solo uso tras validar el pago;
+- emitir o recuperar el mismo código de un solo uso tras validar el pago, tanto para VENTAS como para PATRÓN;
 - copiar el código para entregarlo manualmente solo al número oficial AYUDA.
 
 El panel pide `OPERATOR_TOKEN` en cada sesión y lo mantiene únicamente en memoria del navegador; no lo guarda en almacenamiento local. El Worker vuelve a validar el token en cada endpoint y verifica que el teléfono destino sea un contacto AYUDA oficial. El código se conserva cifrado en D1 para permitir recuperar la misma autorización si se pierde la respuesta.
@@ -73,9 +73,9 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 - Base D1: `sene-licencias`.
 - ID: `22f73e97-e43e-44f1-870b-58fad88e7028`.
 - Binding del Worker: `DB`.
-- Migraciones versionadas: 0001 a 0014 (con numeración repetida en algunos prefijos; se aplican por nombre de archivo).
+- Migraciones versionadas: 0001 a 0015 (con numeración repetida en algunos prefijos; se aplican por nombre de archivo).
 - La migración 0001 ya se aplicó manualmente a la D1 real. **No volver a ejecutarla.**
-- Las migraciones 0002–0014 solo se han probado en CI sobre SQLite temporal.
+- Las migraciones 0002–0015 solo se han probado en CI sobre SQLite temporal.
 
 ## Pendientes antes de producción
 
