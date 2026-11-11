@@ -1676,7 +1676,7 @@ async function createReplacementRequest(request, env) {
 async function listOperatorReplacements(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
   const rows = await env.DB.prepare(
-    "SELECT r.id,r.license_id,l.business_name,r.old_device_id,r.slot_number,r.reason,r.created_at,p.id AS payment_request_id,p.status AS payment_status,p.payment_reference,p.authorized_at FROM replacement_requests r JOIN replacement_payment_requests p ON p.replacement_request_id=r.id JOIN licenses l ON l.id=r.license_id WHERE p.status IN ('pending_payment','authorized') ORDER BY r.created_at ASC LIMIT 100"
+    "SELECT r.id,r.license_id,l.business_name,r.old_device_id,r.slot_number,r.reason,r.created_at,p.id AS payment_request_id,p.status AS payment_status,p.payment_reference,p.delivery_phone,p.authorized_at FROM replacement_requests r JOIN replacement_payment_requests p ON p.replacement_request_id=r.id JOIN licenses l ON l.id=r.license_id WHERE p.status IN ('pending_payment','authorized') ORDER BY r.created_at ASC LIMIT 100"
   ).all();
   return json({ items: rows.results || [] });
 }
@@ -2759,7 +2759,7 @@ button.secondary{background:#29415d}button:disabled{opacity:.5;cursor:wait}
        card.append(node("div","status",row.payment_status==="authorized"?"Pago autorizado · código recuperable":"Pendiente de validar pago"));
        const grid=node("div","grid");
        const ref=node("input");ref.placeholder="Referencia/comprobante de pago";ref.maxLength=120;ref.value=row.payment_reference||"";
-       const phone=node("input");phone.placeholder="Número oficial AYUDA (con lada)";phone.autocomplete="off";
+       const phone=node("input");phone.placeholder="Número oficial AYUDA (con lada)";phone.autocomplete="off";phone.value=row.delivery_phone||"";
        grid.append(ref,phone);card.append(grid);
        const actions=node("div","actions");
        const issue=node("button","",row.payment_status==="authorized"?"Recuperar código":"Validar pago y emitir código");
