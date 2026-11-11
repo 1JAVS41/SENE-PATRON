@@ -211,6 +211,24 @@ jobs:
           sqlite3 "$DB_FILE" "INSERT INTO pairing_tokens (token_hash, license_id, patron_device_id, remaining_uses, created_at, expires_at, slot_number, operation, encrypted_token) VALUES ('hash-eq1-next', 'license-pair-test', 'patron-qr-test', 1, 31, 253402300799, 2, 'REPLACEMENT', 'cipher-next');"
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
 
+      - name: Probar vencimiento de reserva de activación a las 48 horas
+        run: |
+          set -euo pipefail
+          DB_FILE="$(mktemp)"
+          for migration in cloudflare/sene-api/migrations/*.sql; do sqlite3 "$DB_FILE" < "$migration"; done
+          NOW=200000
+          CUTOFF=$((NOW - 48 * 60 * 60))
+          sqlite3 "$DB_FILE" "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at) VALUES ('reg-expired','Tienda Expirada','tienda expirada','install-expired','fingerprint-expired','pending_payment',$((CUTOFF-1))),('reg-authorized-old','Tienda Pagada','tienda pagada','install-paid','fingerprint-paid','authorized',1),('reg-current','Tienda Actual','tienda actual','install-current','fingerprint-current','pending_payment',$((NOW-60)));"
+          sqlite3 "$DB_FILE" "UPDATE registration_requests SET status='cancelled',cancelled_at=$NOW WHERE status='pending_payment' AND created_at <= $CUTOFF;"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM registration_requests WHERE id='reg-expired';")" = "cancelled"
+          test "$(sqlite3 "$DB_FILE" "SELECT status FROM registration_requests WHERE id='reg-authorized-old';")" = "authorized"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM registration_requests WHERE status='pending_payment' AND created_at > $CUTOFF;")" = "1"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM registration_requests WHERE id='reg-expired' AND status='pending_payment' AND created_at > $CUTOFF;")" = "0"
+          # El nombre y la instalación liberados pueden iniciar una nueva solicitud.
+          sqlite3 "$DB_FILE" "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at) VALUES ('reg-retry','Tienda Expirada','tienda expirada','install-expired','fingerprint-expired','pending_payment',$NOW);"
+          test "$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM registration_requests WHERE normalized_name='tienda expirada' AND status='pending_payment';")" = "1"
+          test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
+
       - name: Probar datos registrados y reposición pagada de PATRÓN
         run: |
           set -euo pipefail
