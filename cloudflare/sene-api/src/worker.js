@@ -2742,6 +2742,7 @@ button.secondary{background:#29415d}button:disabled{opacity:.5;cursor:wait}
 <section id="app" class="hidden">
 <div class="panel"><div class="grid"><div><strong>Solicitudes</strong><div id="count" class="code">0</div></div><div><strong>Importe</strong><div class="code">$500 MXN</div></div></div>
 <div class="actions"><button id="refresh" class="secondary">Actualizar solicitudes</button><button id="logout" class="secondary">Cerrar sesión</button></div><div id="msg" class="small" aria-live="polite"></div></div>
+<div class="panel"><h2>Reposición SENE PATRÓN</h2><div id="patronItems"></div></div>
 <div id="items"></div>
 </section>
 <script>
@@ -2794,11 +2795,47 @@ button.secondary{background:#29415d}button:disabled{opacity:.5;cursor:wait}
        actions.append(issue,copy);card.append(actions,code);list.append(card);
      }
      if(!(data.items||[]).length)list.append(node("div","panel","No hay reposiciones pendientes."));
+     await loadPatron();
      message("Solicitudes actualizadas.");
    }catch(e){message(e.message,true);if(e.message==="UNAUTHORIZED")logout();}
  }
+ async function loadPatron(){
+   const list=$("patronItems");list.replaceChildren();
+   try{
+     const data=await api("/v1/operator/patron-recovery-payments/pending");
+     for(const row of (data.items||[])){
+       const card=node("article","item");
+       card.append(node("h3","",row.business_name||"Empresa sin nombre"));
+       card.append(node("div","small","Folio: "+row.id));
+       card.append(node("div","small","Correo registrado: "+(row.registered_email||"—")+" · Teléfono registrado: "+(row.registered_phone||"—")));
+       card.append(node("div","status",row.status==="authorized"?"Pago autorizado · código recuperable":"Pendiente de validar pago"));
+       const grid=node("div","grid");
+       const ref=node("input");ref.placeholder="Referencia/comprobante de pago";ref.maxLength=120;ref.value=row.payment_reference||"";
+       const phone=node("input");phone.placeholder="Número oficial AYUDA (con lada)";phone.autocomplete="off";phone.value=row.delivery_phone||"";
+       grid.append(ref,phone);card.append(grid);
+       const actions=node("div","actions");
+       const issue=node("button","",row.status==="authorized"?"Recuperar código":"Validar pago y emitir código");
+       const copy=node("button","secondary","Copiar código");copy.classList.add("hidden");
+       const code=node("div","code");code.classList.add("hidden");
+       issue.addEventListener("click",async()=>{
+         if(!ref.value.trim()||!phone.value.trim()){message("Captura la referencia de pago y el número oficial AYUDA.",true);return;}
+         issue.disabled=true;message("Validando reposición de PATRÓN…");
+         try{
+           const result=await api("/v1/operator/patron-recovery-payments/authorize",{method:"POST",body:JSON.stringify({requestId:row.id,paymentReference:ref.value.trim(),deliveryPhone:phone.value.trim()})});
+           code.textContent=result.recoveryCode;code.classList.remove("hidden");copy.classList.remove("hidden");
+           copy.onclick=()=>navigator.clipboard.writeText(result.recoveryCode).then(()=>message("Código copiado. Entrégalo únicamente por AYUDA oficial.")).catch(()=>message("No se pudo copiar; selecciona el código manualmente.",true));
+           issue.textContent="Código recuperado";
+           message("Pago de reposición PATRÓN autorizado. Entrega el código únicamente por AYUDA oficial.");
+         }catch(e){message(e.message,true);}
+         finally{issue.disabled=false;}
+       });
+       actions.append(issue,copy);card.append(actions,code);list.append(card);
+     }
+     if(!(data.items||[]).length)list.append(node("div","small","No hay reposiciones de PATRÓN pendientes."));
+   }catch(e){message("Bandeja PATRÓN: "+e.message,true);if(e.message==="UNAUTHORIZED")logout();}
+ }
  function logout(){
-   operatorToken="";$("token").value="";$("app").classList.add("hidden");$("login").classList.remove("hidden");$("items").replaceChildren();
+   operatorToken="";$("token").value="";$("app").classList.add("hidden");$("login").classList.remove("hidden");$("items").replaceChildren();$("patronItems").replaceChildren();
  }
  $("connect").addEventListener("click",async()=>{
    operatorToken=$("token").value.trim();
