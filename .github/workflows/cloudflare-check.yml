@@ -218,7 +218,8 @@ jobs:
           for migration in cloudflare/sene-api/migrations/*.sql; do sqlite3 "$DB_FILE" < "$migration"; done
           NOW=200000
           CUTOFF=$((NOW - 48 * 60 * 60))
-          sqlite3 "$DB_FILE" "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at) VALUES ('reg-expired','Tienda Expirada','tienda expirada','install-expired','fingerprint-expired','pending_payment',$((CUTOFF-1))),('reg-authorized-old','Tienda Pagada','tienda pagada','install-paid','fingerprint-paid','authorized',1),('reg-current','Tienda Actual','tienda actual','install-current','fingerprint-current','pending_payment',$((NOW-60)));"
+          sqlite3 "$DB_FILE" "INSERT INTO licenses (id,business_name,status,max_devices,created_at,expires_at) VALUES ('license-paid','Tienda Pagada','active',3,1,9999999999);"
+          sqlite3 "$DB_FILE" "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at,license_id,code_hash,authorized_at) VALUES ('reg-expired','Tienda Expirada','tienda expirada','install-expired','fingerprint-expired','pending_payment',$((CUTOFF-1)),NULL,NULL,NULL),('reg-authorized-old','Tienda Pagada','tienda pagada','install-paid','fingerprint-paid','authorized',1,'license-paid','authorized-code-hash',2),('reg-current','Tienda Actual','tienda actual','install-current','fingerprint-current','pending_payment',$((NOW-60)),NULL,NULL,NULL);"
           sqlite3 "$DB_FILE" "UPDATE registration_requests SET status='cancelled',cancelled_at=$NOW WHERE status='pending_payment' AND created_at <= $CUTOFF;"
           test "$(sqlite3 "$DB_FILE" "SELECT status FROM registration_requests WHERE id='reg-expired';")" = "cancelled"
           test "$(sqlite3 "$DB_FILE" "SELECT status FROM registration_requests WHERE id='reg-authorized-old';")" = "authorized"
