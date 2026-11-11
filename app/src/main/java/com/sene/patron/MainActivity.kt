@@ -292,7 +292,6 @@ class MainActivity : Activity() {
                 if (savedExpiry > 0L && remaining > 0L) countdownHandler.postDelayed(this, 1000L)
             }
         }
-        countdownHandler.post(countdownTick)
         registrationButton = primaryButton("SOLICITAR ACTIVACIÓN · $580 MXN") {
             val server = base.text.toString().trim().trimEnd('/')
             val name = businessName.text.toString().trim()
@@ -333,6 +332,7 @@ class MainActivity : Activity() {
         registrationButton.isEnabled = savedExpiry == 0L ||
             (savedExpiry - (System.currentTimeMillis() / 1000L + savedOffset)) <= 0L
         registrationCard.addView(registrationButton)
+        countdownHandler.post(countdownTick)
         gap(root, 12)
         root.addView(primaryButton("GUARDAR DIRECCIÓN") {
             val value = base.text.toString().trim().trimEnd('/')
