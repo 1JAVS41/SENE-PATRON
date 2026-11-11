@@ -291,7 +291,8 @@ class MainActivity : Activity() {
             }
         }
         countdownHandler.post(countdownTick)
-        val registrationButton = primaryButton("SOLICITAR ACTIVACIÓN · $580 MXN") {
+        lateinit var registrationButton: TextView
+        registrationButton = primaryButton("SOLICITAR ACTIVACIÓN · $580 MXN") {
             val server = base.text.toString().trim().trimEnd('/')
             val name = businessName.text.toString().trim()
             val email = registeredEmail.text.toString().trim()
