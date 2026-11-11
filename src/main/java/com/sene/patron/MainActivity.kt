@@ -1086,11 +1086,20 @@ class MainActivity : Activity() {
             minLines = 2
             setPadding(dp(14), dp(12), dp(14), dp(12))
         }
+        val business = prefs.getString("business_name", null).orEmpty().ifBlank { "el nombre exacto de tu empresa" }
         AlertDialog.Builder(this)
             .setTitle("REPOSICIÓN · EQUIPO $number")
-            .setMessage("Costo fijo: $500 MXN. Primero crea el folio; después realiza el pago y envía el comprobante a AYUDA oficial. El teléfono anterior seguirá activo hasta canjear el código.")
+            .setMessage(
+                "REPOSICIÓN SENE · $500 MXN\\n\\n" +
+                    "1. Crea primero el folio de reposición.\\n" +
+                    "2. Realiza el pago de $500 MXN.\\n" +
+                    "3. En el concepto escribe exactamente:\\n$business\\n" +
+                    "4. Envía el comprobante a los números oficiales de AYUDA por WhatsApp.\\n" +
+                    "5. Espera la validación y el código de un solo uso.\\n\\n" +
+                    "El teléfono anterior seguirá activo hasta que el código sea canjeado."
+            )
             .setView(reasonField)
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+            .setPositiveButton("CREAR SOLICITUD") { _, _ ->
                 val reason = reasonField.text?.toString()?.trim().orEmpty()
                 if (reason.isBlank()) { Toast.makeText(this, "Escribe el motivo de la reposición", Toast.LENGTH_LONG).show(); return@setPositiveButton }
                 Thread {
