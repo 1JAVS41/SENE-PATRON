@@ -37,7 +37,18 @@ class SeneApiClient(context: Context, baseUrl: String) {
         val result = bootstrapSigned("PATRON_REGISTRATION_REQUEST", "/v1/patron/registrations/request", body.toString(), identity)
         val requestId = result.optString("requestId")
         if (requestId.isNotBlank()) {
-            check(prefs.edit().putString("registration_request_id", requestId).putString("business_name", result.optString("businessName", normalizedName)).commit()) { "No se pudo guardar la solicitud de registro" }
+            val serverTime = result.optLong("serverTime", System.currentTimeMillis() / 1000L)
+            val expiresAt = result.optLong("expiresAt", result.optLong("createdAt") + 48L * 60L * 60L)
+            check(prefs.edit()
+                .putString("registration_request_id", requestId)
+                .putString("registration_status", result.optString("status", "pending_payment"))
+                .putString("business_name", result.optString("businessName", normalizedName))
+                .putString("registration_email", email)
+                .putString("registration_phone", phone)
+                .putLong("registration_created_at", result.optLong("createdAt", serverTime))
+                .putLong("registration_expires_at", expiresAt)
+                .putLong("registration_server_offset", serverTime - System.currentTimeMillis() / 1000L)
+                .commit()) { "No se pudo guardar la solicitud de registro" }
         }
         return result
     }
@@ -261,6 +272,15 @@ class SeneApiClient(context: Context, baseUrl: String) {
     fun requestReplacement(deviceId: String, reason: String): JSONObject {
         val body = JSONObject().put("deviceId", deviceId).put("reason", reason.trim())
         return deviceSigned("PATRON_REPLACEMENT_REQUEST", "/v1/patron/devices/replacement-request", body.toString())
+    }
+
+    fun listVentasDevices(): JSONObject =
+        deviceSigned("PATRON_DEVICES_LIST", "/v1/patron/devices/list", "{}")
+
+    fun redeemReplacement(requestId: String, authorizationCode: String): JSONObject {
+        val body = JSONObject().put("requestId", requestId)
+            .put("authorizationCode", authorizationCode.trim().uppercase())
+        return deviceSigned("PATRON_REPLACEMENT_REDEEM", "/v1/patron/devices/replacement-redeem", body.toString())
     }
 
     private fun deviceSigned(purpose: String, path: String, body: String): JSONObject {

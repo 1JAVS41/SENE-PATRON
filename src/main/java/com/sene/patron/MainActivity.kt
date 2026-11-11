@@ -41,8 +41,7 @@ class MainActivity : Activity() {
     private val success = Color.rgb(22, 139, 69)
     private val white = Color.WHITE
     private var currentPage = "home"
-    @Volatile private var lastNotificationRefreshAt = 0L
-    private var refreshingNotifications = false
+        private var refreshingNotifications = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,7 +99,7 @@ class MainActivity : Activity() {
 
     private fun isLicenseExpired(): Boolean {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
-        if (prefs.getString("license_status", "") in setOf("expired", "suspended")) return true
+        if (prefs.getString("license_status", "").orEmpty().trim().lowercase() in setOf("expired", "suspended")) return true
         val expiry = prefs.getLong("period_ends_at", 0L)
         val serverTime = prefs.getLong("server_time", 0L)
         val elapsedAnchor = prefs.getLong("server_time_elapsed", 0L)
@@ -138,7 +137,7 @@ class MainActivity : Activity() {
         root.addView(primaryButton("VINCULAR SENE PATRÓN") {
             when {
                 linked -> showOwnerOptions()
-                !registrationRequest.isNullOrBlank() -> showActivationDialog()
+                !registrationRequest.isNullOrBlank() -> showRegistrationDialog()
                 else -> showRegistrationDialog()
             }
         })
@@ -482,13 +481,20 @@ class MainActivity : Activity() {
                 val correction = card()
                 correction.addView(text("Venta: " + item.optString("saleId"), 15, ink, true))
                 correction.addView(text("Motivo: " + item.optString("reason"), 13, muted))
+                val reasons = item.optJSONArray("reasons")
+                if (reasons != null && reasons.length() > 1) {
+                    correction.addView(text("Categorías: " + (0 until reasons.length()).joinToString(", ") { reasons.optString(it) }, 12, muted))
+                }
+                if (item.optBoolean("cashImpact", false)) {
+                    correction.addView(text("Cambio de caja: " + item.optString("cashReason"), 12, muted))
+                }
                 correction.addView(text("Estado: $status", 11, muted))
                 if (status == "pending") {
                     gap(correction, 7)
                     correction.addView(primaryButton("AUTORIZAR UNA CORRECCIÓN") {
                         AlertDialog.Builder(this)
                             .setTitle("Autorizar corrección")
-                            .setMessage("Revisa el motivo de la solicitud que aparece en esta tarjeta (por ejemplo: devolución, ajuste de precio, eliminación de producto o corrección de cantidad). Con esa información puedes decidir directamente desde SENE PATRÓN si autorizas o rechazas la corrección. Si autorizas, el trabajador podrá corregir esa venta una sola vez. El detalle comercial de la operación y los cambios de caja e inventario permanecen en SENE VENTAS; el servidor solo conserva el motivo, el estado y los identificadores necesarios para controlar el permiso.")
+                            .setMessage("Revisa el motivo que aparece en esta tarjeta y el mensaje de detalle que el trabajador comparte por WhatsApp con el número configurado del patrón. Confirma el producto/código y la cantidad que solicita corregir antes de decidir. Si autorizas, el trabajador podrá aplicar una sola corrección en SENE VENTAS. El detalle comercial, los cambios de caja y el inventario permanecen locales; el servidor conserva únicamente el motivo, el hash y los identificadores del permiso.")
                             .setPositiveButton("AUTORIZAR") { _, _ -> decideTeamCorrection(team, requestId, true) }
                             .setNegativeButton("RECHAZAR") { _, _ -> decideTeamCorrection(team, requestId, false) }
                             .setNeutralButton("CANCELAR", null)
@@ -740,7 +746,6 @@ class MainActivity : Activity() {
                     try {
                         val result = SeneApiClient(this, baseUrl).recover(code)
                         runOnUiThread {
-                            lastNotificationRefreshAt = 0L
                             Toast.makeText(this, "SENE PATRÓN recuperado. Estado: " + result.optString("licenseStatus"), Toast.LENGTH_LONG).show()
                             render()
                         }
@@ -762,79 +767,143 @@ class MainActivity : Activity() {
             showServerConfig()
             return
         }
-        val existingRequest = prefs.getString("registration_request_id", null)
-        if (!existingRequest.isNullOrBlank()) {
-            showActivationDialog()
-            return
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
         }
-        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
-        fun field(hintText: String, type: Int): EditText = EditText(this).apply {
-            hint = hintText; setSingleLine(true); inputType = type
-            setPadding(dp(12), dp(10), dp(12), dp(10)); form.addView(this)
+        fun field(hintText: String, type: Int, saved: String): EditText =
+            EditText(this).apply {
+                hint = hintText
+                setSingleLine(true)
+                inputType = type
+                setText(saved)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                form.addView(this)
+            }
+        val businessField = field(
+            "Nombre exacto de tu empresa",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+            prefs.getString("business_name", "").orEmpty()
+        )
+        val emailField = field(
+            "Correo electrónico registrado",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            prefs.getString("registration_email", "").orEmpty()
+        )
+        val phoneField = field(
+            "Número telefónico registrado",
+            android.text.InputType.TYPE_CLASS_PHONE,
+            prefs.getString("registration_phone", "").orEmpty()
+        )
+        val countdown = TextView(this).apply {
+            textSize = 14f
+            setTextColor(ink)
+            setPadding(0, dp(12), 0, dp(8))
         }
-        val field = field("Nombre exacto de tu empresa", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
-        val emailField = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
-        val phoneField = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
-        AlertDialog.Builder(this)
+        form.addView(countdown)
+        val requestId = prefs.getString("registration_request_id", null).orEmpty()
+        val expiry = prefs.getLong("registration_expires_at", 0L)
+        val serverOffset = prefs.getLong("registration_server_offset", 0L)
+        val status = prefs.getString("registration_status", "none").orEmpty()
+        val dialog = AlertDialog.Builder(this)
             .setTitle("REGISTRO INICIAL · $580 MXN")
             .setMessage(
-                "Para registrar SENE PATRÓN y sus dos equipos SENE VENTAS:\n\n" +
-                "1. Realiza un pago total de $580 MXN ($500 de alta + $80 de primera mensualidad), usando los datos oficiales de pago proporcionados por SENE.\n" +
-                "2. En el concepto escribe ÚNICAMENTE el nombre exacto de tu empresa.\n" +
-                "3. Envía el comprobante a uno de los dos números oficiales del botón AYUDA por WhatsApp.\n" +
-                "4. Después de enviar el comprobante, pulsa YA REALICÉ EL PAGO.\n\n" +
-                "El servidor crea una sola solicitud. El código de activación se entrega a través de los números oficiales de AYUDA únicamente después de verificar el pago. No se activa la licencia antes de introducir el código."
+                "El registro incluye SENE PATRÓN y dos espacios SENE VENTAS. " +
+                "El nombre de tu empresa se reserva durante 48 horas desde que el servidor recibe la solicitud.\n\n" +
+                "Realiza el pago de $580 MXN ($500 de alta + $80 de primera mensualidad). " +
+                "En el concepto escribe únicamente el nombre exacto de tu empresa. " +
+                "Envía el comprobante por WhatsApp a uno de los contactos oficiales del botón AYUDA. " +
+                "La captura no confirma el pago: el administrador debe verificar el depósito y entregarte el código."
             )
             .setView(form)
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
-                val businessName = field.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
-                if (businessName.isBlank() || businessName.length > 100) {
-                    Toast.makeText(this, "Escribe el nombre exacto de tu empresa", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+            .setPositiveButton("SOLICITAR ACTIVACIÓN", null)
+            .setNeutralButton("YA TENGO MI CÓDIGO", null)
+            .setNegativeButton("CERRAR", null)
+            .create()
+        val handler = android.os.Handler(mainLooper)
+        val tick = object : Runnable {
+            override fun run() {
+                val now = System.currentTimeMillis() / 1000L + serverOffset
+                val remaining = expiry - now
+                when {
+                    status == "authorized" -> countdown.text =
+                        "PAGO CONFIRMADO. Introduce el código entregado por SENE para activar tu empresa."
+                    requestId.isNotBlank() && remaining > 0L -> {
+                        countdown.text = "REALIZA EL PAGO ANTES DE: %02d:%02d:%02d\nConserva el nombre de tu empresa.".format(
+                            remaining / 3600L, (remaining % 3600L) / 60L, remaining % 60L
+                        )
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
+                    }
+                    requestId.isNotBlank() && remaining <= 0L -> {
+                        countdown.text = "La reserva de 48 horas venció. Puedes solicitar un nuevo registro; el servidor comprobará nuevamente la disponibilidad del nombre."
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
+                    }
+                    else -> {
+                        countdown.text = "Al solicitar, el servidor reservará el nombre durante 48 horas."
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
+                    }
                 }
+                if (requestId.isNotBlank() && remaining > 0L && status != "authorized") {
+                    handler.postDelayed(this, 1000L)
+                }
+            }
+        }
+        dialog.setOnShowListener {
+            val submit = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val codeButton = dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+            submit.isEnabled = status != "authorized" &&
+                (requestId.isBlank() || expiry <= System.currentTimeMillis() / 1000L + serverOffset)
+            submit.setOnClickListener {
+                val businessName = businessField.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
                 val email = emailField.text?.toString()?.trim().orEmpty()
-                val phone = phoneField.text?.toString()?.trim().orEmpty()
-                if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
-                    phone.filter { it.isDigit() }.length !in 10..15) {
-                    Toast.makeText(this, "Escribe un correo y teléfono válidos", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+                val phone = phoneField.text?.toString()?.filter { it.isDigit() }.orEmpty()
+                if (businessName.isBlank() || businessName.length > 100 ||
+                    !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
+                    phone.length !in 10..15) {
+                    Toast.makeText(this, "Revisa el nombre, correo y teléfono de la empresa.", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
                 }
+                submit.isEnabled = false
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
-                        val requestId = result.optString("requestId")
                         runOnUiThread {
-                            if (requestId.isBlank()) {
-                                Toast.makeText(this, "No se recibió el folio de registro", Toast.LENGTH_LONG).show()
+                            countdown.text = if (result.optString("status") == "authorized") {
+                                "PAGO CONFIRMADO. Introduce el código de activación."
                             } else {
-                                AlertDialog.Builder(this)
-                                    .setTitle("SOLICITUD DE REGISTRO RECIBIDA")
-                                    .setMessage(
-                                        "Empresa: " + result.optString("businessName", businessName) +
-                                        "\nImporte: $580 MXN\nConcepto: " +
-                                        result.optString("businessName", businessName) +
-                                        "\n\nLa solicitud quedó registrada. Conserva el comprobante y espera el código enviado por los canales oficiales de AYUDA. Cuando lo recibas, vuelve a VINCULAR SENE PATRÓN para introducirlo."
-                                    )
-                                    .setPositiveButton("CERRAR", null)
-                                    .show()
+                                "SOLICITUD REGISTRADA. REALIZA EL PAGO ANTES DE: 48:00:00\nFolio: " + result.optString("requestId")
                             }
+                            Toast.makeText(this, "Solicitud registrada. Envía tu comprobante a AYUDA por WhatsApp. Folio: " + result.optString("requestId"), Toast.LENGTH_LONG).show()
+                            dialog.dismiss()
+                            render()
                         }
                     } catch (error: Exception) {
                         runOnUiThread {
+                            submit.isEnabled = true
+                            val detail = error.message.orEmpty()
                             val message = when {
-                                error.message?.contains("BUSINESS_NAME_ALREADY_REGISTERED") == true ->
-                                    "Ese nombre de empresa ya está registrado."
-                                error.message?.contains("BUSINESS_NAME_REGISTRATION_PENDING") == true ->
-                                    "Ya existe una solicitud pendiente para ese nombre. Contacta AYUDA para continuar."
-                                else -> "No se pudo registrar la solicitud. " + (error.message ?: "")
+                                detail.contains("BUSINESS_NAME_ALREADY_REGISTERED") ->
+                                    "Ese nombre de empresa ya está registrado. Elige otro nombre."
+                                detail.contains("BUSINESS_NAME_REGISTRATION_PENDING") ->
+                                    "Ese nombre está reservado por otra solicitud durante su plazo de 48 horas."
+                                detail.contains("DEVICE_HAS_DIFFERENT_PENDING_REGISTRATION") ->
+                                    "Este teléfono ya tiene una solicitud pendiente con otros datos. Continúa con ese registro o contacta AYUDA."
+                                else -> "No se pudo registrar la solicitud. $detail"
                             }
-                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                            AlertDialog.Builder(this).setTitle("NO SE PUDO REGISTRAR")
+                                .setMessage(message).setPositiveButton("ENTENDIDO", null).show()
                         }
                     }
                 }.start()
             }
-            .setNegativeButton("CANCELAR", null)
-            .show()
+            codeButton.setOnClickListener {
+                dialog.dismiss()
+                showActivationDialog()
+            }
+            tick.run()
+        }
+        dialog.setOnDismissListener { handler.removeCallbacksAndMessages(null) }
+        dialog.show()
     }
 
     private fun showActivationDialog() {
@@ -869,7 +938,6 @@ class MainActivity : Activity() {
                                 "SENE PATRÓN vinculado. Estado: " + result.optString("licenseStatus"),
                                 Toast.LENGTH_LONG
                             ).show()
-                            lastNotificationRefreshAt = 0L
                             render()
                         }
                     } catch (error: Exception) {
@@ -889,9 +957,15 @@ class MainActivity : Activity() {
     }
 
     private fun refreshNotificationsFromServer(force: Boolean = false) {
-        val now = System.currentTimeMillis()
-        if (refreshingNotifications || (!force && now - lastNotificationRefreshAt < 86_400_000L)) return
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val lastRefreshElapsed = prefs.getLong("notifications_refresh_elapsed", 0L)
+        // El tiempo monotónico persiste entre cierres de la app y aplica un intervalo
+        // de 48 horas. Tras reiniciar el teléfono el contador vuelve a cero, por lo que
+        // se permite una nueva sincronización. El botón manual omite el límite.
+        if (refreshingNotifications ||
+            (!force && lastRefreshElapsed > 0L && nowElapsed >= lastRefreshElapsed &&
+                nowElapsed - lastRefreshElapsed < 172_800_000L)) return
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         if (prefs.getString("device_id", null).isNullOrBlank()) return
         refreshingNotifications = true
@@ -902,10 +976,10 @@ class MainActivity : Activity() {
                 val api = SeneApiClient(this, baseUrl)
                 val session = api.session()
                 if (session.optString("licenseStatus") != "EXPIRED") {
-                    // Solo aplicar el intervalo de 24 h cuando el servidor confirmó
-                    // la consulta; un fallo de red no debe silenciar reintentos.
                     api.refreshNotifications()
-                    lastNotificationRefreshAt = System.currentTimeMillis()
+                    check(prefs.edit()
+                        .putLong("notifications_refresh_elapsed", SystemClock.elapsedRealtime())
+                        .commit()) { "No se pudo guardar la hora de actualización de avisos" }
                 }
                 runOnUiThread {
                     refreshingNotifications = false
@@ -933,13 +1007,13 @@ class MainActivity : Activity() {
             .setTitle("PAGAR MENSUALIDAD")
             .setMessage(
                 "RENOVACIÓN SENE · $80 MXN\n\n" +
-                    "1. Realiza el pago de $80 MXN.\n" +
-                    "2. En el concepto escribe exactamente:\n$business\n" +
-                    "3. Envía la captura del comprobante a los números oficiales de Ayuda por WhatsApp.\n" +
-                    "4. Después pulsa YA REALICÉ EL PAGO para enviar la solicitud y espera la confirmación del pago y el código de autorización.\n\n" +
-                    "La licencia se renueva 30 días cuando introduces el código correcto."
+                    "1. Pulsa CREAR SOLICITUD para obtener tu folio.\n" +
+                    "2. Realiza el pago de $80 MXN.\n" +
+                    "3. En el concepto escribe exactamente:\n$business\n" +
+                    "4. Envía la captura del comprobante a los números oficiales de Ayuda por WhatsApp.\n\n" +
+                    "Espera la validación del pago y el código de autorización. La licencia se renueva 30 días cuando introduces el código correcto."
             )
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+            .setPositiveButton("CREAR SOLICITUD") { _, _ ->
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestRenewal()
@@ -987,7 +1061,6 @@ class MainActivity : Activity() {
                         val result = SeneApiClient(this, baseUrl).redeemRenewal(requestId, code)
                         runOnUiThread {
                             Toast.makeText(this, "Licencia renovada por 30 días", Toast.LENGTH_LONG).show()
-                            lastNotificationRefreshAt = 0L
                             render()
                         }
                     } catch (error: Exception) {
@@ -999,6 +1072,88 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("CANCELAR", null)
             .show()
+    }
+
+    private fun showVentasReplacementRequest(team: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) { showServerConfig(); return }
+        val number = if (team == "team1") "1" else "2"
+        val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+        val reasonField = EditText(this).apply {
+            hint = "Motivo de reposición (pérdida o daño)"
+            setSingleLine(false)
+            minLines = 2
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        val business = prefs.getString("business_name", null).orEmpty().ifBlank { "el nombre exacto de tu empresa" }
+        AlertDialog.Builder(this)
+            .setTitle("REPOSICIÓN · EQUIPO $number")
+            .setMessage(
+                "REPOSICIÓN SENE · $500 MXN\n\n" +
+                    "1. Crea primero el folio de reposición.\n" +
+                    "2. Realiza el pago de $500 MXN.\n" +
+                    "3. En el concepto escribe exactamente:\n$business\n" +
+                    "4. Envía el comprobante a los números oficiales de AYUDA por WhatsApp.\n" +
+                    "5. Espera la validación y el código de un solo uso.\n\n" +
+                    "El teléfono anterior seguirá activo hasta que el código sea canjeado."
+            )
+            .setView(reasonField)
+            .setPositiveButton("CREAR SOLICITUD") { _, _ ->
+                val reason = reasonField.text?.toString()?.trim().orEmpty()
+                if (reason.isBlank()) { Toast.makeText(this, "Escribe el motivo de la reposición", Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                Thread {
+                    try {
+                        val api = SeneApiClient(this, baseUrl)
+                        val devices = api.listVentasDevices().optJSONArray("items") ?: org.json.JSONArray()
+                        var deviceId = ""
+                        for (i in 0 until devices.length()) {
+                            val item = devices.optJSONObject(i) ?: continue
+                            if (item.optString("slot") == slot) { deviceId = item.optString("deviceId"); break }
+                        }
+                        if (deviceId.isBlank()) throw IllegalStateException("No hay un teléfono activo vinculado a Equipo $number")
+                        val result = api.requestReplacement(deviceId, reason)
+                        val requestId = result.optString("requestId")
+                        if (requestId.isBlank()) throw IllegalStateException("El servidor no devolvió el folio")
+                        prefs.edit().putString("ventas_replacement_request_$number", requestId).commit()
+                        runOnUiThread {
+                            AlertDialog.Builder(this).setTitle("SOLICITUD REGISTRADA")
+                                .setMessage("Folio: " + requestId + "\n\nImporte: $500 MXN\nSiguiente paso: realiza el pago y envía el comprobante a AYUDA oficial.\nEstado: " + result.optString("status") + "\n\nConserva el mismo folio. No vuelvas a pagar si ya existe una solicitud.")
+                                .setPositiveButton("CERRAR", null).show()
+                            render()
+                        }
+                    } catch (error: Exception) { runOnUiThread { Toast.makeText(this, "No se pudo registrar: " + (error.message ?: ""), Toast.LENGTH_LONG).show() } }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null).show()
+    }
+
+    private fun showVentasReplacementCode(team: String, requestId: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) { showServerConfig(); return }
+        val number = if (team == "team1") "1" else "2"
+        val field = EditText(this).apply {
+            hint = "Código de 12 caracteres"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+        }
+        AlertDialog.Builder(this).setTitle("CANJEAR REPOSICIÓN · EQUIPO $number")
+            .setMessage("Al aceptar el código correcto, el teléfono anterior será revocado y podrás generar el QR de reposición para el mismo espacio.")
+            .setView(field)
+            .setPositiveButton("CANJEAR CÓDIGO") { _, _ ->
+                val code = field.text?.toString()?.trim().orEmpty()
+                if (code.length != 12) { Toast.makeText(this, "El código debe tener 12 caracteres", Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                Thread {
+                    try {
+                        SeneApiClient(this, baseUrl).redeemReplacement(requestId, code)
+                        prefs.edit().remove("ventas_replacement_request_$number").commit()
+                        runOnUiThread { Toast.makeText(this, "Código válido. Ahora genera el QR de reposición del Equipo $number.", Toast.LENGTH_LONG).show(); render() }
+                    } catch (error: Exception) { runOnUiThread { Toast.makeText(this, "No se pudo canjear: " + (error.message ?: ""), Toast.LENGTH_LONG).show() } }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null).show()
     }
 
     private fun showContactDialog() {
@@ -1096,7 +1251,6 @@ class MainActivity : Activity() {
                     try {
                         val result = SeneApiClient(this, baseUrl).restorePatron(name, mail, number)
                         runOnUiThread {
-                            lastNotificationRefreshAt = 0L
                             Toast.makeText(this,
                                 "Vinculación restaurada en este teléfono. Estado: " + result.optString("licenseStatus"),
                                 Toast.LENGTH_LONG).show()
@@ -1124,10 +1278,10 @@ class MainActivity : Activity() {
         val company = field("Nombre exacto de la empresa registrada", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
         val email = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
         val phone = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
-        val instructions = text("REPOSICIÓN DE SENE PATRÓN · $500 MXN\n\n1. Realiza el pago de $500 MXN con el concepto exacto: Reposición SENE PATRÓN.\n2. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\n3. Después pulsa YA REALICÉ EL PAGO.\n\nEl servidor comprobará que empresa, correo y teléfono coincidan con los datos registrados. Tras verificar el pago, el código de reposición se entregará únicamente por los números oficiales de AYUDA.", 14, ink, false)
+        val instructions = text("REPOSICIÓN DE SENE PATRÓN · $500 MXN\n\n1. Pulsa CREAR SOLICITUD DE PAGO para obtener tu folio.\n2. Realiza el pago de $500 MXN con el concepto exacto: Reposición SENE PATRÓN.\n3. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\n\nEl servidor comprobará que empresa, correo y teléfono coincidan con los datos registrados. La solicitud queda pendiente hasta validar el pago. Después, el código de un solo uso se entregará únicamente por los números oficiales de AYUDA.", 14, ink, false)
         form.addView(instructions)
         AlertDialog.Builder(this).setTitle("PERDÍ MI EQUIPO SENE PATRÓN").setView(form)
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+            .setPositiveButton("CREAR SOLICITUD DE PAGO") { _, _ ->
                 val name = company.text?.toString()?.trim().orEmpty()
                 val mail = email.text?.toString()?.trim().orEmpty()
                 val number = phone.text?.toString()?.trim().orEmpty()
@@ -1152,6 +1306,15 @@ class MainActivity : Activity() {
     private fun menuScreen(root: LinearLayout) {
         header(root, "Menú de administración")
         val intro = card()
+        val adminLogo = ImageView(this).apply {
+            setImageBitmap(redLogo())
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Logotipo original SENE PATRÓN"
+        }
+        intro.addView(adminLogo, LinearLayout.LayoutParams(dp(92), dp(72)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(8)
+        })
         intro.addView(kicker("HERRAMIENTAS DEL TITULAR"))
         intro.addView(text("Selecciona el equipo que deseas administrar", 20, ink, true))
         intro.addView(text("Cada equipo tendrá sus propias configuraciones y notificaciones independientes.", 13, muted))
@@ -1221,6 +1384,16 @@ class MainActivity : Activity() {
         device.addView(primaryButton("GENERAR QR DE VINCULACIÓN · EQUIPO $number") { showPairingQr(team, "NEW") })
         gap(device, 7)
         device.addView(primaryButton("GENERAR QR DE REPOSICIÓN · EQUIPO $number") { showPairingQr(team, "REPLACEMENT") })
+        gap(device, 7)
+        device.addView(primaryButton("SOLICITAR REPOSICIÓN · $500 MXN") { showVentasReplacementRequest(team) })
+        val replacementRequestId = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+            .getString("ventas_replacement_request_$number", null)
+        if (!replacementRequestId.isNullOrBlank()) {
+            gap(device, 7)
+            device.addView(primaryButton("INTRODUCIR CÓDIGO DE REPOSICIÓN") {
+                showVentasReplacementCode(team, replacementRequestId)
+            })
+        }
         gap(device, 7)
         device.addView(primaryButton("VER ESTADO DE SEGURIDAD") {
             AlertDialog.Builder(this)
@@ -1314,7 +1487,7 @@ class MainActivity : Activity() {
                 root.addView(info("VÍNCULO · EQUIPO $teamNumber",
                     "Genera un QR temporal para vincular el teléfono SENE VENTAS que ocupará este espacio. Cada QR permite dos vinculaciones y vence en 24 horas."))
                 gap(root, 9)
-                root.addView(primaryButton("GENERAR QR DE VINCULACIÓN") { showPairingQr() })
+                root.addView(primaryButton("GENERAR QR DE VINCULACIÓN") { showPairingQr(teamHome, "NEW") })
             }
         }
         gap(root, 11)

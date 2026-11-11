@@ -4,12 +4,17 @@ on:
   push:
     branches:
       - sene-cloudflare-backend
+      - fix/patron-gradle-toolchain
     paths:
       - "src/**"
+      - "app/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-build.yml"
+  pull_request:
+    branches:
+      - sene-cloudflare-backend
   workflow_dispatch:
 
 permissions:
@@ -28,8 +33,22 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Instalar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Localizar Android SDK y sdkmanager
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          SDKMANAGER="$(find "$SDK_ROOT" /usr/local/lib/android/sdk -type f -name sdkmanager 2>/dev/null | head -n 1)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "No se encontró sdkmanager. Directorios SDK disponibles:"
+            ls -la "$SDK_ROOT" || true
+            find /usr/local/lib/android -maxdepth 4 -type d 2>/dev/null | head -80 || true
+            exit 1
+          fi
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          "$SDKMANAGER" --version
 
       - name: Generar icono con el logotipo original SENE
         run: |
@@ -46,8 +65,8 @@ jobs:
 
       - name: Instalar plataforma y herramientas Android
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Instalar Gradle 8.9
         run: |
@@ -55,13 +74,36 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
 
-      - name: Compilar APK de depuración
-        run: gradle --no-daemon assembleDebug
+      - name: Compilar APK de depuración y guardar diagnóstico
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon assembleDebug --stacktrace --info 2>&1 | tee build-diagnostics.log
+          result=${PIPESTATUS[0]}
+          exit "$result"
 
-      - name: Publicar APK de depuración para pruebas
+      - name: Publicar diagnóstico de compilación
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SENE-PATRON-debug
-          path: build/outputs/apk/debug/*.apk
+          name: SENE-PATRON-build-diagnostics
+          path: build-diagnostics.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Preparar APK con nombre oficial
+        if: success()
+        run: |
+          mkdir -p dist
+          APK="$(find build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          cp "$APK" "dist/SENE PATRON-online.apk"
+
+      - name: Publicar APK para pruebas
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SENE PATRON-online
+          path: "dist/SENE PATRON-online.apk"
           if-no-files-found: error
           retention-days: 14
