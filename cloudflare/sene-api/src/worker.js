@@ -1098,9 +1098,13 @@ async function createPatronRegistrationRequest(request, env) {
     return json({ error: "INVALID_BUSINESS_NAME_OR_IDENTITY" }, 400);
   }
   const normalizedName = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
+  const now = Math.floor(Date.now() / 1000);
+  const reservationCutoff = now - 48 * 60 * 60;
+  // A pending registration reserves its company name for exactly 48 hours.
+  // An already-authorized payment is not expired by this reservation timer.
   const existingForDevice = await env.DB.prepare(
-    "SELECT id, business_name, registered_email, registered_phone, fingerprint, status, created_at FROM registration_requests WHERE installation_id = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
-  ).bind(proof.challenge.installation_id).first();
+    "SELECT id, business_name, registered_email, registered_phone, fingerprint, status, created_at FROM registration_requests WHERE installation_id = ? AND (status = 'authorized' OR (status = 'pending_payment' AND created_at > ?)) ORDER BY created_at DESC LIMIT 1"
+  ).bind(proof.challenge.installation_id, reservationCutoff).first();
   if (existingForDevice) {
     if (existingForDevice.business_name.normalize("NFKC").toLocaleLowerCase("es-MX") !== normalizedName || existingForDevice.registered_email !== registeredEmail || existingForDevice.registered_phone !== registeredPhone) {
       return json({ error: "DEVICE_HAS_DIFFERENT_PENDING_REGISTRATION" }, 409);
@@ -1119,11 +1123,11 @@ async function createPatronRegistrationRequest(request, env) {
   ).bind(businessName).first();
   if (activeName) return json({ error: "BUSINESS_NAME_ALREADY_REGISTERED" }, 409);
   const openName = await env.DB.prepare(
-    "SELECT id FROM registration_requests WHERE normalized_name = ? AND status IN ('pending_payment','authorized') LIMIT 1"
-  ).bind(normalizedName).first();
+    "SELECT id FROM registration_requests WHERE normalized_name = ? AND (status = 'authorized' OR (status = 'pending_payment' AND created_at > ?)) LIMIT 1"
+  ).bind(normalizedName, reservationCutoff).first();
   if (openName) return json({ error: "BUSINESS_NAME_REGISTRATION_PENDING" }, 409);
   const id = crypto.randomUUID();
-  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = now + 48 * 60 * 60;
   try {
     await env.DB.prepare(
       "INSERT INTO registration_requests (id,business_name,normalized_name,installation_id,fingerprint,status,created_at,registered_email,registered_phone) VALUES (?,?,?,?,?,'pending_payment',?,?,?)"
@@ -1137,6 +1141,7 @@ async function createPatronRegistrationRequest(request, env) {
   }
   return json({
     requestId: id, businessName, status: "pending_payment", createdAt: now,
+    expiresAt, reservationSeconds: 48 * 60 * 60,
     amountCents: 58000, currency: "MXN", package: "1_PATRON_2_VENTAS",
     instructions: "Realiza el pago inicial de $580 MXN. En el concepto escribe únicamente el nombre exacto de tu empresa. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp. Después pulsa YA REALICÉ EL PAGO. El código se entrega únicamente después de verificar el pago."
   }, 201);
