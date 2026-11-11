@@ -60,7 +60,8 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 1. `node --check` para detectar errores de sintaxis.
 2. Migraciones 0001–0015 sobre SQLite temporal e `integrity_check`.
-3. Prueba de autorización de reposición pagada de PATRÓN, almacenamiento cifrado y rechazo de reintento que intentaría sustituir el código.\n4. Prueba del límite semanal de 20 operaciones y rechazo de la número 21.
+3. Prueba de autorización de reposición pagada de PATRÓN, almacenamiento cifrado y rechazo de reintento que intentaría sustituir el código.
+4. Prueba del límite semanal de 20 operaciones y rechazo de la número 21.
 5. Pruebas de renovación, pago inicial de $580 y activación por 30 días.
 6. Pruebas de historial y reemplazo de dispositivos, unicidad de solicitudes pendientes, revocación e invalidación de QR.
 7. Prueba del permiso de corrección de un solo uso.
