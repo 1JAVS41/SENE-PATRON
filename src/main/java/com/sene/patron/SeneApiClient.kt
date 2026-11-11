@@ -274,6 +274,15 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return deviceSigned("PATRON_REPLACEMENT_REQUEST", "/v1/patron/devices/replacement-request", body.toString())
     }
 
+    fun listVentasDevices(): JSONObject =
+        deviceSigned("PATRON_DEVICES_LIST", "/v1/patron/devices/list", "{}")
+
+    fun redeemReplacement(requestId: String, authorizationCode: String): JSONObject {
+        val body = JSONObject().put("requestId", requestId)
+            .put("authorizationCode", authorizationCode.trim().uppercase())
+        return deviceSigned("PATRON_REPLACEMENT_REDEEM", "/v1/patron/devices/replacement-redeem", body.toString())
+    }
+
     private fun deviceSigned(purpose: String, path: String, body: String): JSONObject {
         val deviceId = storedDeviceId()
             ?: throw IllegalStateException("SENE PATRÓN todavía no está vinculado")
