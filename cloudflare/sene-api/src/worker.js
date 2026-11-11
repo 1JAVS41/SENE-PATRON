@@ -1100,8 +1100,12 @@ async function createPatronRegistrationRequest(request, env) {
   const normalizedName = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
   const now = Math.floor(Date.now() / 1000);
   const reservationCutoff = now - 48 * 60 * 60;
-  // A pending registration reserves its company name for exactly 48 hours.
-  // An already-authorized payment is not expired by this reservation timer.
+  // Release expired pending reservations in the database so the partial unique
+  // indexes no longer block a fresh request from the same name or installation.
+  // Authorized payments are deliberately preserved beyond the 48-hour window.
+  await env.DB.prepare(
+    "UPDATE registration_requests SET status='cancelled', cancelled_at=? WHERE status='pending_payment' AND created_at <= ?"
+  ).bind(now, reservationCutoff).run();
   const existingForDevice = await env.DB.prepare(
     "SELECT id, business_name, registered_email, registered_phone, fingerprint, status, created_at FROM registration_requests WHERE installation_id = ? AND (status = 'authorized' OR (status = 'pending_payment' AND created_at > ?)) ORDER BY created_at DESC LIMIT 1"
   ).bind(proof.challenge.installation_id, reservationCutoff).first();
