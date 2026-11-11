@@ -1306,6 +1306,15 @@ class MainActivity : Activity() {
     private fun menuScreen(root: LinearLayout) {
         header(root, "Menú de administración")
         val intro = card()
+        val adminLogo = ImageView(this).apply {
+            setImageBitmap(redLogo())
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Logotipo original SENE PATRÓN"
+        }
+        intro.addView(adminLogo, LinearLayout.LayoutParams(dp(92), dp(72)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(8)
+        })
         intro.addView(kicker("HERRAMIENTAS DEL TITULAR"))
         intro.addView(text("Selecciona el equipo que deseas administrar", 20, ink, true))
         intro.addView(text("Cada equipo tendrá sus propias configuraciones y notificaciones independientes.", 13, muted))
