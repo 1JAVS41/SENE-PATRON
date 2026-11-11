@@ -940,7 +940,7 @@ async function pairVentas(request, env) {
       env.DB.prepare(
         `UPDATE pairing_tokens SET remaining_uses = 0, consumed_at = ?
           WHERE token_hash = ? AND remaining_uses = 1 AND revoked_at IS NULL
-            AND consumed_at IS NULL AND operation = 'NEW'
+            AND consumed_at IS NULL AND operation IN ('NEW','REPLACEMENT')
             AND EXISTS (SELECT 1 FROM devices d
               WHERE d.id = ? AND d.license_id = pairing_tokens.license_id
                 AND d.slot_number = pairing_tokens.slot_number)`
