@@ -34,7 +34,7 @@ SENE PATRÓN ya contiene una primera integración Android real, aún no validada
 
 SENE VENTAS ya incluye cliente HTTPS firmado, vinculación QR, solicitudes de trabajador, recepción de respuestas, cola local de cierres de turno y envío de reportes de nómina. La integración sigue pendiente de E2E y de ajustes de disponibilidad de envío en la fecha de pago.
 
-**Importante:** la interfaz Android y el cliente firmado no hacen que el servicio esté operativo por sí solos. La API aún no está desplegada en Cloudflare y la D1 real todavía no tiene las migraciones 0002–0013. No introducir la URL de Hello World como servidor productivo ni activar equipos hasta completar el entorno de pruebas.
+**Importante:** la interfaz Android y el cliente firmado no hacen que el servicio esté operativo por sí solos. La API aún no está desplegada en Cloudflare y la D1 real todavía no tiene las migraciones 0002–0015. No introducir la URL de Hello World como servidor productivo ni activar equipos hasta completar el entorno de pruebas.
 
 ## Panel privado de reposiciones
 
@@ -50,7 +50,7 @@ El panel pide `OPERATOR_TOKEN` en cada sesión y lo mantiene únicamente en memo
 
 ## Estado de despliegue
 
-**El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0014 todavía no se aplican allí.
+**El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0015 todavía no se aplican allí.
 
 No desplegar ni aplicar migraciones remotas hasta completar revisión y pruebas E2E en un entorno de pruebas, y recibir autorización explícita.
 
@@ -59,14 +59,14 @@ No desplegar ni aplicar migraciones remotas hasta completar revisión y pruebas 
 El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 1. `node --check` para detectar errores de sintaxis.
-2. Migraciones 0001–0013 sobre SQLite temporal e `integrity_check`.
+2. Migraciones 0001–0015 sobre SQLite temporal e `integrity_check`.
 3. Prueba del límite semanal de 20 operaciones y rechazo de la número 21.
 4. Pruebas de renovación, pago inicial de $580 y activación por 30 días.
 5. Pruebas de historial y reemplazo de dispositivos, unicidad de solicitudes pendientes, revocación e invalidación de QR.
 6. Prueba del permiso de corrección de un solo uso.
 7. Prueba de que el código de activación no se consume si falta confirmar la primera renta.
 
-Último resultado comprobado al actualizar este documento: CI exitoso para el commit `288c8f21ca50d01d51615760e70c18e29d00d87d`. Estas pruebas SQLite no sustituyen pruebas de extremo a extremo contra Workers/D1 reales.
+Último resultado comprobado al actualizar este documento: CI exitoso para el commit `44bf26d9b875d1749c2f91a6ea5c15543f9cfefa` (incluye migraciones 0001–0015 y panel de reposiciones). Estas pruebas SQLite no sustituyen pruebas de extremo a extremo contra Workers/D1 reales.
 
 ## Migraciones y base D1
 
@@ -99,7 +99,7 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 ## Recuperación de códigos
 
-Se implementaron `POST /v1/operator/licenses/reissue-activation-code` y `POST /v1/operator/renewals/reissue-code`. Rotan el hash del código, invalidan el anterior, exigen pago confirmado y dejan auditoría. Los códigos no se guardan en texto claro. Migración 0007 añade `authorized_by` a renovaciones. CI debe aplicar 0001–0013. Para QR recuperables, configurar PAIRING_TOKEN_ENCRYPTION_KEY como secreto del Worker: 64 caracteres hexadecimales aleatorios (32 bytes). Sin este secreto el servidor rechaza emitir QR, nunca almacena tokens en claro.
+Se implementaron `POST /v1/operator/licenses/reissue-activation-code` y `POST /v1/operator/renewals/reissue-code`. Rotan el hash del código, invalidan el anterior, exigen pago confirmado y dejan auditoría. Los códigos no se guardan en texto claro. Migración 0007 añade `authorized_by` a renovaciones. CI debe aplicar 0001–0015. Para QR y códigos recuperables de reposición, configurar `PAIRING_TOKEN_ENCRYPTION_KEY` como secreto del Worker: 64 caracteres hexadecimales aleatorios (32 bytes). Sin este secreto el servidor rechaza emitir QR o autorizar códigos recuperables; nunca almacena tokens ni códigos en claro. La migración 0015 añade los campos cifrados de recuperación de PATRÓN.
 
 
 **Lectura de notificaciones (migración 0008):** cada solicitud operativa y cada corrección tiene su propio `seen_at`. Al abrir la bandeja del Equipo 1 o 2 se marcan como vistas únicamente las notificaciones pendientes de ese equipo y categoría; el estado de la solicitud permanece `pending` hasta que el patrón aprueba o rechaza. El contador por equipo suma solo notificaciones pendientes aún no vistas. Así el botón puede pasar de verde con número exacto a rojo al consultar, sin borrar solicitudes ni historial.
