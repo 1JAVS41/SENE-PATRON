@@ -1115,8 +1115,11 @@ async function createPatronRegistrationRequest(request, env) {
       ).bind(proof.challenge.fingerprint.toLowerCase(), existingForDevice.id, proof.challenge.installation_id, existingForDevice.fingerprint).run();
       if ((rebound.meta?.changes ?? 0) !== 1) return json({ error: "REGISTRATION_IDENTITY_REBIND_CONFLICT" }, 409);
     }
+    const existingExpiresAt = Number(existingForDevice.created_at) + 48 * 60 * 60;
     return json({ requestId: existingForDevice.id, businessName: existingForDevice.business_name,
-      status: existingForDevice.status, amountCents: 58000, currency: "MXN", duplicate: true });
+      status: existingForDevice.status, createdAt: Number(existingForDevice.created_at),
+      expiresAt: existingExpiresAt, reservationSeconds: 48 * 60 * 60,
+      amountCents: 58000, currency: "MXN", duplicate: true });
   }
   const activeName = await env.DB.prepare(
     "SELECT id FROM licenses WHERE lower(trim(business_name)) = lower(trim(?)) AND status IN ('pending','active','expired','suspended') LIMIT 1"
@@ -1134,8 +1137,8 @@ async function createPatronRegistrationRequest(request, env) {
     ).bind(id,businessName,normalizedName,proof.challenge.installation_id,proof.challenge.fingerprint.toLowerCase(),now,registeredEmail,registeredPhone).run();
   } catch {
     const raced = await env.DB.prepare(
-      "SELECT id,status,created_at FROM registration_requests WHERE normalized_name = ? AND status IN ('pending_payment','authorized') LIMIT 1"
-    ).bind(normalizedName).first();
+      "SELECT id,status,created_at FROM registration_requests WHERE normalized_name = ? AND (status = 'authorized' OR (status = 'pending_payment' AND created_at > ?)) LIMIT 1"
+    ).bind(normalizedName, reservationCutoff).first();
     if (raced) return json({ error: "BUSINESS_NAME_REGISTRATION_PENDING", requestId: raced.id }, 409);
     return json({ error: "REGISTRATION_REQUEST_FAILED" }, 503);
   }
