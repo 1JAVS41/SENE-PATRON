@@ -1212,10 +1212,16 @@ async function registerLegacyLicenseContacts(request, env) {
 
 async function listOperatorRegistrations(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const now = Math.floor(Date.now() / 1000);
+  const reservationCutoff = now - 48 * 60 * 60;
+  // La bandeja administrativa no debe conservar solicitudes cuya reserva ya venció.
+  await env.DB.prepare(
+    "UPDATE registration_requests SET status='cancelled', cancelled_at=? WHERE status='pending_payment' AND created_at <= ?"
+  ).bind(now, reservationCutoff).run();
   const rows = await env.DB.prepare(
-    "SELECT id,business_name,registered_email,registered_phone,status,created_at,installation_id,fingerprint FROM registration_requests WHERE status='pending_payment' ORDER BY created_at ASC LIMIT 100"
-  ).all();
-  return json({ items: rows.results || [] });
+    "SELECT id,business_name,registered_email,registered_phone,status,created_at,installation_id,fingerprint FROM registration_requests WHERE status='pending_payment' AND created_at > ? ORDER BY created_at ASC LIMIT 100"
+  ).bind(reservationCutoff).all();
+  return json({ items: rows.results || [], serverTime: now, reservationSeconds: 48 * 60 * 60 });
 }
 
 async function authorizePatronRegistration(request, env) {
@@ -1230,22 +1236,29 @@ async function authorizePatronRegistration(request, env) {
     return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   }
   const row = await env.DB.prepare(
-    "SELECT id,business_name,registered_email,registered_phone,status FROM registration_requests WHERE id=? LIMIT 1"
+    "SELECT id,business_name,registered_email,registered_phone,status,created_at FROM registration_requests WHERE id=? LIMIT 1"
   ).bind(requestId).first();
   if (!row || row.status !== "pending_payment") return json({ error: "REGISTRATION_NOT_PENDING" }, 409);
+  const now = Math.floor(Date.now() / 1000);
+  const reservationCutoff = now - 48 * 60 * 60;
+  if (Number(row.created_at) <= reservationCutoff) {
+    await env.DB.prepare(
+      "UPDATE registration_requests SET status='cancelled', cancelled_at=? WHERE id=? AND status='pending_payment' AND created_at <= ?"
+    ).bind(now, requestId, reservationCutoff).run();
+    return json({ error: "REGISTRATION_RESERVATION_EXPIRED" }, 409);
+  }
   const licenseId = crypto.randomUUID();
   const code = makeCode();
   const codeHash = await sha256(code);
-  const now = Math.floor(Date.now() / 1000);
   const results = await env.DB.batch([
     // Cada alta depende de que la solicitud siga pendiente; evita licencias duplicadas
     // si dos operadores confirman simultáneamente el mismo comprobante.
     env.DB.prepare(
-      "INSERT INTO licenses (id,label,business_name,registered_email,registered_phone,status,max_devices,activation_code_hash,created_at) SELECT ?,?,?,?,?, 'pending',3,?,? WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='pending_payment')"
-    ).bind(licenseId,row.business_name,row.business_name,row.registered_email,row.registered_phone,codeHash,now,requestId),
+      "INSERT INTO licenses (id,label,business_name,registered_email,registered_phone,status,max_devices,activation_code_hash,created_at) SELECT ?,?,?,?,?, 'pending',3,?,? WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='pending_payment' AND created_at > ?)"
+    ).bind(licenseId,row.business_name,row.business_name,row.registered_email,row.registered_phone,codeHash,now,requestId,reservationCutoff),
     env.DB.prepare(
-      "UPDATE registration_requests SET status='authorized',license_id=?,code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment' AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND activation_code_hash=?)"
-    ).bind(licenseId,codeHash,reference,now,requestId,licenseId,codeHash),
+      "UPDATE registration_requests SET status='authorized',license_id=?,code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND status='pending_payment' AND created_at > ? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND activation_code_hash=?)"
+    ).bind(licenseId,codeHash,reference,now,requestId,reservationCutoff,licenseId,codeHash),
     env.DB.prepare(
       "INSERT INTO payments (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,created_at,confirmed_at,confirmed_by) SELECT ?,?,'SETUP',50000,'MXN','CONFIRMED',?,?,?,?,'operator' WHERE EXISTS (SELECT 1 FROM registration_requests WHERE id=? AND status='authorized' AND license_id=? AND code_hash=?)"
     ).bind(crypto.randomUUID(),licenseId,reference,"registration-setup:"+requestId,now,now,requestId,licenseId,codeHash),
