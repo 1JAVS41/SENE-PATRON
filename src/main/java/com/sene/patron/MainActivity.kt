@@ -138,7 +138,7 @@ class MainActivity : Activity() {
         root.addView(primaryButton("VINCULAR SENE PATRÓN") {
             when {
                 linked -> showOwnerOptions()
-                !registrationRequest.isNullOrBlank() -> showActivationDialog()
+                !registrationRequest.isNullOrBlank() -> showRegistrationDialog()
                 else -> showRegistrationDialog()
             }
         })
@@ -769,79 +769,143 @@ class MainActivity : Activity() {
             showServerConfig()
             return
         }
-        val existingRequest = prefs.getString("registration_request_id", null)
-        if (!existingRequest.isNullOrBlank()) {
-            showActivationDialog()
-            return
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
         }
-        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
-        fun field(hintText: String, type: Int): EditText = EditText(this).apply {
-            hint = hintText; setSingleLine(true); inputType = type
-            setPadding(dp(12), dp(10), dp(12), dp(10)); form.addView(this)
+        fun field(hintText: String, type: Int, saved: String): EditText =
+            EditText(this).apply {
+                hint = hintText
+                setSingleLine(true)
+                inputType = type
+                setText(saved)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                form.addView(this)
+            }
+        val businessField = field(
+            "Nombre exacto de tu empresa",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+            prefs.getString("business_name", "").orEmpty()
+        )
+        val emailField = field(
+            "Correo electrónico registrado",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            prefs.getString("registration_email", "").orEmpty()
+        )
+        val phoneField = field(
+            "Número telefónico registrado",
+            android.text.InputType.TYPE_CLASS_PHONE,
+            prefs.getString("registration_phone", "").orEmpty()
+        )
+        val countdown = TextView(this).apply {
+            textSize = 14f
+            setTextColor(ink)
+            setPadding(0, dp(12), 0, dp(8))
         }
-        val field = field("Nombre exacto de tu empresa", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
-        val emailField = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
-        val phoneField = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
-        AlertDialog.Builder(this)
+        form.addView(countdown)
+        val requestId = prefs.getString("registration_request_id", null).orEmpty()
+        val expiry = prefs.getLong("registration_expires_at", 0L)
+        val serverOffset = prefs.getLong("registration_server_offset", 0L)
+        val status = prefs.getString("registration_status", "none").orEmpty()
+        val dialog = AlertDialog.Builder(this)
             .setTitle("REGISTRO INICIAL · $580 MXN")
             .setMessage(
-                "Para registrar SENE PATRÓN y sus dos equipos SENE VENTAS:\n\n" +
-                "1. Realiza un pago total de $580 MXN ($500 de alta + $80 de primera mensualidad), usando los datos oficiales de pago proporcionados por SENE.\n" +
-                "2. En el concepto escribe ÚNICAMENTE el nombre exacto de tu empresa.\n" +
-                "3. Envía el comprobante a uno de los dos números oficiales del botón AYUDA por WhatsApp.\n" +
-                "4. Después de enviar el comprobante, pulsa YA REALICÉ EL PAGO.\n\n" +
-                "El servidor crea una sola solicitud. El código de activación se entrega a través de los números oficiales de AYUDA únicamente después de verificar el pago. No se activa la licencia antes de introducir el código."
+                "El registro incluye SENE PATRÓN y dos espacios SENE VENTAS. " +
+                "El nombre de tu empresa se reserva durante 48 horas desde que el servidor recibe la solicitud.\n\n" +
+                "Realiza el pago de $580 MXN ($500 de alta + $80 de primera mensualidad). " +
+                "En el concepto escribe únicamente el nombre exacto de tu empresa. " +
+                "Envía el comprobante por WhatsApp a uno de los contactos oficiales del botón AYUDA. " +
+                "La captura no confirma el pago: el administrador debe verificar el depósito y entregarte el código."
             )
             .setView(form)
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
-                val businessName = field.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
-                if (businessName.isBlank() || businessName.length > 100) {
-                    Toast.makeText(this, "Escribe el nombre exacto de tu empresa", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+            .setPositiveButton("SOLICITAR ACTIVACIÓN", null)
+            .setNeutralButton("YA TENGO MI CÓDIGO", null)
+            .setNegativeButton("CERRAR", null)
+            .create()
+        val handler = android.os.Handler(mainLooper)
+        val tick = object : Runnable {
+            override fun run() {
+                val now = System.currentTimeMillis() / 1000L + serverOffset
+                val remaining = expiry - now
+                when {
+                    status == "authorized" -> countdown.text =
+                        "PAGO CONFIRMADO. Introduce el código entregado por SENE para activar tu empresa."
+                    requestId.isNotBlank() && remaining > 0L -> {
+                        countdown.text = "REALIZA EL PAGO ANTES DE: %02d:%02d:%02d\nConserva el nombre de tu empresa.".format(
+                            remaining / 3600L, (remaining % 3600L) / 60L, remaining % 60L
+                        )
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
+                    }
+                    requestId.isNotBlank() && remaining <= 0L -> {
+                        countdown.text = "La reserva de 48 horas venció. Puedes solicitar un nuevo registro; el servidor comprobará nuevamente la disponibilidad del nombre."
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
+                    }
+                    else -> {
+                        countdown.text = "Al solicitar, el servidor reservará el nombre durante 48 horas."
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
+                    }
                 }
+                if (requestId.isNotBlank() && remaining > 0L && status != "authorized") {
+                    handler.postDelayed(this, 1000L)
+                }
+            }
+        }
+        dialog.setOnShowListener {
+            val submit = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val codeButton = dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+            submit.isEnabled = status != "authorized" &&
+                (requestId.isBlank() || expiry <= System.currentTimeMillis() / 1000L + serverOffset)
+            submit.setOnClickListener {
+                val businessName = businessField.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
                 val email = emailField.text?.toString()?.trim().orEmpty()
-                val phone = phoneField.text?.toString()?.trim().orEmpty()
-                if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
-                    phone.filter { it.isDigit() }.length !in 10..15) {
-                    Toast.makeText(this, "Escribe un correo y teléfono válidos", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+                val phone = phoneField.text?.toString()?.filter { it.isDigit() }.orEmpty()
+                if (businessName.isBlank() || businessName.length > 100 ||
+                    !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
+                    phone.length !in 10..15) {
+                    Toast.makeText(this, "Revisa el nombre, correo y teléfono de la empresa.", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
                 }
+                submit.isEnabled = false
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
-                        val requestId = result.optString("requestId")
                         runOnUiThread {
-                            if (requestId.isBlank()) {
-                                Toast.makeText(this, "No se recibió el folio de registro", Toast.LENGTH_LONG).show()
+                            countdown.text = if (result.optString("status") == "authorized") {
+                                "PAGO CONFIRMADO. Introduce el código de activación."
                             } else {
-                                AlertDialog.Builder(this)
-                                    .setTitle("SOLICITUD DE REGISTRO RECIBIDA")
-                                    .setMessage(
-                                        "Empresa: " + result.optString("businessName", businessName) +
-                                        "\nImporte: $580 MXN\nConcepto: " +
-                                        result.optString("businessName", businessName) +
-                                        "\n\nLa solicitud quedó registrada. Conserva el comprobante y espera el código enviado por los canales oficiales de AYUDA. Cuando lo recibas, vuelve a VINCULAR SENE PATRÓN para introducirlo."
-                                    )
-                                    .setPositiveButton("CERRAR", null)
-                                    .show()
+                                "SOLICITUD REGISTRADA. REALIZA EL PAGO ANTES DE: 48:00:00\nFolio: " + result.optString("requestId")
                             }
+                            Toast.makeText(this, "Solicitud registrada. Envía tu comprobante a AYUDA por WhatsApp. Folio: " + result.optString("requestId"), Toast.LENGTH_LONG).show()
+                            dialog.dismiss()
+                            render()
                         }
                     } catch (error: Exception) {
                         runOnUiThread {
+                            submit.isEnabled = true
+                            val detail = error.message.orEmpty()
                             val message = when {
-                                error.message?.contains("BUSINESS_NAME_ALREADY_REGISTERED") == true ->
-                                    "Ese nombre de empresa ya está registrado."
-                                error.message?.contains("BUSINESS_NAME_REGISTRATION_PENDING") == true ->
-                                    "Ya existe una solicitud pendiente para ese nombre. Contacta AYUDA para continuar."
-                                else -> "No se pudo registrar la solicitud. " + (error.message ?: "")
+                                detail.contains("BUSINESS_NAME_ALREADY_REGISTERED") ->
+                                    "Ese nombre de empresa ya está registrado. Elige otro nombre."
+                                detail.contains("BUSINESS_NAME_REGISTRATION_PENDING") ->
+                                    "Ese nombre está reservado por otra solicitud durante su plazo de 48 horas."
+                                detail.contains("DEVICE_HAS_DIFFERENT_PENDING_REGISTRATION") ->
+                                    "Este teléfono ya tiene una solicitud pendiente con otros datos. Continúa con ese registro o contacta AYUDA."
+                                else -> "No se pudo registrar la solicitud. $detail"
                             }
-                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                            AlertDialog.Builder(this).setTitle("NO SE PUDO REGISTRAR")
+                                .setMessage(message).setPositiveButton("ENTENDIDO", null).show()
                         }
                     }
                 }.start()
             }
-            .setNegativeButton("CANCELAR", null)
-            .show()
+            codeButton.setOnClickListener {
+                dialog.dismiss()
+                showActivationDialog()
+            }
+            tick.run()
+        }
+        dialog.setOnDismissListener { handler.removeCallbacksAndMessages(null) }
+        dialog.show()
     }
 
     private fun showActivationDialog() {
