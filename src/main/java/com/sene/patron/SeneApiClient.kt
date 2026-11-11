@@ -43,6 +43,8 @@ class SeneApiClient(context: Context, baseUrl: String) {
                 .putString("registration_request_id", requestId)
                 .putString("registration_status", result.optString("status", "pending_payment"))
                 .putString("business_name", result.optString("businessName", normalizedName))
+                .putString("registration_email", email)
+                .putString("registration_phone", phone)
                 .putLong("registration_created_at", result.optLong("createdAt", serverTime))
                 .putLong("registration_expires_at", expiresAt)
                 .putLong("registration_server_offset", serverTime - System.currentTimeMillis() / 1000L)
