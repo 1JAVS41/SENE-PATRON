@@ -1055,7 +1055,7 @@ async function createPatronRecoveryPaymentRequest(request, env) {
 
 async function listOperatorPatronRecoveryPayments(request, env) {
   if (!(await requireOperator(request, env))) return json({error:"UNAUTHORIZED"},401);
-  const rows=await env.DB.prepare("SELECT r.id,r.license_id,l.business_name,r.registered_email,r.registered_phone,r.created_at,r.installation_id,r.fingerprint FROM patron_recovery_payment_requests r JOIN licenses l ON l.id=r.license_id WHERE r.status='pending_payment' ORDER BY r.created_at ASC LIMIT 100").all();
+  const rows=await env.DB.prepare("SELECT r.id,r.license_id,l.business_name,r.registered_email,r.registered_phone,r.created_at,r.installation_id,r.fingerprint,r.status,r.payment_reference,r.delivery_phone,r.authorized_at FROM patron_recovery_payment_requests r JOIN licenses l ON l.id=r.license_id WHERE r.status IN ('pending_payment','authorized') ORDER BY r.created_at ASC LIMIT 100").all();
   return json({items:rows.results||[]});
 }
 
@@ -1068,15 +1068,28 @@ async function authorizePatronRecoveryPayment(request, env) {
   if (!/^[0-9a-f-]{36}$/i.test(requestId)||!reference||!deliveryPhone) return json({error:"INVALID_REQUEST"},400);
   if (!(await requireOfficialHelpRecipient(env,deliveryPhone))) return json({error:"UNOFFICIAL_CODE_RECIPIENT"},403);
   const row=await env.DB.prepare("SELECT * FROM patron_recovery_payment_requests WHERE id=? LIMIT 1").bind(requestId).first();
-  if (!row||row.status!=="pending_payment") return json({error:"RECOVERY_NOT_PENDING"},409);
+  if (!row) return json({error:"RECOVERY_NOT_FOUND"},404);
+  const normalizedDeliveryPhone=normalizeOfficialPhone(deliveryPhone);
+  if (row.status==="authorized") {
+    if (row.payment_reference!==reference ||
+        normalizeOfficialPhone(row.delivery_phone||"")!==normalizedDeliveryPhone ||
+        !row.encrypted_code) return json({error:"RECOVERY_ALREADY_AUTHORIZED"},409);
+    try {
+      const existingCode=await decryptPairingToken(row.encrypted_code,env);
+      return json({requestId,recoveryCode:existingCode,amountCents:50000,currency:"MXN",reused:true,
+        note:"Se recuperó el mismo código de un solo uso. Entregar exclusivamente por AYUDA oficial."});
+    } catch { return json({error:"RECOVERY_CODE_RECOVERY_FAILED"},503); }
+  }
+  if (row.status!=="pending_payment") return json({error:"RECOVERY_NOT_PENDING"},409);
   const oldPatron=await env.DB.prepare("SELECT id FROM devices WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' LIMIT 1").bind(row.old_patron_device_id,row.license_id).first();
   if (!oldPatron) return json({error:"OLD_PATRON_DEVICE_NOT_FOUND"},409);
   const code=makeCode(), hash=await sha256(code), now=Math.floor(Date.now()/1000), recoveryId=crypto.randomUUID();
+  let encryptedCode;
+  try { encryptedCode=await encryptPairingToken(code,env); }
+  catch { return json({error:"PATRON_RECOVERY_CODE_ENCRYPTION_NOT_CONFIGURED"},503); }
   const results=await env.DB.batch([
-    // Insertar la autorización solo si la solicitud sigue pendiente y el equipo anterior
-    // continúa activo. Evita crear códigos huérfanos si dos operadores autorizan a la vez.
     env.DB.prepare("INSERT INTO patron_recovery_requests (id,license_id,old_patron_device_id,code_hash,reason,status,created_at,created_by) SELECT ?,p.license_id,p.old_patron_device_id,?,?,'pending',?,'operator' FROM patron_recovery_payment_requests p JOIN devices d ON d.id=p.old_patron_device_id AND d.license_id=p.license_id WHERE p.id=? AND p.license_id=? AND p.status='pending_payment' AND p.old_patron_device_id=? AND d.device_type='PATRON' AND d.slot_number=1 AND d.status='active'").bind(recoveryId,hash,"Reposición SENE PATRÓN",now,requestId,row.license_id,row.old_patron_device_id),
-    env.DB.prepare("UPDATE patron_recovery_payment_requests SET status='authorized',code_hash=?,payment_reference=?,authorized_at=? WHERE id=? AND license_id=? AND status='pending_payment' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id=? AND license_id=? AND code_hash=? AND status='pending')").bind(hash,reference,now,requestId,row.license_id,recoveryId,row.license_id,hash),
+    env.DB.prepare("UPDATE patron_recovery_payment_requests SET status='authorized',code_hash=?,encrypted_code=?,delivery_phone=?,payment_reference=?,authorized_at=? WHERE id=? AND license_id=? AND status='pending_payment' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id=? AND license_id=? AND code_hash=? AND status='pending')").bind(hash,encryptedCode,normalizedDeliveryPhone,reference,now,requestId,row.license_id,recoveryId,row.license_id,hash),
     env.DB.prepare("INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?, 'operator','operator','patron_recovery_payment_authorized',?,? WHERE EXISTS (SELECT 1 FROM patron_recovery_payment_requests WHERE id=? AND status='authorized' AND code_hash=?) AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id=? AND status='pending' AND code_hash=?)").bind(crypto.randomUUID(),row.license_id,row.old_patron_device_id,JSON.stringify({requestId,recoveryRequestId:recoveryId,paymentReference:reference,amountCents:50000}),now,requestId,hash,recoveryId,hash)
   ]);
   if (results.some(x=>(x?.meta?.changes??0)!==1)) return json({error:"RECOVERY_AUTHORIZATION_CONFLICT"},409);
