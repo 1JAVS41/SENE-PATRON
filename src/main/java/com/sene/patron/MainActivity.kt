@@ -1074,6 +1074,79 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun showVentasReplacementRequest(team: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) { showServerConfig(); return }
+        val number = if (team == "team1") "1" else "2"
+        val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+        val reasonField = EditText(this).apply {
+            hint = "Motivo de reposición (pérdida o daño)"
+            setSingleLine(false)
+            minLines = 2
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("REPOSICIÓN · EQUIPO $number")
+            .setMessage("Costo fijo: $500 MXN. Realiza el pago y envía el comprobante a AYUDA oficial. El teléfono anterior seguirá activo hasta que el código de un solo uso sea canjeado.")
+            .setView(reasonField)
+            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+                val reason = reasonField.text?.toString()?.trim().orEmpty()
+                if (reason.isBlank()) { Toast.makeText(this, "Escribe el motivo de la reposición", Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                Thread {
+                    try {
+                        val api = SeneApiClient(this, baseUrl)
+                        val devices = api.listVentasDevices().optJSONArray("items") ?: org.json.JSONArray()
+                        var deviceId = ""
+                        for (i in 0 until devices.length()) {
+                            val item = devices.optJSONObject(i) ?: continue
+                            if (item.optString("slot") == slot) { deviceId = item.optString("deviceId"); break }
+                        }
+                        if (deviceId.isBlank()) throw IllegalStateException("No hay un teléfono activo vinculado a Equipo $number")
+                        val result = api.requestReplacement(deviceId, reason)
+                        val requestId = result.optString("requestId")
+                        if (requestId.isBlank()) throw IllegalStateException("El servidor no devolvió el folio")
+                        prefs.edit().putString("ventas_replacement_request_$number", requestId).commit()
+                        runOnUiThread {
+                            AlertDialog.Builder(this).setTitle("SOLICITUD REGISTRADA")
+                                .setMessage("Folio: " + requestId + "\n\nImporte: $500 MXN\nEstado: " + result.optString("status") + "\n\nConserva el mismo folio. No vuelvas a pagar si ya existe una solicitud.")
+                                .setPositiveButton("CERRAR", null).show()
+                            render()
+                        }
+                    } catch (error: Exception) { runOnUiThread { Toast.makeText(this, "No se pudo registrar: " + (error.message ?: ""), Toast.LENGTH_LONG).show() } }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null).show()
+    }
+
+    private fun showVentasReplacementCode(team: String, requestId: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)
+        if (baseUrl.isNullOrBlank()) { showServerConfig(); return }
+        val number = if (team == "team1") "1" else "2"
+        val field = EditText(this).apply {
+            hint = "Código de 12 caracteres"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+        }
+        AlertDialog.Builder(this).setTitle("CANJEAR REPOSICIÓN · EQUIPO $number")
+            .setMessage("Al aceptar el código correcto, el teléfono anterior será revocado y podrás generar el QR de reposición para el mismo espacio.")
+            .setView(field)
+            .setPositiveButton("CANJEAR CÓDIGO") { _, _ ->
+                val code = field.text?.toString()?.trim().orEmpty()
+                if (code.length != 12) { Toast.makeText(this, "El código debe tener 12 caracteres", Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                Thread {
+                    try {
+                        SeneApiClient(this, baseUrl).redeemReplacement(requestId, code)
+                        prefs.edit().remove("ventas_replacement_request_$number").commit()
+                        runOnUiThread { Toast.makeText(this, "Código válido. Ahora genera el QR de reposición del Equipo $number.", Toast.LENGTH_LONG).show(); render() }
+                    } catch (error: Exception) { runOnUiThread { Toast.makeText(this, "No se pudo canjear: " + (error.message ?: ""), Toast.LENGTH_LONG).show() } }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null).show()
+    }
+
     private fun showContactDialog() {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)?.trim()?.takeIf { it.startsWith("https://") }
@@ -1293,6 +1366,16 @@ class MainActivity : Activity() {
         device.addView(primaryButton("GENERAR QR DE VINCULACIÓN · EQUIPO $number") { showPairingQr(team, "NEW") })
         gap(device, 7)
         device.addView(primaryButton("GENERAR QR DE REPOSICIÓN · EQUIPO $number") { showPairingQr(team, "REPLACEMENT") })
+        gap(device, 7)
+        device.addView(primaryButton("SOLICITAR REPOSICIÓN · $500 MXN") { showVentasReplacementRequest(team) })
+        val replacementRequestId = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+            .getString("ventas_replacement_request_$number", null)
+        if (!replacementRequestId.isNullOrBlank()) {
+            gap(device, 7)
+            device.addView(primaryButton("INTRODUCIR CÓDIGO DE REPOSICIÓN") {
+                showVentasReplacementCode(team, replacementRequestId)
+            })
+        }
         gap(device, 7)
         device.addView(primaryButton("VER ESTADO DE SEGURIDAD") {
             AlertDialog.Builder(this)
