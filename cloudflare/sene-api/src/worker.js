@@ -2699,6 +2699,114 @@ async function updateOfficialSupportContacts(request, env) {
   return getOfficialSupportContacts(request, env);
 }
 
+function operatorReplacementPanelResponse() {
+  const html = \`<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>SENE · Operador · Reposiciones</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#edf5ff}
+body{margin:0;padding:22px;max-width:980px;margin-inline:auto}
+header{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.mark{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#1677e8,#16b981);display:grid;place-items:center;font-weight:900}
+h1{font-size:22px;margin:0}p{color:#a8bdd3}
+.panel,.item{background:#101f32;border:1px solid #263b55;border-radius:16px;padding:16px;margin:14px 0}
+input,button{font:inherit;border-radius:10px;padding:12px;border:1px solid #36516e}
+input{background:#081727;color:white;width:100%;box-sizing:border-box;margin:6px 0 12px}
+button{background:#0879df;color:white;border:0;font-weight:700;cursor:pointer}
+button.secondary{background:#29415d}button:disabled{opacity:.5;cursor:wait}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.small{font-size:13px;color:#a8bdd3}.status{color:#6ee7b7;font-weight:700}.error{color:#fda4af}
+.code{font-size:22px;letter-spacing:3px;font-weight:800;color:#6ee7b7;overflow-wrap:anywhere}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.hidden{display:none}
+</style></head><body>
+<header><div class="mark">S</div><div><h1>SENE · Panel de operador</h1><div class="small">Validación de reposiciones · $500 MXN</div></div></header>
+<section class="panel" id="login">
+<h2>Acceso privado</h2><p>Introduce el secreto de operador configurado en Cloudflare. No se guarda en el navegador.</p>
+<input id="token" type="password" autocomplete="off" placeholder="OPERATOR_TOKEN">
+<button id="connect">Entrar al panel</button><div id="loginMsg" class="small"></div>
+</section>
+<section id="app" class="hidden">
+<div class="panel"><div class="grid"><div><strong>Solicitudes</strong><div id="count" class="code">0</div></div><div><strong>Importe</strong><div class="code">$500 MXN</div></div></div>
+<div class="actions"><button id="refresh" class="secondary">Actualizar solicitudes</button><button id="logout" class="secondary">Cerrar sesión</button></div><div id="msg" class="small" aria-live="polite"></div></div>
+<div id="items"></div>
+</section>
+<script>
+(()=> {
+ let operatorToken="";
+ const $=id=>document.getElementById(id);
+ const headers=()=>({"Authorization":"Bearer "+operatorToken,"Content-Type":"application/json"});
+ const message=(value,error=false)=>{ $("msg").textContent=value; $("msg").className=error?"error":"small"; };
+ async function api(path,options={}) {
+   const response=await fetch(path,{...options,headers:{...headers(),...(options.headers||{})},cache:"no-store"});
+   const data=await response.json().catch(()=>({error:"RESPUESTA_INVALIDA"}));
+   if(!response.ok) throw new Error(data.message||data.error||("HTTP "+response.status));
+   return data;
+ }
+ function node(tag,cls,txt){const el=document.createElement(tag);if(cls)el.className=cls;if(txt!==undefined)el.textContent=txt;return el;}
+ async function load(){
+   message("Consultando solicitudes…");
+   try{
+     const data=await api("/v1/operator/replacements/pending");
+     $("count").textContent=String((data.items||[]).length);
+     const list=$("items");list.replaceChildren();
+     for(const row of (data.items||[])){
+       const card=node("article","item");
+       card.append(node("h2","",row.business_name||"Empresa sin nombre"));
+       card.append(node("div","small","Folio: "+row.id));
+       card.append(node("div","small","Equipo: "+(row.slot_number===2?"VENTAS 1":"VENTAS 2")+" · Motivo: "+(row.reason||"No especificado")));
+       card.append(node("div","small","Solicitud: "+new Date(Number(row.created_at)*1000).toLocaleString("es-MX")));
+       card.append(node("div","status",row.payment_status==="authorized"?"Pago autorizado · código recuperable":"Pendiente de validar pago"));
+       const grid=node("div","grid");
+       const ref=node("input");ref.placeholder="Referencia/comprobante de pago";ref.maxLength=120;ref.value=row.payment_reference||"";
+       const phone=node("input");phone.placeholder="Número oficial AYUDA (con lada)";phone.autocomplete="off";
+       grid.append(ref,phone);card.append(grid);
+       const actions=node("div","actions");
+       const issue=node("button","",row.payment_status==="authorized"?"Recuperar código":"Validar pago y emitir código");
+       const copy=node("button","secondary","Copiar código");copy.classList.add("hidden");
+       const code=node("div","code");code.classList.add("hidden");
+       issue.addEventListener("click",async()=>{
+         if(!ref.value.trim()||!phone.value.trim()){message("Captura la referencia de pago y el número oficial AYUDA.",true);return;}
+         issue.disabled=true;message("Validando y autorizando…");
+         try{
+           const result=await api("/v1/operator/replacements/authorize",{method:"POST",body:JSON.stringify({requestId:row.id,paymentReference:ref.value.trim(),deliveryPhone:phone.value.trim()})});
+           code.textContent=result.authorizationCode;code.classList.remove("hidden");copy.classList.remove("hidden");
+           copy.onclick=()=>navigator.clipboard.writeText(result.authorizationCode).then(()=>message("Código copiado. Entrégalo únicamente al número oficial AYUDA.")).catch(()=>message("No se pudo copiar; selecciona el código manualmente.",true));
+           message("Pago autorizado. Código de un solo uso listo; entrégalo únicamente al número oficial AYUDA.");
+           issue.textContent="Código recuperado";
+           $("count").textContent=""; 
+         }catch(e){message(e.message,true);}
+         finally{issue.disabled=false;}
+       });
+       actions.append(issue,copy);card.append(actions,code);list.append(card);
+     }
+     if(!(data.items||[]).length)list.append(node("div","panel","No hay reposiciones pendientes."));
+     message("Solicitudes actualizadas.");
+   }catch(e){message(e.message,true);if(e.message==="UNAUTHORIZED")logout();}
+ }
+ function logout(){
+   operatorToken="";$("token").value="";$("app").classList.add("hidden");$("login").classList.remove("hidden");$("items").replaceChildren();
+ }
+ $("connect").addEventListener("click",async()=>{
+   operatorToken=$("token").value.trim();
+   if(!operatorToken){$("loginMsg").textContent="Introduce el secreto.";return;}
+   try{const r=await api("/v1/operator/replacements/pending");$("login").classList.add("hidden");$("app").classList.remove("hidden");$("count").textContent=String((r.items||[]).length);load();}
+   catch(e){operatorToken="";$("loginMsg").textContent=e.message;}
+ });
+ $("refresh").addEventListener("click",load);$("logout").addEventListener("click",logout);
+})();
+</script></body></html>\`;
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store, max-age=0",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    }
+  });
+}
+
 async function handle(request, env) {
   const url = new URL(request.url);
 
@@ -2706,6 +2814,7 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/operator/support/contacts/register") return registerOfficialSupportContacts(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/support/contacts/update") return updateOfficialSupportContacts(request, env);
 
+  if (request.method === "GET" && url.pathname === "/operator/replacements") return operatorReplacementPanelResponse();
   if (request.method === "GET" && url.pathname === "/health") {
     return json({ service: "SENE licensing API", status: "ok", version: 1 });
   }
