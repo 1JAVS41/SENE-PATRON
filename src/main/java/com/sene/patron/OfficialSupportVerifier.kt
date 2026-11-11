@@ -12,7 +12,7 @@ import java.security.MessageDigest
 internal object OfficialSupportVerifier {
     private const val KEY_ID = "sene-official-contacts-v1"
     private const val ALGORITHM = "ECDSA_P256_SHA256"
-    private const val PUBLIC_KEY_X509 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDa1wlfPzS1pMguQM36nv+A596hF4IZz10lUOoOlxVD+KDThMEeXqIc08JTiR6G5n6GyMOZdQFISDWNuesarbKA=="
+    private const val PUBLIC_KEY_X509 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdFPQFBMkYPP07ZlExK5J7KxsxQyiUYeSuqoxy4rdvgjYhOb69bkL93b4SwbqaHBmac5d9qfz6y7zh9aHzLTtZw=="
 
     fun verifyAndRemember(context: Context, response: JSONObject): JSONObject {
         check(response.optString("keyId") == KEY_ID) { "Identificador de clave oficial desconocido" }
