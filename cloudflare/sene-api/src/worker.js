@@ -1806,6 +1806,9 @@ async function decideOperatorReplacement(request, env, decision) {
         "UPDATE replacement_requests SET status = 'rejected', decided_at = ?, decided_by = 'operator' WHERE id = ? AND status = 'pending'"
       ).bind(now, requestId),
       env.DB.prepare(
+        "UPDATE replacement_payment_requests SET status='cancelled' WHERE replacement_request_id=? AND status='pending_payment'"
+      ).bind(requestId),
+      env.DB.prepare(
         "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, old_device_id, 'operator', 'operator', 'device_replacement_rejected', ?, ? FROM replacement_requests WHERE id = ? AND status = 'rejected' AND decided_at = ?"
       ).bind(crypto.randomUUID(), row.license_id, JSON.stringify({ requestId }), now, requestId, now)
     ]);
