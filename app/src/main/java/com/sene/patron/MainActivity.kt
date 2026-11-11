@@ -236,6 +236,24 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             setSingleLine(true)
         }
+        val businessName = EditText(this).apply {
+            hint = "Nombre de tu empresa"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            setSingleLine(true)
+            setText(prefs.getString("registration_business_name", ""))
+        }
+        val registeredEmail = EditText(this).apply {
+            hint = "Correo del propietario"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setSingleLine(true)
+            setText(prefs.getString("registration_email", ""))
+        }
+        val registeredPhone = EditText(this).apply {
+            hint = "Teléfono del propietario (10 a 15 dígitos)"
+            inputType = InputType.TYPE_CLASS_PHONE
+            setSingleLine(true)
+            setText(prefs.getString("registration_phone", ""))
+        }
         val fields = card()
         fields.addView(kicker("SERVIDOR OFICIAL SENE"))
         fields.addView(text("Dirección HTTPS del Worker", 13, ink, true))
@@ -245,6 +263,74 @@ class MainActivity : Activity() {
         fields.addView(text("Recuperación de un PATRÓN perdido", 13, ink, true))
         fields.addView(recoveryCode)
         root.addView(fields)
+        gap(root, 12)
+        val registrationCard = card()
+        registrationCard.addView(kicker("REGISTRO DE EMPRESA"))
+        registrationCard.addView(text("Reserva tu nombre de empresa durante 48 horas. El pago debe verificarse antes del vencimiento.", 13, muted))
+        registrationCard.addView(businessName)
+        registrationCard.addView(registeredEmail)
+        registrationCard.addView(registeredPhone)
+        val registrationCountdown = text("Aún no tienes una solicitud de activación.", 14, ink, true)
+        registrationCard.addView(registrationCountdown)
+        root.addView(registrationCard)
+        val savedExpiry = prefs.getLong("registration_expires_at", 0L)
+        val savedOffset = prefs.getLong("registration_server_offset", 0L)
+        val countdownHandler = android.os.Handler(mainLooper)
+        val countdownTick = object : Runnable {
+            override fun run() {
+                val remaining = savedExpiry - (System.currentTimeMillis() / 1000L + savedOffset)
+                if (savedExpiry > 0L && remaining > 0L) {
+                    val hours = remaining / 3600L
+                    val minutes = (remaining % 3600L) / 60L
+                    val seconds = remaining % 60L
+                    registrationCountdown.text = "REALIZA EL PAGO ANTES DE: %02d:%02d:%02d\nConserva el nombre de tu empresa.".format(hours, minutes, seconds)
+                } else if (savedExpiry > 0L) {
+                    registrationCountdown.text = "La reserva de 48 horas venció. Solicita un nuevo registro; el servidor volverá a validar si el nombre está disponible."
+                }
+                if (savedExpiry > 0L && remaining > 0L) countdownHandler.postDelayed(this, 1000L)
+            }
+        }
+        countdownHandler.post(countdownTick)
+        val registrationButton = primaryButton("SOLICITAR ACTIVACIÓN · $580 MXN") {
+            val server = base.text.toString().trim().trimEnd('/')
+            val name = businessName.text.toString().trim()
+            val email = registeredEmail.text.toString().trim()
+            val phone = registeredPhone.text.toString().filter { it.isDigit() }
+            if (!server.startsWith("https://") || Uri.parse(server).host.isNullOrBlank() ||
+                name.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
+                phone.length !in 10..15) {
+                Toast.makeText(this, "Completa servidor, empresa, correo y teléfono válidos.", Toast.LENGTH_LONG).show()
+            } else {
+                prefs.edit().putString("server_base_url", server).putString("registration_business_name", name)
+                    .putString("registration_email", email).putString("registration_phone", phone).apply()
+                Thread {
+                    try {
+                        val result = SenePatronApiClient(this, server).requestRegistration(name, email, phone)
+                        val serverTime = result.optLong("serverTime", System.currentTimeMillis() / 1000L)
+                        val expiresAt = result.optLong("expiresAt", result.optLong("createdAt") + 48L * 3600L)
+                        prefs.edit().putString("registration_request_id", result.getString("requestId"))
+                            .putLong("registration_expires_at", expiresAt)
+                            .putLong("registration_server_offset", serverTime - System.currentTimeMillis() / 1000L)
+                            .apply()
+                        runOnUiThread {
+                            registrationButton.isEnabled = false
+                            Toast.makeText(this, "Solicitud registrada. Envía tu comprobante por WhatsApp a un contacto oficial de AYUDA. Folio: " + result.optString("requestId"), Toast.LENGTH_LONG).show()
+                            render()
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            registrationButton.isEnabled = true
+                            val detail = (e as? SenePatronApiException)?.responseBody.orEmpty()
+                            val error = try { org.json.JSONObject(detail).optString("error", detail) } catch (_: Exception) { detail }
+                            Toast.makeText(this, "No se pudo solicitar: " + (error.ifBlank { e.message ?: "Error" }), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.start()
+            }
+        }
+        registrationButton.isEnabled = savedExpiry == 0L ||
+            (savedExpiry - (System.currentTimeMillis() / 1000L + savedOffset)) <= 0L
+        registrationCard.addView(registrationButton)
         gap(root, 12)
         root.addView(primaryButton("GUARDAR DIRECCIÓN") {
             val value = base.text.toString().trim().trimEnd('/')
@@ -257,7 +343,7 @@ class MainActivity : Activity() {
             }
         })
         gap(root, 9)
-        root.addView(primaryButton("ACTIVAR SENE PATRÓN") {
+        root.addView(primaryButton("YA REALICÉ EL PAGO · INTRODUCIR CÓDIGO") {
             val value = base.text.toString().trim().trimEnd('/')
             val activationCode = code.text.toString().trim()
             val uri = Uri.parse(value)
