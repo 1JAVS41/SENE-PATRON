@@ -41,8 +41,7 @@ class MainActivity : Activity() {
     private val success = Color.rgb(22, 139, 69)
     private val white = Color.WHITE
     private var currentPage = "home"
-    @Volatile private var lastNotificationRefreshAt = 0L
-    private var refreshingNotifications = false
+        private var refreshingNotifications = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -747,7 +746,6 @@ class MainActivity : Activity() {
                     try {
                         val result = SeneApiClient(this, baseUrl).recover(code)
                         runOnUiThread {
-                            lastNotificationRefreshAt = 0L
                             Toast.makeText(this, "SENE PATRÓN recuperado. Estado: " + result.optString("licenseStatus"), Toast.LENGTH_LONG).show()
                             render()
                         }
@@ -960,9 +958,15 @@ class MainActivity : Activity() {
     }
 
     private fun refreshNotificationsFromServer(force: Boolean = false) {
-        val now = System.currentTimeMillis()
-        if (refreshingNotifications || (!force && now - lastNotificationRefreshAt < 86_400_000L)) return
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val lastRefreshElapsed = prefs.getLong("notifications_refresh_elapsed", 0L)
+        // El tiempo monotónico persiste entre cierres de la app y evita consultas
+        // repetidas al reabrirla. Tras reiniciar el teléfono el contador vuelve a cero,
+        // por lo que se permite una nueva sincronización. El botón manual omite el límite.
+        if (refreshingNotifications ||
+            (!force && lastRefreshElapsed > 0L && nowElapsed >= lastRefreshElapsed &&
+                nowElapsed - lastRefreshElapsed < 86_400_000L)) return
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() } ?: return
         if (prefs.getString("device_id", null).isNullOrBlank()) return
         refreshingNotifications = true
@@ -973,10 +977,10 @@ class MainActivity : Activity() {
                 val api = SeneApiClient(this, baseUrl)
                 val session = api.session()
                 if (session.optString("licenseStatus") != "EXPIRED") {
-                    // Solo aplicar el intervalo de 24 h cuando el servidor confirmó
-                    // la consulta; un fallo de red no debe silenciar reintentos.
                     api.refreshNotifications()
-                    lastNotificationRefreshAt = System.currentTimeMillis()
+                    check(prefs.edit()
+                        .putLong("notifications_refresh_elapsed", SystemClock.elapsedRealtime())
+                        .commit()) { "No se pudo guardar la hora de actualización de avisos" }
                 }
                 runOnUiThread {
                     refreshingNotifications = false
