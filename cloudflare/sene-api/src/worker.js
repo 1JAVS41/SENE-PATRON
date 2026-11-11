@@ -2700,7 +2700,7 @@ async function updateOfficialSupportContacts(request, env) {
 }
 
 function operatorReplacementPanelResponse() {
-  const html = \`<!doctype html>
+  const html = `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer"><title>SENE · Operador · Reposiciones</title>
 <style>
@@ -2795,7 +2795,7 @@ button.secondary{background:#29415d}button:disabled{opacity:.5;cursor:wait}
  });
  $("refresh").addEventListener("click",load);$("logout").addEventListener("click",logout);
 })();
-</script></body></html>\`;
+</script></body></html>`;
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
