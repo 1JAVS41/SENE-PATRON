@@ -54,6 +54,8 @@ const db = {
       },
       async all() {
         if (sql.includes("FROM registration_requests WHERE status='pending_payment'")) return { results: [] };
+        if (sql.includes("FROM licenses l")) return { results: [] };
+        if (sql.includes("FROM audit_log")) return { results: [] };
         throw new Error("Unexpected all query: " + sql);
       }
     };
@@ -86,6 +88,14 @@ const operatorInbox = await worker.fetch(new Request("https://sene.test/v1/opera
 }), env);
 assert.equal(operatorInbox.status, 200, "La sesión SENE ADMIN debe autorizar las bandejas del operador");
 assert.deepEqual((await operatorInbox.json()).items, []);
+
+for (const path of ["/v1/operator/licenses", "/v1/operator/audit"]) {
+  const response = await worker.fetch(new Request("https://sene.test" + path, {
+    method: "GET", headers: { authorization: "Bearer " + session.accessToken }
+  }), env);
+  assert.equal(response.status, 200, "La sesión admin debe consultar " + path);
+  assert.deepEqual((await response.json()).items, []);
+}
 
 const logout = await worker.fetch(new Request("https://sene.test/v1/admin/logout", {
   method: "POST", headers: { authorization: "Bearer " + session.accessToken }
