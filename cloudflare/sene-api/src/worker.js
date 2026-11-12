@@ -571,12 +571,12 @@ async function restorePatron(request, env) {
   if (!proof.ok) return json({ error: proof.error }, proof.status);
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
-  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\\s+/g, " ") : "";
+  const businessName = typeof body.businessName === "string" ? body.businessName.trim().replace(/\s+/g, " ") : "";
   const email = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
-  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\\D/g, "") : "";
+  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\D/g, "") : "";
   const identity = await validateBootstrapIdentity(body);
   if (!identity || !businessName || businessName.length > 100 ||
-      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || phone.length < 10 || phone.length > 15 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || phone.length < 10 || phone.length > 15 ||
       Object.keys(body).some((key) => !["businessName", "registeredEmail", "registeredPhone", "installationId", "continuityId", "publicKeyBase64", "fingerprint"].includes(key)) ||
       identity.installationId !== proof.challenge.installation_id ||
       identity.fingerprint !== String(proof.challenge.fingerprint).toLowerCase()) {
@@ -1204,10 +1204,10 @@ async function registerLegacyLicenseContacts(request, env) {
   try { body = await request.json(); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
   const licenseId = typeof body.licenseId === "string" ? body.licenseId : "";
   const email = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
-  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\\D/g, "") : "";
+  const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\D/g, "") : "";
   const verificationNote = typeof body.verificationNote === "string" ? body.verificationNote.trim().slice(0, 200) : "";
   if (!/^[0-9a-f-]{36}$/i.test(licenseId) ||
-      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
       phone.length < 10 || phone.length > 15 || verificationNote.length < 8 ||
       Object.keys(body).some((key) => !["licenseId", "registeredEmail", "registeredPhone", "verificationNote"].includes(key))) {
     return json({ error: "INVALID_REGISTERED_CONTACTS" }, 400);
