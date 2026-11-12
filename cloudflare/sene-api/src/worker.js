@@ -1385,12 +1385,12 @@ async function createPatronRecoveryPaymentRequest(request, env) {
         ).bind(proof.challenge.fingerprint.toLowerCase(), raced.id, proof.challenge.installation_id, raced.fingerprint).run();
         if ((rebound.meta?.changes ?? 0) !== 1) return json({ error: "RECOVERY_IDENTITY_REBIND_CONFLICT" }, 409);
       }
-      return json({requestId:raced.id,status:raced.status,createdAt:raced.created_at,amountCents:50000,currency:"MXN",duplicate:true});
+      return json({requestId:raced.id,folio:raced.id,status:raced.status,createdAt:raced.created_at,amountCents:50000,currency:"MXN",duplicate:true});
     }
     return json({error:"RECOVERY_REQUEST_FAILED"},503);
   }
   return json({requestId:id,status:"pending_payment",createdAt:now,amountCents:50000,currency:"MXN",businessName:license.business_name,
-    instructions:"Reposición de SENE PATRÓN: realiza un pago de $500 MXN. En el concepto escribe únicamente: Reposición SENE PATRÓN. Envía el comprobante a uno de los números oficiales del botón AYUDA por WhatsApp. Después pulsa YA REALICÉ EL PAGO. El código se entrega únicamente después de verificar el pago."},201);
+    instructions:`Reposición de SENE PATRÓN: realiza un pago de $500 MXN. En el concepto o referencia escribe exactamente el folio: ${id}. Envía el comprobante a un número oficial de AYUDA por WhatsApp e incluye el mismo folio. El código se entrega únicamente después de verificar el pago.`},201);
 }
 
 async function listOperatorPatronRecoveryPayments(request, env) {
@@ -1474,7 +1474,7 @@ async function createPatronRegistrationRequest(request, env) {
       if ((rebound.meta?.changes ?? 0) !== 1) return json({ error: "REGISTRATION_IDENTITY_REBIND_CONFLICT" }, 409);
     }
     const existingExpiresAt = Number(existingForDevice.created_at) + 48 * 60 * 60;
-    return json({ requestId: existingForDevice.id, businessName: existingForDevice.business_name,
+    return json({ requestId: existingForDevice.id, folio: existingForDevice.id, businessName: existingForDevice.business_name,
       status: existingForDevice.status, createdAt: Number(existingForDevice.created_at),
       expiresAt: existingExpiresAt, serverTime: now, reservationSeconds: 48 * 60 * 60,
       amountCents: 58000, currency: "MXN", duplicate: true });
@@ -1501,7 +1501,7 @@ async function createPatronRegistrationRequest(request, env) {
     return json({ error: "REGISTRATION_REQUEST_FAILED" }, 503);
   }
   return json({
-    requestId: id, businessName, status: "pending_payment", createdAt: now,
+    requestId: id, folio: id, businessName, status: "pending_payment", createdAt: now,
     expiresAt, serverTime: now, reservationSeconds: 48 * 60 * 60,
     amountCents: 58000, currency: "MXN", package: "1_PATRON_2_VENTAS",
     instructions: `Realiza el pago inicial de $580 MXN. En el concepto o referencia escribe exactamente el folio de solicitud: ${id}. Conserva el comprobante y envíalo a un número oficial de AYUDA. El folio identifica tu solicitud; enviar el comprobante no confirma el pago. El código se entrega únicamente después de verificar el pago.`
@@ -1678,7 +1678,7 @@ async function createRenewalRequest(request, env) {
   const existing = await env.DB.prepare(
     "SELECT id, status, created_at FROM renewal_requests WHERE license_id = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
   ).bind(ctx.licenseId).first();
-  if (existing) return json({ requestId: existing.id, status: existing.status, createdAt: existing.created_at, duplicate: true });
+  if (existing) return json({ requestId: existing.id, folio: existing.id, status: existing.status, createdAt: existing.created_at, amountCents: 8000, currency: "MXN", duplicate: true, instructions: `Renovación SENE: paga $80 MXN. En el concepto o referencia escribe exactamente el folio: ${existing.id}. Envía el comprobante a AYUDA e incluye el mismo folio.` });
   const license = await env.DB.prepare(
     "SELECT business_name FROM licenses WHERE id = ? LIMIT 1"
   ).bind(ctx.licenseId).first();
@@ -1692,13 +1692,13 @@ async function createRenewalRequest(request, env) {
     const raced = await env.DB.prepare(
       "SELECT id, status, created_at FROM renewal_requests WHERE license_id = ? AND status IN ('pending_payment','authorized') ORDER BY created_at DESC LIMIT 1"
     ).bind(ctx.licenseId).first();
-    if (raced) return json({ requestId: raced.id, status: raced.status, createdAt: raced.created_at, duplicate: true });
+    if (raced) return json({ requestId: raced.id, folio: raced.id, status: raced.status, createdAt: raced.created_at, amountCents: 8000, currency: "MXN", duplicate: true, instructions: `Renovación SENE: paga $80 MXN. En el concepto o referencia escribe exactamente el folio: ${raced.id}. Envía el comprobante a AYUDA e incluye el mismo folio.` });
     return json({ error: "SERVICE_UNAVAILABLE" }, 503);
   }
   return json({
-    requestId: id, status: "pending_payment", createdAt: now,
+    requestId: id, folio: id, status: "pending_payment", createdAt: now,
     amountCents: 8000, currency: "MXN",
-    instructions: "Paga $80 MXN, escribe el nombre exacto de tu empresa en el concepto y envía el comprobante a los canales oficiales de Ayuda. Después espera el código de autorización."
+    instructions: `Renovación SENE: paga $80 MXN. En el concepto o referencia escribe exactamente el folio: ${id}. Envía el comprobante a un número oficial de AYUDA e incluye el mismo folio. Después espera la validación y el código de autorización.`
   }, 201);
 }
 
@@ -2021,9 +2021,9 @@ async function createReplacementRequest(request, env) {
     "SELECT r.id, r.status, r.created_at, p.status AS payment_status FROM replacement_requests r JOIN replacement_payment_requests p ON p.replacement_request_id=r.id WHERE r.old_device_id=? AND p.status IN ('pending_payment','authorized') ORDER BY r.created_at DESC LIMIT 1"
   ).bind(oldDeviceId).first();
   if (existing) return json({
-    requestId: existing.id, status: existing.payment_status, amountCents: 50000,
+    requestId: existing.id, folio: existing.id, status: existing.payment_status, amountCents: 50000,
     currency: "MXN", createdAt: Number(existing.created_at), duplicate: true,
-    message: "La solicitud ya existe; conserva el mismo folio y no realices otro pago."
+    instructions: `Reposición de equipo: paga $500 MXN. En el concepto o referencia escribe exactamente el folio: ${existing.id}. Envía el comprobante a AYUDA e incluye el mismo folio.`
   });
 
   const requestId = crypto.randomUUID();
@@ -2046,15 +2046,15 @@ async function createReplacementRequest(request, env) {
     const raced = await env.DB.prepare(
       "SELECT r.id,r.status,r.created_at,p.status AS payment_status FROM replacement_requests r JOIN replacement_payment_requests p ON p.replacement_request_id=r.id WHERE r.old_device_id=? AND p.status IN ('pending_payment','authorized') ORDER BY r.created_at DESC LIMIT 1"
     ).bind(oldDeviceId).first();
-    if (raced) return json({ requestId: raced.id, status: raced.payment_status, amountCents: 50000, currency: "MXN", createdAt: Number(raced.created_at), duplicate: true });
+    if (raced) return json({ requestId: raced.id, folio: raced.id, status: raced.payment_status, amountCents: 50000, currency: "MXN", createdAt: Number(raced.created_at), duplicate: true, instructions: `Reposición de equipo: paga $500 MXN. En el concepto o referencia escribe exactamente el folio: ${raced.id}. Envía el comprobante a AYUDA e incluye el mismo folio.` });
     return json({ error: "REPLACEMENT_REQUEST_CONFLICT" }, 409);
   }
   return json({
-    requestId, deviceId: oldDeviceId,
+    requestId, folio: requestId, deviceId: oldDeviceId,
     slot: oldDevice.slot_number === 2 ? "VENTAS_1" : "VENTAS_2",
     status: "pending_payment", amountCents: 50000, currency: "MXN",
     createdAt: now,
-    message: "Paga $500 MXN y espera la validación. El equipo anterior seguirá activo hasta canjear el código."
+    instructions: `Reposición de equipo: paga $500 MXN. En el concepto o referencia escribe exactamente el folio: ${requestId}. Envía el comprobante a AYUDA e incluye el mismo folio. El equipo anterior seguirá activo hasta canjear el código.`
   }, 201);
 }
 
