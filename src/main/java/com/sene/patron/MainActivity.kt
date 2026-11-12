@@ -32,6 +32,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONObject
 
+private const val SENE_TEST_SERVER_URL = "https://sene-licensing-api-testing.1codex41.workers.dev"
+
 class MainActivity : Activity() {
     private val bg = Color.rgb(244, 245, 250)
     private val ink = Color.rgb(23, 33, 61)
@@ -46,6 +48,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
+            .putString("server_base_url", SENE_TEST_SERVER_URL).apply()
         window.statusBarColor = bg
         window.navigationBarColor = bg
         if (android.os.Build.VERSION.SDK_INT >= 23) {
@@ -700,16 +704,9 @@ class MainActivity : Activity() {
     }
 
     private fun showServerConfig() {
-        // La URL del servidor es configuración interna de SENE; nunca debe
-        // solicitarse al dueño desde Vincular o Generar QR.
         AlertDialog.Builder(this)
-            .setTitle("SERVIDOR SENE EN PREPARACIÓN")
-            .setMessage(
-                "La conexión oficial todavía no está habilitada. " +
-                "No escribas ni uses direcciones de prueba. " +
-                "Vincular SENE PATRÓN y generar los QR estarán disponibles " +
-                "cuando el servidor oficial quede publicado y configurado por SENE."
-            )
+            .setTitle("CONEXIÓN SENE CONFIGURADA")
+            .setMessage("SENE PATRÓN está conectado automáticamente al servidor aislado de pruebas. No necesitas escribir ninguna URL. Esta dirección es temporal y no corresponde al servidor de producción.")
             .setPositiveButton("ENTENDIDO", null)
             .show()
     }
