@@ -913,7 +913,7 @@ async function restorePatron(request, env) {
     return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
   }
   const oldPatron = await env.DB.prepare(
-    "SELECT id FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? LIMIT 1"
+    "SELECT id,fingerprint FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? LIMIT 1"
   ).bind(license.id, identity.continuityId).first();
   if (!oldPatron) return json({ error: "SAME_PHONE_NOT_VERIFIED" }, 409);
   const pendingRecovery = await env.DB.prepare(
@@ -1194,7 +1194,7 @@ async function restoreVentas(request, env) {
     return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
   }
   const oldDevice = await env.DB.prepare(
-    "SELECT id,slot_number FROM devices WHERE license_id=? AND device_type='VENTAS' AND status='active' AND continuity_id=? AND slot_number IN (2,3) LIMIT 1"
+    "SELECT id,slot_number,fingerprint FROM devices WHERE license_id=? AND device_type='VENTAS' AND status='active' AND continuity_id=? AND slot_number IN (2,3) LIMIT 1"
   ).bind(license.id, identity.continuityId).first();
   if (!oldDevice) return json({ error: "SAME_PHONE_NOT_VERIFIED" }, 409);
   const pendingReplacement = await env.DB.prepare(
