@@ -657,6 +657,9 @@ async function reissuePatronRecoveryCode(request, env) {
   if (!paidRequest) return json({ error: "PAID_RECOVERY_REQUIRED" }, 409);
   const code = makeCode();
   const codeHash = await sha256(code);
+  let encryptedCode;
+  try { encryptedCode = await encryptPairingToken(code, env); }
+  catch { return json({ error: "PATRON_RECOVERY_CODE_ENCRYPTION_NOT_CONFIGURED" }, 503); }
   const now = Math.floor(Date.now() / 1000);
   const statements = [
     env.DB.prepare(
@@ -665,8 +668,8 @@ async function reissuePatronRecoveryCode(request, env) {
   ];
   if (paidRequest) {
     statements.push(env.DB.prepare(
-      "UPDATE patron_recovery_payment_requests SET code_hash = ? WHERE id = ? AND code_hash = ? AND status = 'authorized'"
-    ).bind(codeHash, paidRequest.id, existing.code_hash));
+      "UPDATE patron_recovery_payment_requests SET code_hash = ?, encrypted_code = ? WHERE id = ? AND code_hash = ? AND status = 'authorized'"
+    ).bind(codeHash, encryptedCode, paidRequest.id, existing.code_hash));
   }
   statements.push(env.DB.prepare(
     "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, license_id, old_patron_device_id, 'operator', 'operator', 'patron_recovery_code_reissued', ?, ? FROM patron_recovery_requests WHERE id = ? AND status = 'pending' AND code_hash = ?"
