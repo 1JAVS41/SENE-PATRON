@@ -524,25 +524,25 @@ async function recoverPatron(request, env) {
       // D1 batch statements are transactional, but a successful UPDATE with 0 changes
       // does not abort later statements; the processing state gates every side effect.
       env.DB.prepare(
-        "UPDATE patron_recovery_requests SET status = 'processing' WHERE id = ? AND code_hash = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = patron_recovery_requests.old_patron_device_id AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active')"
-      ).bind(recovery.id, codeHash),
+        "UPDATE patron_recovery_requests SET status = 'cancelled', consumed_at = ? WHERE id = ? AND code_hash = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = patron_recovery_requests.old_patron_device_id AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active')"
+      ).bind(now, recovery.id, codeHash),
       env.DB.prepare(
-        "UPDATE devices SET status = 'revoked' WHERE id = ? AND license_id = ? AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'processing')"
-      ).bind(recovery.old_patron_device_id, recovery.license_id, recovery.id, codeHash),
+        "UPDATE devices SET status = 'revoked' WHERE id = ? AND license_id = ? AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'cancelled' AND consumed_at = ?)"
+      ).bind(recovery.old_patron_device_id, recovery.license_id, recovery.id, codeHash, now),
       env.DB.prepare(
-        "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked') AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'processing')"
-      ).bind(now, recovery.license_id, recovery.old_patron_device_id, recovery.id, codeHash),
+        "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked') AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'cancelled' AND consumed_at = ?)"
+      ).bind(now, recovery.license_id, recovery.old_patron_device_id, recovery.id, codeHash, now),
       env.DB.prepare(
-        "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT ?, r.license_id, 'PATRON', ?, ?, ?, ?, 1, 'active', ? FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id JOIN devices old ON old.id = r.old_patron_device_id WHERE r.id = ? AND r.code_hash = ? AND r.status = 'processing' AND old.status = 'revoked' AND l.status IN ('active','expired') AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id = r.license_id AND d.slot_number = 1 AND d.status = 'active')"
-      ).bind(newDeviceId, identity.installationId, body.continuityId.toLowerCase(), identity.publicKey, identity.fingerprint, now, recovery.id, codeHash),
+        "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT ?, r.license_id, 'PATRON', ?, ?, ?, ?, 1, 'active', ? FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id JOIN devices old ON old.id = r.old_patron_device_id WHERE r.id = ? AND r.code_hash = ? AND r.status = 'cancelled' AND r.consumed_at = ? AND old.status = 'revoked' AND l.status IN ('active','expired') AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id = r.license_id AND d.slot_number = 1 AND d.status = 'active')"
+      ).bind(newDeviceId, identity.installationId, body.continuityId.toLowerCase(), identity.publicKey, identity.fingerprint, now, recovery.id, codeHash, now),
       // Conserva cualquier solicitud de mensualidad abierta y su código pagado,
       // trasladándolos al nuevo dispositivo PATRÓN dentro de la misma transacción.
       env.DB.prepare(
         "UPDATE renewal_requests SET patron_device_id = ? WHERE license_id = ? AND patron_device_id = ? AND status IN ('pending_payment','authorized') AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'active')"
       ).bind(newDeviceId, recovery.license_id, recovery.old_patron_device_id, newDeviceId),
       env.DB.prepare(
-        "UPDATE patron_recovery_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND code_hash = ? AND status = 'processing' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND status = 'active')"
-      ).bind(now, recovery.id, codeHash, newDeviceId),
+        "UPDATE patron_recovery_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND code_hash = ? AND status = 'cancelled' AND consumed_at = ? AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND status = 'active')"
+      ).bind(now, recovery.id, codeHash, newDeviceId, now),
       env.DB.prepare(
         "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'system', 'patron_recovery', 'patron_device_recovered', ?, ? WHERE EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND status = 'consumed' AND consumed_at = ?) AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'active')"
       ).bind(crypto.randomUUID(), recovery.license_id, newDeviceId, JSON.stringify({ recoveryRequestId: recovery.id, oldDeviceId: recovery.old_patron_device_id }), now, recovery.id, now, newDeviceId),
