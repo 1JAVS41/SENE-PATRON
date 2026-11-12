@@ -114,7 +114,7 @@ async function signedAck(body) {
 const body = {
   ackId: "123e4567-e89b-42d3-a456-426614174001",
   stream: "PATRON_REQUESTS",
-  deliveryId: "delivery-001",
+  deliveryId: "PATRON_REQUESTS:" + "a".repeat(48),
   payloadSha256: "a".repeat(64),
   cursor: 1,
   recipientDeviceId: deviceId
