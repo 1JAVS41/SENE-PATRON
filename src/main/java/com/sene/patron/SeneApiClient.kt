@@ -267,7 +267,7 @@ class SeneApiClient(context: Context, baseUrl: String) {
     }
 
     fun paydayBundle(paymentDate: String): JSONObject {
-        require(paymentDate.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) { "Fecha de pago no válida" }
+        require(isStrictIsoDate(paymentDate)) { "Fecha de pago no válida" }
         val body = JSONObject().put("paymentDate", paymentDate)
         return deviceSigned("PATRON_PAYDAY_BUNDLE", "/v1/patron/payday/bundle", body.toString())
     }
