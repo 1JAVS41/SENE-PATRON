@@ -1,6 +1,8 @@
 package com.sene.patron
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.Bitmap.Config
@@ -1119,6 +1121,79 @@ class MainActivity : Activity() {
                 // y provocaría un ciclo de reintentos continuo cuando la red falla.
                 runOnUiThread {
                     refreshingNotifications = false
+                }
+            }
+        }.start()
+    }
+
+    private fun showPaymentFolioDialog(
+        title: String,
+        folio: String,
+        amount: String,
+        paymentType: String,
+        nextLabel: String? = null,
+        nextAction: (() -> Unit)? = null
+    ) {
+        val message = "FOLIO DE SOLICITUD\\n$folio\\n\\n" +
+            "CONCEPTO / REFERENCIA EXACTA\\n$folio\\n\\n" +
+            "Importe: $amount\\n\\n" +
+            "No cambies ni recortes el folio. Inclúyelo también en el mensaje de AYUDA junto con el comprobante. " +
+            "El comprobante no confirma el pago; SENE debe validarlo."
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("ENVIAR AVISO POR WHATSAPP") { _, _ ->
+                sendPaymentNoticeToAyuda(folio, amount, paymentType)
+            }
+            .setNegativeButton("CERRAR", null)
+        if (nextAction != null && !nextLabel.isNullOrBlank()) {
+            dialog.setNeutralButton(nextLabel) { _, _ -> nextAction() }
+        }
+        dialog.show()
+    }
+
+    private fun sendPaymentNoticeToAyuda(folio: String, amount: String, paymentType: String) {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.trim()?.takeIf { it.startsWith("https://") }
+        if (baseUrl == null) {
+            showServerConfig()
+            return
+        }
+        Thread {
+            try {
+                val contacts = SeneApiClient(this, baseUrl).officialSupportContacts()
+                val options = listOf(
+                    "AYUDA 1" to contacts.optString("helpPhone1").filter { it.isDigit() },
+                    "AYUDA 2" to contacts.optString("helpPhone2").filter { it.isDigit() }
+                ).filter { it.second.length >= 10 }
+                if (options.isEmpty()) throw IllegalStateException("El servidor no devolvió teléfonos oficiales válidos.")
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    AlertDialog.Builder(this)
+                        .setTitle("CONTACTO OFICIAL SENE · VERIFICADO")
+                        .setItems(options.map { it.first }.toTypedArray()) { _, index ->
+                            val phone = options[index].second
+                            val business = prefs.getString("business_name", "").orEmpty()
+                            val message = "AVISO DE PAGO SENE\\n" +
+                                "Tipo: $paymentType\\n" +
+                                "Empresa: $business\\n" +
+                                "Folio de solicitud: $folio\\n" +
+                                "Importe: $amount\\n" +
+                                "Adjunto el comprobante para que SENE valide el pago."
+                            val uri = Uri.parse("https://wa.me/$phone?text=${Uri.encode(message)}")
+                            startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        }
+                        .setNegativeButton("CANCELAR", null)
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        Toast.makeText(this,
+                            "No se pudieron verificar los contactos oficiales. Conserva el folio y abre AYUDA. " +
+                                (error.message ?: ""),
+                            Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }.start()
