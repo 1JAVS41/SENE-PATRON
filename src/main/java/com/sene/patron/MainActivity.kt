@@ -484,11 +484,13 @@ class MainActivity : Activity() {
                 val api = SeneApiClient(this, baseUrl)
                 val result = api.reportsInbox(slot)
                 check(prefs.edit().putString("reports_$team", result.toString())
-                    .putLong("reports_updated_$team", System.currentTimeMillis())
                     .putBoolean("reports_refreshing_$team", false).commit()) {
                     "No se pudo guardar localmente el lote de reportes."
                 }
                 api.acknowledgePersistedDelivery("PATRON_REPORTS_$slot", result)
+                check(prefs.edit().putLong("reports_updated_$team", System.currentTimeMillis()).commit()) {
+                    "No se pudo guardar el cursor temporal de reportes confirmados."
+                }
                 runOnUiThread { if (!isFinishing && currentPage == "${team}_schedule") render() }
             } catch (error: Exception) {
                 prefs.edit().putBoolean("reports_refreshing_$team", false).apply()
@@ -654,12 +656,14 @@ class MainActivity : Activity() {
                 )
                 check(prefs.edit()
                     .putString("requests_$team", combined.toString())
-                    .putLong("requests_updated_$team", System.currentTimeMillis())
                     .putBoolean("requests_refreshing_$team", false)
                     .commit()) { "No se pudieron guardar localmente las bandejas del equipo." }
                 // Los dos lotes ya quedaron guardados; confirmar cada flujo por separado.
                 api.acknowledgePersistedDelivery("PATRON_REQUESTS_$slot", result)
                 api.acknowledgePersistedDelivery("PATRON_CORRECTIONS_$slot", correctionResult)
+                check(prefs.edit().putLong("requests_updated_$team", System.currentTimeMillis()).commit()) {
+                    "No se pudo guardar el estado de las bandejas confirmadas."
+                }
                 updateTeamNotificationCount(correctionResult)
                 runOnUiThread { if (!isFinishing && (currentPage == "${team}_requests" || currentPage == "team1" || currentPage == "team2" || currentPage == "menu")) render() }
             } catch (error: Exception) {
