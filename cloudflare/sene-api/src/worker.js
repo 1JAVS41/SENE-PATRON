@@ -509,20 +509,31 @@ async function recoverPatron(request, env) {
       String(recovery.recovery_fingerprint).toLowerCase() !== identity.fingerprint) {
     return json({ error: "RECOVERY_DEVICE_MISMATCH_OR_PAYMENT_REQUIRED" }, 409);
   }
+  const oldPatron = await env.DB.prepare(
+    "SELECT id FROM devices WHERE id = ? AND license_id = ? AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active' LIMIT 1"
+  ).bind(recovery.old_patron_device_id, recovery.license_id).first();
+  if (!oldPatron) return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
+
   const newDeviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
 
   let results;
   try {
     results = await env.DB.batch([
+      // Claim the pending request only while the original PATRÓN is still active.
+      // D1 batch statements are transactional, but a successful UPDATE with 0 changes
+      // does not abort later statements; the processing state gates every side effect.
       env.DB.prepare(
-        "UPDATE devices SET status = 'revoked' WHERE id = ? AND license_id = ? AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'pending')"
+        "UPDATE patron_recovery_requests SET status = 'processing' WHERE id = ? AND code_hash = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = patron_recovery_requests.old_patron_device_id AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active')"
+      ).bind(recovery.id, codeHash),
+      env.DB.prepare(
+        "UPDATE devices SET status = 'revoked' WHERE id = ? AND license_id = ? AND device_type = 'PATRON' AND slot_number = 1 AND status = 'active' AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'processing')"
       ).bind(recovery.old_patron_device_id, recovery.license_id, recovery.id, codeHash),
       env.DB.prepare(
-        "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked') AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'pending')"
+        "UPDATE pairing_tokens SET revoked_at = ? WHERE license_id = ? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'revoked') AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND code_hash = ? AND status = 'processing')"
       ).bind(now, recovery.license_id, recovery.old_patron_device_id, recovery.id, codeHash),
       env.DB.prepare(
-        "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT ?, r.license_id, 'PATRON', ?, ?, ?, ?, 1, 'active', ? FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id JOIN devices old ON old.id = r.old_patron_device_id WHERE r.id = ? AND r.code_hash = ? AND r.status = 'pending' AND old.status = 'revoked' AND l.status IN ('active','expired') AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id = r.license_id AND d.slot_number = 1 AND d.status = 'active')"
+        "INSERT INTO devices (id, license_id, device_type, installation_id, continuity_id, public_key, fingerprint, slot_number, status, created_at) SELECT ?, r.license_id, 'PATRON', ?, ?, ?, ?, 1, 'active', ? FROM patron_recovery_requests r JOIN licenses l ON l.id = r.license_id JOIN devices old ON old.id = r.old_patron_device_id WHERE r.id = ? AND r.code_hash = ? AND r.status = 'processing' AND old.status = 'revoked' AND l.status IN ('active','expired') AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id = r.license_id AND d.slot_number = 1 AND d.status = 'active')"
       ).bind(newDeviceId, identity.installationId, body.continuityId.toLowerCase(), identity.publicKey, identity.fingerprint, now, recovery.id, codeHash),
       // Conserva cualquier solicitud de mensualidad abierta y su código pagado,
       // trasladándolos al nuevo dispositivo PATRÓN dentro de la misma transacción.
@@ -530,7 +541,7 @@ async function recoverPatron(request, env) {
         "UPDATE renewal_requests SET patron_device_id = ? WHERE license_id = ? AND patron_device_id = ? AND status IN ('pending_payment','authorized') AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'active')"
       ).bind(newDeviceId, recovery.license_id, recovery.old_patron_device_id, newDeviceId),
       env.DB.prepare(
-        "UPDATE patron_recovery_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND code_hash = ? AND status = 'pending' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND status = 'active')"
+        "UPDATE patron_recovery_requests SET status = 'consumed', consumed_at = ? WHERE id = ? AND code_hash = ? AND status = 'processing' AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND license_id = patron_recovery_requests.license_id AND device_type = 'PATRON' AND status = 'active')"
       ).bind(now, recovery.id, codeHash, newDeviceId),
       env.DB.prepare(
         "INSERT INTO audit_log (id, license_id, device_id, actor_type, actor_id, event_type, details_json, created_at) SELECT ?, ?, ?, 'system', 'patron_recovery', 'patron_device_recovered', ?, ? WHERE EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id = ? AND status = 'consumed' AND consumed_at = ?) AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND status = 'active')"
@@ -542,8 +553,8 @@ async function recoverPatron(request, env) {
   } catch {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
-  if ([0, 2, 4, 5].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1) ||
-      (paidRecovery && (results?.[6]?.meta?.changes ?? 0) !== 1)) {
+  if ([0, 1, 3, 5, 6].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1) ||
+      (paidRecovery && (results?.[7]?.meta?.changes ?? 0) !== 1)) {
     return json({ error: "PATRON_RECOVERY_CONFLICT" }, 409);
   }
   return json({
