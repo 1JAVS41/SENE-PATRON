@@ -65,6 +65,13 @@ jobs:
           set -euo pipefail
           npx --yes wrangler@4 d1 migrations apply sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml
 
+      - name: Verificar migraciones aplicadas en D1 de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 migrations list sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml | tee /tmp/sene-d1-migrations.log
+          grep -q '0022_admin_event_lifecycle' /tmp/sene-d1-migrations.log
+
       - name: Desplegar Worker aislado de pruebas
         shell: bash
         run: |
