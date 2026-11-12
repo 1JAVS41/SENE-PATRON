@@ -200,6 +200,9 @@ jobs:
           test "$(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;')" = "ok"
           sqlite3 "$DB_FILE" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 
+      - name: Probar triggers del outbox de SENE ADMIN
+        run: python3 cloudflare/sene-api/tests/admin-event-migrations.test.py
+
       - name: Probar reserva de empresa y QR independientes de un solo uso
         run: |
           set -euo pipefail
