@@ -40,6 +40,12 @@ jobs:
           [[ "$SENE_TEST_OPERATOR_TOKEN" =~ .{32,} ]] || { echo "SENE_TEST_OPERATOR_TOKEN debe tener al menos 32 caracteres"; exit 1; }
           [[ "$SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY debe contener exactamente 64 caracteres hexadecimales"; exit 1; }
 
+      - name: Aplicar migraciones únicamente a D1 de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 d1 migrations apply sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml
+
       - name: Desplegar Worker aislado de pruebas
         shell: bash
         run: |
