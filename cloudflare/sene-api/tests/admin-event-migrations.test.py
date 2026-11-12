@@ -44,6 +44,10 @@ expected = {
 assert counts == expected, (counts, expected)
 rows = db.execute("SELECT payload_json FROM admin_event_outbox").fetchall()
 assert all(row[0] and len(row[0]) > 2 for row in rows)
+issued_columns = {row[1] for row in db.execute("PRAGMA table_info(delivery_issued)")}
+assert {"device_id", "license_id", "stream", "delivery_id", "payload_sha256", "cursor", "issued_at", "acknowledged_at"} <= issued_columns
+issued_indexes = {row[1] for row in db.execute("PRAGMA index_list(delivery_issued)")}
+assert "idx_delivery_issued_unacked" in issued_indexes
 assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 assert not db.execute("PRAGMA foreign_key_check").fetchall()
 print("PASS: los cuatro flujos comerciales generan eventos administrativos durables, sin datos operativos de VENTAS")
