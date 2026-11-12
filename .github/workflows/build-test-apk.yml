@@ -5,6 +5,7 @@ on:
     branches:
       - sene-cloudflare-backend
       - integration/ack-universal
+      - consolidation/patron-unificada-v2
     paths:
       - "src/**"
       - "build.gradle.kts"
@@ -12,11 +13,12 @@ on:
       - "gradle.properties"
       - "cloudflare/sene-api/**"
       - ".github/workflows/build-test-apk.yml"
+      - ".github/scripts/**"
   workflow_dispatch:
 
 concurrency:
-  group: sene-patron-apk
-  cancel-in-progress: true
+  group: sene-patron-apk-${{ github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -68,6 +70,7 @@ jobs:
           unzip -l "$APK" | grep -q 'logo_sene_pv'
           sha256sum "$APK"
       - name: Smoke test de arranque en emulador Android 35
+        timeout-minutes: 20
         uses: reactivecircus/android-emulator-runner@v2
         env:
           APK_PATH: ${{ steps.apk.outputs.path }}
@@ -77,20 +80,19 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 600
           cores: 2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-snapshot-save
-          script: |
-            set -eu
-            test -n "$APK_PATH" && test -s "$APK_PATH"
-            timeout 60s adb wait-for-device
-            test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
-            adb devices -l
-            timeout 120s adb install -r "$APK_PATH"
-            adb shell am force-stop com.sene.patron
-            timeout 45s adb shell monkey -p com.sene.patron 1
-            sleep 3
-            timeout 15s adb shell pidof com.sene.patron
+          script: sh .github/scripts/smoke-test.sh
+      - name: Subir diagnóstico del smoke test
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SENE-PATRON-smoke-diagnostics
+          path: diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Preparar nombre de entrega
         run: |
           mkdir -p dist
