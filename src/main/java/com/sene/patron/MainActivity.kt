@@ -191,18 +191,22 @@ class MainActivity : Activity() {
                 val deliveryId = result.optString("deliveryId")
                 check(deliveryId.isNotBlank()) { "El servidor no devolvió el folio de entrega." }
                 val payload = result.optJSONObject("payload") ?: JSONObject()
-                // La persistencia local se confirma antes de enviar ACK al servidor.
+                // Primero se persiste el paquete completo; nunca se confirma ACK si falta información.
                 check(prefs.edit().putString("payday_delivery_$paymentDate", result.toString()).commit()) {
                     "No se pudo guardar localmente el inventario y la nómina."
                 }
-                val ack = api.acknowledgePaydayBundle(deliveryId)
-                check(ack.optString("status") == "acked") { "El servidor no confirmó la recepción (ACK)." }
-                check(prefs.edit().putBoolean("payday_delivery_acked_$paymentDate", true).commit()) {
-                    "El servidor confirmó el ACK, pero no se pudo guardar el estado local."
-                }
                 val inventories = payload.optJSONArray("inventories") ?: org.json.JSONArray()
                 val missing = payload.optJSONArray("missingInventoryTeams") ?: org.json.JSONArray()
+                val missingPayroll = payload.optJSONArray("missingPayrollTeams") ?: org.json.JSONArray()
                 val payroll = payload.optJSONArray("payrollReports") ?: org.json.JSONArray()
+                val complete = missing.length() == 0 && missingPayroll.length() == 0
+                if (complete) {
+                    val ack = api.acknowledgePaydayBundle(deliveryId)
+                    check(ack.optString("status") == "acked") { "El servidor no confirmó la recepción (ACK)." }
+                    check(prefs.edit().putBoolean("payday_delivery_acked_$paymentDate", true).commit()) {
+                        "El servidor confirmó el ACK, pero no se pudo guardar el estado local."
+                    }
+                }
                 val detail = StringBuilder()
                     .append("Fecha: ").append(paymentDate)
                     .append("\\nEquipos incluidos: ").append((0 until inventories.length()).joinToString(", ") {
@@ -221,10 +225,15 @@ class MainActivity : Activity() {
                     detail.append("\\n\\nSIN INVENTARIO: ")
                     detail.append((0 until missing.length()).joinToString(", ") { missing.optString(it) })
                 }
-                detail.append("\\n\\nACK confirmado. Los inventarios entregados ya pueden depurarse del servidor.")
+                if (missingPayroll.length() > 0) {
+                    detail.append("\\n\\nSIN REPORTE DE NÓMINA: ")
+                    detail.append((0 until missingPayroll.length()).joinToString(", ") { missingPayroll.optString(it) })
+                }
+                detail.append(if (complete) "\\n\\nACK confirmado. Los inventarios entregados ya pueden depurarse del servidor."
+                    else "\\n\\nEntrega parcial guardada. No se envió ACK ni se borraron inventarios; vuelve a consultar cuando VENTAS termine de enviar.")
                 runOnUiThread {
                     if (!isFinishing) AlertDialog.Builder(this)
-                        .setTitle("ENTREGA RECIBIDA Y GUARDADA")
+                        .setTitle(if (complete) "ENTREGA RECIBIDA Y GUARDADA" else "ENTREGA PARCIAL · FALTA INFORMACIÓN")
                         .setMessage(detail.toString())
                         .setPositiveButton("CERRAR", null)
                         .show()
