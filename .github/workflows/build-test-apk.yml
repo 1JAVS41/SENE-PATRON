@@ -67,10 +67,10 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
-          disable-animations: false
+          disable-animations: true
           emulator-boot-timeout: 900
           cores: 2
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-snapshot-save
           script: |
             APK="$(find build/outputs/apk/debug -maxdepth 1 -name "*.apk" -type f | head -n 1)"
             test -s "$APK"
