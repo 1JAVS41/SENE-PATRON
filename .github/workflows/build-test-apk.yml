@@ -47,14 +47,14 @@ jobs:
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
       - name: Compilar APK de pruebas
         run: gradle --no-daemon assembleDebug
-          - name: Localizar APK para prueba de arranque
+      - name: Localizar APK para prueba de arranque
         id: apk
         shell: bash
         run: |
           APK_PATH="$(find "$GITHUB_WORKSPACE/build/outputs/apk" -type f -name '*.apk' | sort | head -n 1)"
           test -n "$APK_PATH" && test -s "$APK_PATH"
           echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
-  - name: Verificar identidad y recursos del APK
+      - name: Verificar identidad y recursos del APK
         shell: bash
         run: |
           APK="$(find build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f | head -n 1)"
