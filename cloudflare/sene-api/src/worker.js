@@ -3297,6 +3297,7 @@ async function acknowledgeUniversalDelivery(request, env) {
       !/^[A-Za-z0-9._:-]{1,120}$/.test(deliveryId) ||
       !/^[A-Z][A-Z0-9_.-]{1,47}$/.test(stream) ||
       !/^[0-9a-f]{64}$/.test(payloadSha256) ||
+      deliveryId !== `${stream}:${payloadSha256.slice(0, 48)}` ||
       !Number.isSafeInteger(cursor) || cursor < 0 ||
       (body.recipientDeviceId != null && body.recipientDeviceId !== ctx.deviceId)) {
     return json({ error: "INVALID_ACK" }, 400);
