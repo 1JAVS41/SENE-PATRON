@@ -47,7 +47,14 @@ const db = {
           if (row) row.revoked_at = args[0];
           return { meta: { changes: row ? 1 : 0 } };
         }
+        if (sql.includes("UPDATE registration_requests SET status='cancelled'")) {
+          return { meta: { changes: 0 } };
+        }
         throw new Error("Unexpected run query: " + sql);
+      },
+      async all() {
+        if (sql.includes("FROM registration_requests WHERE status='pending_payment'")) return { results: [] };
+        throw new Error("Unexpected all query: " + sql);
       }
     };
   }
@@ -73,6 +80,12 @@ const session = await good.json();
 assert.equal(session.tokenType, "Bearer");
 assert.ok(session.accessToken.length > 80);
 assert.ok(session.expiresAt > session.serverTime);
+
+const operatorInbox = await worker.fetch(new Request("https://sene.test/v1/operator/registrations/pending", {
+  method: "GET", headers: { authorization: "Bearer " + session.accessToken }
+}), env);
+assert.equal(operatorInbox.status, 200, "La sesión SENE ADMIN debe autorizar las bandejas del operador");
+assert.deepEqual((await operatorInbox.json()).items, []);
 
 const logout = await worker.fetch(new Request("https://sene.test/v1/admin/logout", {
   method: "POST", headers: { authorization: "Bearer " + session.accessToken }
