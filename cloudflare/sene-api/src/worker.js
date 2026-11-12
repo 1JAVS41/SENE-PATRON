@@ -3136,12 +3136,14 @@ async function createOrReadPaydayBundle(request, env) {
   if (payloadJson.length > 131072) return json({ error: "PAYDAY_BUNDLE_TOO_LARGE" }, 413);
   const now = Math.floor(Date.now() / 1000);
   if (existing?.status === "pending") {
-    const refreshed = await env.DB.prepare(
-      "UPDATE payday_deliveries SET payload_json=? WHERE id=? AND license_id=? AND status='pending'"
-    ).bind(payloadJson, existing.id, ctx.licenseId).run();
-    if ((refreshed.meta?.changes ?? 0) !== 1) return json({ error: "PAYDAY_BUNDLE_REFRESH_CONFLICT" }, 409);
-    return json({ deliveryId: existing.id, paymentDate: body.paymentDate, status: "pending",
-      duplicate: true, payload, createdAt: Number(existing.created_at) });
+    // A pending delivery is immutable: retries must receive the exact payload
+    // that was first issued, otherwise an ACK could authorize deleting a newer
+    // inventory snapshot that the device never durably stored.
+    return json({
+      deliveryId: existing.id, paymentDate: body.paymentDate, status: "pending",
+      duplicate: true, payload: JSON.parse(existing.payload_json),
+      createdAt: Number(existing.created_at)
+    });
   }
   const deliveryId = crypto.randomUUID();
   try {
