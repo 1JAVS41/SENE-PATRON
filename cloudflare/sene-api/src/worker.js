@@ -1834,9 +1834,10 @@ async function confirmInitialPayment(request, env) {
 
 async function listOperatorRenewals(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const cutoff = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
   const rows = await env.DB.prepare(
-    "SELECT id, license_id, business_name, status, created_at FROM renewal_requests WHERE status = 'pending_payment' ORDER BY created_at ASC LIMIT 100"
-  ).all();
+    "SELECT id, license_id, business_name, status, created_at, authorized_at FROM renewal_requests WHERE status IN ('pending_payment','authorized') AND created_at >= ? ORDER BY created_at ASC LIMIT 100"
+  ).bind(cutoff).all();
   return json({ items: rows.results || [] });
 }
 
