@@ -87,7 +87,8 @@ object PatronDeviceIdentity {
         val privateKey = store.getKey(KEY_ALIAS, null) as? java.security.PrivateKey
         if (publicKey != null && privateKey != null) return KeyPair(publicKey, privateKey)
         if (store.containsAlias(KEY_ALIAS)) store.deleteEntry(KEY_ALIAS)
-        check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(ID_KEY).commit())
+        // El installationId lógico ya se deriva de ANDROID_ID en get().
+        // Renovar la clave no debe borrar ni cambiar esa identidad estable.
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
         generator.initialize(
             KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
