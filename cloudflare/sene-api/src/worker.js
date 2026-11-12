@@ -306,8 +306,9 @@ async function adminLogin(request, env) {
   const valid = constantTimeTextEqual(email, env.ADMIN_LOGIN_EMAIL.trim().toLowerCase()) &&
     constantTimeTextEqual(candidate, env.ADMIN_PASSWORD_HASH.toLowerCase());
   if (!valid) {
-    const windowStarted = !attempt || now - Number(attempt.window_started_at) >= 900 ? now : Number(attempt.window_started_at);
-    const attempts = windowStarted === now ? 1 : Number(attempt.attempts || 0) + 1;
+    const resetWindow = !attempt || now - Number(attempt.window_started_at) >= 900;
+    const windowStarted = resetWindow ? now : Number(attempt.window_started_at);
+    const attempts = resetWindow ? 1 : Number(attempt.attempts || 0) + 1;
     const blockedUntil = attempts >= 8 ? now + 900 : 0;
     await env.DB.prepare(
       "INSERT INTO admin_login_attempts (ip_hash, window_started_at, attempts, blocked_until) VALUES (?, ?, ?, ?) ON CONFLICT(ip_hash) DO UPDATE SET window_started_at=excluded.window_started_at, attempts=excluded.attempts, blocked_until=excluded.blocked_until"
