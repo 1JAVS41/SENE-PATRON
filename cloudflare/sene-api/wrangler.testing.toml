@@ -1,0 +1,13 @@
+# Entorno aislado de pruebas. No usar para producción.
+name = "sene-licensing-api-testing"
+main = "src/worker.js"
+compatibility_date = "2026-11-08"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sene-licencias-pruebas"
+database_id = "92ffc66c-e9f6-4b9f-9c85-0531d20a1fb9"
+migrations_dir = "migrations"
+
+[vars]
+API_VERSION = "1"
