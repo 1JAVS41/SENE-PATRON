@@ -35,6 +35,7 @@ const challenges = new Map();
 const acknowledgements = new Map();
 const deliveries = new Map();
 const cursors = new Map();
+const issuedDeliveries = new Map();
 const db = {
   prepare(sql) {
     let args = [];
@@ -49,6 +50,9 @@ const db = {
         if (sql.includes("FROM delivery_acknowledgements WHERE ack_id = ?")) return acknowledgements.get(args[0]) ?? null;
         if (sql.includes("FROM delivery_acknowledgements WHERE device_id = ?")) {
           return deliveries.get([args[0], args[1], args[2]].join("|")) ?? null;
+        }
+        if (sql.includes("FROM delivery_issued")) {
+          return issuedDeliveries.get([args[0], args[1], args[2]].join("|")) ?? null;
         }
         if (sql.includes("FROM delivery_ack_cursors")) {
           return cursors.get([args[0], args[1]].join("|")) ?? null;
@@ -85,6 +89,12 @@ const db = {
           const current = cursors.get(key);
           if (current && current.last_cursor > cursor) return { meta: { changes: 0 } };
           cursors.set(key, { last_cursor: cursor, updated_at });
+          return { meta: { changes: 1 } };
+        }
+        if (sql.includes("UPDATE delivery_issued SET acknowledged_at")) {
+          const row = issuedDeliveries.get([args[1], args[2], args[3]].join("|"));
+          if (!row || row.payload_sha256 !== args[4] || Number(row.cursor) !== args[5]) return { meta: { changes: 0 } };
+          row.acknowledged_at ??= args[0];
           return { meta: { changes: 1 } };
         }
         if (sql.includes("DELETE FROM delivery_acknowledgements")) {
@@ -142,6 +152,20 @@ const body = {
   cursor: 1,
   recipientDeviceId: deviceId
 };
+issuedDeliveries.set([deviceId, body.stream, body.deliveryId].join("|"), {
+  payload_sha256: body.payloadSha256, cursor: body.cursor, acknowledged_at: null
+});
+
+const unissued = await signedAck({
+  ...body,
+  ackId: "123e4567-e89b-42d3-a456-426614174099",
+  deliveryId: "PATRON_REQUESTS:" + "e".repeat(48),
+  payloadSha256: "e".repeat(64),
+  cursor: 999999
+});
+assert.equal(unissued.status, 409, "El servidor debe rechazar un ACK de una entrega que nunca emitió");
+assert.equal(acknowledgements.size, 0, "Una entrega inventada no puede crear recibo ni avanzar cursor");
+
 const first = await signedAck(body);
 assert.equal(first.status, 200);
 assert.equal((await first.json()).duplicate, false);
@@ -164,13 +188,17 @@ const conflictingDelivery = await signedAck({
 });
 assert.equal(conflictingDelivery.status, 400, "El identificador de entrega debe estar ligado a la huella");
 
-const regressingCursor = await signedAck({
+const regressionBody = {
   ...body,
   ackId: "123e4567-e89b-42d3-a456-426614174004",
   payloadSha256: "d".repeat(64),
   deliveryId: "PATRON_REQUESTS:" + "d".repeat(48),
   cursor: 0
+};
+issuedDeliveries.set([deviceId, regressionBody.stream, regressionBody.deliveryId].join("|"), {
+  payload_sha256: regressionBody.payloadSha256, cursor: regressionBody.cursor, acknowledged_at: null
 });
+const regressingCursor = await signedAck(regressionBody);
 assert.equal(regressingCursor.status, 409, "El cursor de un flujo no puede retroceder");
 assert.equal(acknowledgements.size, 1, "Los reintentos y conflictos no deben duplicar el recibo");
-console.log("PASS: ACK firmado, durable, idempotente, sin duplicados y con conflictos detectados");
+console.log("PASS: ACK firmado, limitado a entregas emitidas, durable, idempotente y con conflictos detectados");
