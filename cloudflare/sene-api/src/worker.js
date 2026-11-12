@@ -1022,7 +1022,7 @@ async function createPatronRecoveryPaymentRequest(request, env) {
   const email = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
   const phone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\D/g, "") : "";
   if (!businessName || businessName.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || phone.length < 10 || phone.length > 15 ||
-      Object.keys(body).some((key) => !["businessName","registeredEmail","registeredPhone"].includes(key)) ||
+      Object.keys(body).some((key) => !["businessName","registeredEmail","registeredPhone","installationId","continuityId","publicKeyBase64","fingerprint"].includes(key)) ||
       !/^[0-9a-f-]{36}$/i.test(proof.challenge.installation_id) || !/^[0-9a-f]{64}$/i.test(proof.challenge.fingerprint || "")) return json({ error: "INVALID_RECOVERY_DETAILS" }, 400);
   const normalized = businessName.normalize("NFKC").toLocaleLowerCase("es-MX");
   const license = await env.DB.prepare("SELECT id,business_name,registered_email,registered_phone FROM licenses WHERE lower(trim(business_name))=lower(trim(?)) AND lower(trim(registered_email))=? AND registered_phone=? AND status IN ('active','expired') LIMIT 1").bind(businessName,email,phone).first();
@@ -1123,7 +1123,7 @@ async function createPatronRegistrationRequest(request, env) {
   const registeredEmail = typeof body.registeredEmail === "string" ? body.registeredEmail.trim().toLowerCase() : "";
   const registeredPhone = typeof body.registeredPhone === "string" ? body.registeredPhone.replace(/\D/g, "") : "";
   if (!businessName || businessName.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registeredEmail) || registeredPhone.length < 10 || registeredPhone.length > 15 ||
-      Object.keys(body).some((key) => !["businessName","registeredEmail","registeredPhone"].includes(key)) ||
+      Object.keys(body).some((key) => !["businessName","registeredEmail","registeredPhone","installationId","continuityId","publicKeyBase64","fingerprint"].includes(key)) ||
       !/^[0-9a-f-]{36}$/i.test(proof.challenge.installation_id) ||
       !/^[0-9a-f]{64}$/i.test(proof.challenge.fingerprint || "")) {
     return json({ error: "INVALID_BUSINESS_NAME_OR_IDENTITY" }, 400);
