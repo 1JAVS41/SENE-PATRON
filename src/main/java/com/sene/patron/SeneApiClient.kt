@@ -46,7 +46,13 @@ class SeneApiClient(context: Context, baseUrl: String) {
         val result = bootstrapSigned("PATRON_REGISTRATION_REQUEST", "/v1/patron/registrations/request", body.toString(), identity)
         val requestId = result.optString("requestId")
         if (requestId.isNotBlank()) {
-            check(prefs.edit().putString("registration_request_id", requestId).putString("business_name", result.optString("businessName", normalizedName)).commit()) { "No se pudo guardar la solicitud de registro" }
+            check(prefs.edit()
+                .putString("registration_request_id", requestId)
+                .putString("business_name", result.optString("businessName", normalizedName))
+                .putLong("registration_expires_at", result.optLong("expiresAt", 0L))
+                .putLong("registration_server_time", result.optLong("serverTime", 0L))
+                .putLong("registration_server_elapsed", android.os.SystemClock.elapsedRealtime())
+                .commit()) { "No se pudo guardar la solicitud de registro" }
         }
         return result
     }
