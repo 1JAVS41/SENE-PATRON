@@ -83,14 +83,14 @@ jobs:
           script: |
             set -eu
             test -n "$APK_PATH" && test -s "$APK_PATH"
-            adb wait-for-device
+            timeout 60s adb wait-for-device
             test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
             adb devices -l
-            adb install -r "$APK_PATH"
+            timeout 120s adb install -r "$APK_PATH"
             adb shell am force-stop com.sene.patron
-            adb shell am start -n com.sene.patron/.MainActivity
+            timeout 45s adb shell monkey -p com.sene.patron 1
             sleep 3
-            adb shell pidof com.sene.patron
+            timeout 15s adb shell pidof com.sene.patron
       - name: Preparar nombre de entrega
         run: |
           mkdir -p dist
