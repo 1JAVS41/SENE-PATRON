@@ -28,6 +28,12 @@ jobs:
       - name: Comprobar sintaxis del Worker
         run: node --check cloudflare/sene-api/src/worker.js
 
+      - name: Probar validación estricta de fechas de inventario y nómina
+        run: |
+          set -euo pipefail
+          cp cloudflare/sene-api/src/worker.js cloudflare/sene-api/src/worker.mjs
+          node cloudflare/sene-api/tests/iso-date-validation.test.mjs
+
       - name: Probar firma digital real de contactos AYUDA en el Worker
         run: |
           set -euo pipefail
