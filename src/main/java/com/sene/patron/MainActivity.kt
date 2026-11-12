@@ -481,10 +481,14 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
-                val result = SeneApiClient(this, baseUrl).reportsInbox(slot)
-                prefs.edit().putString("reports_$team", result.toString())
+                val api = SeneApiClient(this, baseUrl)
+                val result = api.reportsInbox(slot)
+                check(prefs.edit().putString("reports_$team", result.toString())
                     .putLong("reports_updated_$team", System.currentTimeMillis())
-                    .putBoolean("reports_refreshing_$team", false).apply()
+                    .putBoolean("reports_refreshing_$team", false).commit()) {
+                    "No se pudo guardar localmente el lote de reportes."
+                }
+                api.acknowledgePersistedDelivery("PATRON_REPORTS_$slot", result)
                 runOnUiThread { if (!isFinishing && currentPage == "${team}_schedule") render() }
             } catch (error: Exception) {
                 prefs.edit().putBoolean("reports_refreshing_$team", false).apply()
@@ -648,11 +652,14 @@ class MainActivity : Activity() {
                     "corrections",
                     correctionResult.optJSONArray("items") ?: org.json.JSONArray()
                 )
-                prefs.edit()
+                check(prefs.edit()
                     .putString("requests_$team", combined.toString())
                     .putLong("requests_updated_$team", System.currentTimeMillis())
                     .putBoolean("requests_refreshing_$team", false)
-                    .apply()
+                    .commit()) { "No se pudieron guardar localmente las bandejas del equipo." }
+                // Los dos lotes ya quedaron guardados; confirmar cada flujo por separado.
+                api.acknowledgePersistedDelivery("PATRON_REQUESTS_$slot", result)
+                api.acknowledgePersistedDelivery("PATRON_CORRECTIONS_$slot", correctionResult)
                 updateTeamNotificationCount(correctionResult)
                 runOnUiThread { if (!isFinishing && (currentPage == "${team}_requests" || currentPage == "team1" || currentPage == "team2" || currentPage == "menu")) render() }
             } catch (error: Exception) {
