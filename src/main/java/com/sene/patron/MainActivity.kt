@@ -1010,7 +1010,7 @@ class MainActivity : Activity() {
             Thread {
                 try {
                     val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
-                    val requestId = result.optString("requestId")
+                    val requestId = result.optString("folio").ifBlank { result.optString("requestId") }
                     check(requestId.isNotBlank()) { "El servidor no devolvió el folio de registro." }
                     runOnUiThread {
                         if (isFinishing) return@runOnUiThread
@@ -1019,10 +1019,11 @@ class MainActivity : Activity() {
                             .setTitle("SOLICITUD ENVIADA AL SERVIDOR")
                             .setMessage(
                                 "Empresa: " + result.optString("businessName", businessName) +
-                                    "\\nFolio de solicitud: " + requestId +
-                                    "\\nImporte informado: $580 MXN" +
-                                    "\\nConcepto / referencia exacta: " + requestId +
-                                    "\\n\\nLa solicitud quedó registrada en el servidor de pruebas. Esto no significa que el pago esté confirmado. Conserva tu comprobante y espera la validación y el código de activación."
+                                    "\nFolio de solicitud: " + requestId +
+                                    "\nImporte informado: $580 MXN" +
+                                    "\nConcepto / referencia exacta: " + requestId +
+                                    (if (result.optBoolean("duplicate")) "\n\nEsta solicitud ya existía. No realices otro pago si ya enviaste el comprobante." else "") +
+                                    "\n\nLa solicitud quedó registrada en el servidor de pruebas. Esto no significa que el pago esté confirmado. Conserva tu comprobante y espera la validación y el código de activación."
                             )
                             .setNeutralButton("ENVIAR AVISO A AYUDA") { _, _ ->
                                 sendPaymentNoticeToAyuda(requestId, "$580 MXN", "REGISTRO INICIAL")
