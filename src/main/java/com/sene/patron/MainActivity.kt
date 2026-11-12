@@ -157,6 +157,10 @@ class MainActivity : Activity() {
             render()
         })
         gap(root, 12)
+        root.addView(primaryButton("RECIBIR INVENTARIOS Y NÓMINA · DÍA DE PAGO") {
+            receivePaydayBundle()
+        })
+        gap(root, 12)
         root.addView(primaryButton("PAGAR MENSUALIDAD") {
             if (linked) showRenewalDialog()
             else Toast.makeText(this, "Primero debes vincular SENE PATRÓN", Toast.LENGTH_LONG).show()
@@ -169,6 +173,72 @@ class MainActivity : Activity() {
                 showPatronRecoveryCodeDialog()
             })
         }
+    }
+
+    private fun receivePaydayBundle() {
+        val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+        val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() }
+        if (baseUrl == null || prefs.getString("device_id", null).isNullOrBlank()) {
+            Toast.makeText(this, "Primero vincula SENE PATRÓN con el servidor de pruebas.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val paymentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        Toast.makeText(this, "Consultando inventarios y nómina del día de pago…", Toast.LENGTH_LONG).show()
+        Thread {
+            try {
+                val api = SeneApiClient(this, baseUrl)
+                val result = api.paydayBundle(paymentDate)
+                val deliveryId = result.optString("deliveryId")
+                check(deliveryId.isNotBlank()) { "El servidor no devolvió el folio de entrega." }
+                val payload = result.optJSONObject("payload") ?: JSONObject()
+                // La persistencia local se confirma antes de enviar ACK al servidor.
+                check(prefs.edit().putString("payday_delivery_$paymentDate", result.toString()).commit()) {
+                    "No se pudo guardar localmente el inventario y la nómina."
+                }
+                val ack = api.acknowledgePaydayBundle(deliveryId)
+                check(ack.optString("status") == "acked") { "El servidor no confirmó la recepción (ACK)." }
+                check(prefs.edit().putBoolean("payday_delivery_acked_$paymentDate", true).commit()) {
+                    "El servidor confirmó el ACK, pero no se pudo guardar el estado local."
+                }
+                val inventories = payload.optJSONArray("inventories") ?: org.json.JSONArray()
+                val missing = payload.optJSONArray("missingInventoryTeams") ?: org.json.JSONArray()
+                val payroll = payload.optJSONArray("payrollReports") ?: org.json.JSONArray()
+                val detail = StringBuilder()
+                    .append("Fecha: ").append(paymentDate)
+                    .append("\\nEquipos incluidos: ").append((0 until inventories.length()).joinToString(", ") {
+                        inventories.optJSONObject(it)?.optString("slot", "Equipo") ?: "Equipo"
+                    }.ifBlank { "Ninguno" })
+                    .append("\\nReportes de nómina: ").append(payroll.length())
+                for (i in 0 until inventories.length()) {
+                    val item = inventories.optJSONObject(i) ?: continue
+                    val snapshot = item.optJSONObject("snapshot") ?: JSONObject()
+                    val products = snapshot.optJSONArray("products") ?: org.json.JSONArray()
+                    detail.append("\\n\\n").append(item.optString("slot"))
+                        .append(" · Inventario ").append(item.optString("inventoryDate"))
+                        .append("\\nProductos: ").append(products.length())
+                }
+                if (missing.length() > 0) {
+                    detail.append("\\n\\nSIN INVENTARIO: ")
+                    detail.append((0 until missing.length()).joinToString(", ") { missing.optString(it) })
+                }
+                detail.append("\\n\\nACK confirmado. Los inventarios entregados ya pueden depurarse del servidor.")
+                runOnUiThread {
+                    if (!isFinishing) AlertDialog.Builder(this)
+                        .setTitle("ENTREGA RECIBIDA Y GUARDADA")
+                        .setMessage(detail.toString())
+                        .setPositiveButton("CERRAR", null)
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing) AlertDialog.Builder(this)
+                        .setTitle("NO SE COMPLETÓ LA ENTREGA")
+                        .setMessage("No se borrarán inventarios del servidor sin ACK. Puedes volver a intentar.\\n\\nDetalle: " + (error.message ?: "Error de conexión"))
+                        .setPositiveButton("ENTENDIDO", null)
+                        .show()
+                }
+            }
+        }.start()
     }
 
     private fun showOwnerOptions() {
