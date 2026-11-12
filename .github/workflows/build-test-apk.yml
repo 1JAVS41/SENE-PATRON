@@ -36,6 +36,7 @@ jobs:
           packages: "platform-tools platforms;android-35 build-tools;35.0.0"
       - name: Pruebas de backend, ACK y migraciones SQLite
         run: |
+          cp cloudflare/sene-api/src/worker.js cloudflare/sene-api/src/worker.mjs
           node cloudflare/sene-api/tests/admin-auth.test.mjs
           node cloudflare/sene-api/tests/universal-ack.test.mjs
           python3 cloudflare/sene-api/tests/admin-event-migrations.test.py
