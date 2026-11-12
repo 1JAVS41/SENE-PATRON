@@ -2721,7 +2721,18 @@ async function patronNotifications(request, env) {
     if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.pending_count);
     if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.pending_count);
   }
-  return json({ pendingByTeam, serverTime: Math.floor(Date.now() / 1000) });
+  const cursorRow = await env.DB.prepare(
+    `SELECT MAX(value) AS cursor FROM (
+       SELECT MAX(COALESCE(decided_at,created_at)) AS value FROM work_requests WHERE license_id=?
+       UNION ALL
+       SELECT MAX(COALESCE(decided_at,created_at)) AS value FROM correction_requests WHERE license_id=?
+     )`
+  ).bind(ctx.licenseId, ctx.licenseId).first();
+  return json({
+    pendingByTeam,
+    cursor: Number(cursorRow?.cursor || 0),
+    serverTime: Math.floor(Date.now() / 1000)
+  });
 }
 
 async function decideWorkRequest(request, env) {
