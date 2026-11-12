@@ -1137,9 +1137,9 @@ class MainActivity : Activity() {
         nextLabel: String? = null,
         nextAction: (() -> Unit)? = null
     ) {
-        val message = "FOLIO DE SOLICITUD\\n$folio\\n\\n" +
-            "CONCEPTO / REFERENCIA EXACTA\\n$folio\\n\\n" +
-            "Importe: $amount\\n\\n" +
+        val message = "FOLIO DE SOLICITUD\n$folio\n\n" +
+            "CONCEPTO / REFERENCIA EXACTA\n$folio\n\n" +
+            "Importe: $amount\n\n" +
             "No cambies ni recortes el folio. Inclúyelo también en el mensaje de AYUDA junto con el comprobante. " +
             "El comprobante no confirma el pago; SENE debe validarlo."
         val dialog = AlertDialog.Builder(this)
@@ -1177,11 +1177,11 @@ class MainActivity : Activity() {
                         .setItems(options.map { it.first }.toTypedArray()) { _, index ->
                             val phone = options[index].second
                             val business = prefs.getString("business_name", "").orEmpty()
-                            val message = "AVISO DE PAGO SENE\\n" +
-                                "Tipo: $paymentType\\n" +
-                                "Empresa: $business\\n" +
-                                "Folio de solicitud: $folio\\n" +
-                                "Importe: $amount\\n" +
+                            val message = "AVISO DE PAGO SENE\n" +
+                                "Tipo: $paymentType\n" +
+                                "Empresa: $business\n" +
+                                "Folio de solicitud: $folio\n" +
+                                "Importe: $amount\n" +
                                 "Adjunto el comprobante para que SENE valide el pago."
                             val uri = Uri.parse("https://wa.me/$phone?text=${Uri.encode(message)}")
                             startActivity(Intent(Intent.ACTION_VIEW, uri))
