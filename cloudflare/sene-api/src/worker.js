@@ -215,12 +215,12 @@ async function issueAdminSession(email, env) {
   await env.DB.prepare(
     "INSERT INTO admin_sessions (session_id, token_sha256, role, created_at, expires_at, revoked_at) VALUES (?, ?, 'admin', ?, ?, NULL)"
   ).bind(sessionId, tokenHash, now, expiresAt).run();
-  const eventCursor = await env.DB.prepare(
-    "SELECT COALESCE(MAX(id),0) AS last_cursor FROM admin_event_outbox"
-  ).first();
+  // Start at zero: the event query excludes payloads already compacted
+  // after every active admin session acknowledged them. New sessions still
+  // receive any durable event that has not yet been acknowledged globally.
   await env.DB.prepare(
-    "INSERT INTO admin_event_cursors (session_id,last_cursor,updated_at) VALUES (?,?,?)"
-  ).bind(sessionId, Number(eventCursor?.last_cursor || 0), now).run();
+    "INSERT INTO admin_event_cursors (session_id,last_cursor,updated_at) VALUES (?,0,?)"
+  ).bind(sessionId, now).run();
   return { accessToken: token, tokenType: "Bearer", expiresAt, serverTime: now };
 }
 
@@ -285,7 +285,7 @@ async function listAdminEvents(request, env) {
   }
   const fromCursor = Number(cursorRow.last_cursor || 0);
   const rows = await env.DB.prepare(
-    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? ORDER BY id ASC LIMIT 101"
+    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? AND json_extract(payload_json,'$.compacted') IS NULL ORDER BY id ASC LIMIT 101"
   ).bind(fromCursor).all();
   const hasMore = (rows.results || []).length > 100;
   const items = (rows.results || []).slice(0, 100).map((row) => ({
@@ -349,7 +349,7 @@ async function acknowledgeAdminEvents(request, env) {
   if (currentCursor !== fromCursor) return json({ error: "ADMIN_EVENT_CURSOR_CONFLICT", cursor: currentCursor }, 409);
 
   const rows = await env.DB.prepare(
-    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? AND id<=? ORDER BY id ASC LIMIT 101"
+    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? AND id<=? AND json_extract(payload_json,'$.compacted') IS NULL ORDER BY id ASC LIMIT 101"
   ).bind(fromCursor, throughCursor).all();
   if (!rows.results?.length || rows.results.length > 100 ||
       Number(rows.results[rows.results.length - 1].id) !== throughCursor) {
