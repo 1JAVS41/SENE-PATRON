@@ -1099,7 +1099,9 @@ class MainActivity : Activity() {
                 if (session.optString("licenseStatus") != "EXPIRED") {
                     // Solo aplicar el intervalo de 24 h cuando el servidor confirmó
                     // la consulta; un fallo de red no debe silenciar reintentos.
-                    api.refreshNotifications()
+                    val notificationBatch = api.refreshNotifications()
+                    // refreshNotifications guarda primero los contadores en preferencias.
+                    api.acknowledgePersistedDelivery("PATRON_NOTIFICATIONS", notificationBatch)
                     lastNotificationRefreshAt = System.currentTimeMillis()
                 }
                 runOnUiThread {
