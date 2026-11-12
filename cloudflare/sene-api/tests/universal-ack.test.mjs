@@ -97,6 +97,16 @@ const db = {
           row.acknowledged_at ??= args[0];
           return { meta: { changes: 1 } };
         }
+        if (sql.includes("DELETE FROM delivery_issued WHERE acknowledged_at IS NOT NULL")) {
+          let changes = 0;
+          for (const [key, row] of issuedDeliveries.entries()) {
+            if (row.acknowledged_at !== null && row.acknowledged_at < args[0]) {
+              issuedDeliveries.delete(key);
+              changes++;
+            }
+          }
+          return { meta: { changes } };
+        }
         if (sql.includes("DELETE FROM delivery_acknowledgements")) {
           const row = acknowledgements.get(args[0]);
           if (row) deliveries.delete([row.device_id, row.stream, row.delivery_id].join("|"));
@@ -155,6 +165,15 @@ const body = {
 issuedDeliveries.set([deviceId, body.stream, body.deliveryId].join("|"), {
   payload_sha256: body.payloadSha256, cursor: body.cursor, acknowledged_at: null
 });
+const oldAckedKey = [deviceId, body.stream, body.stream + ":" + "f".repeat(48)].join("|");
+issuedDeliveries.set(oldAckedKey, {
+  payload_sha256: "f".repeat(64), cursor: 0,
+  acknowledged_at: Math.floor(Date.now() / 1000) - 91 * 86400
+});
+const oldPendingKey = [deviceId, body.stream, body.stream + ":" + "e".repeat(48)].join("|");
+issuedDeliveries.set(oldPendingKey, {
+  payload_sha256: "e".repeat(64), cursor: 0, acknowledged_at: null
+});
 
 const unissued = await signedAck({
   ...body,
@@ -169,6 +188,8 @@ assert.equal(acknowledgements.size, 0, "Una entrega inventada no puede crear rec
 const first = await signedAck(body);
 assert.equal(first.status, 200);
 assert.equal((await first.json()).duplicate, false);
+assert.equal(issuedDeliveries.has(oldAckedKey), false, "Los recibos ACKed de más de 90 días deben eliminarse");
+assert.equal(issuedDeliveries.has(oldPendingKey), true, "Las entregas sin ACK deben conservarse aunque sean antiguas");
 const retry = await signedAck(body);
 assert.equal(retry.status, 200);
 assert.equal((await retry.json()).duplicate, true);
