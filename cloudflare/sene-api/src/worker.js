@@ -193,13 +193,6 @@ function makeCode() {
   return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
 }
 
-function constantTimeTextEqual(left, right) {
-  if (typeof left !== "string" || typeof right !== "string" || left.length !== right.length) return false;
-  let diff = 0;
-  for (let i = 0; i < left.length; i++) diff |= left.charCodeAt(i) ^ right.charCodeAt(i);
-  return diff === 0;
-}
-
 async function adminSessionSecretKey(env, usages) {
   if (typeof env.ADMIN_SESSION_SECRET !== "string" || env.ADMIN_SESSION_SECRET.length < 32) return null;
   return crypto.subtle.importKey(
