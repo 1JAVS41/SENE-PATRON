@@ -226,6 +226,18 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return deviceSigned("PATRON_REPORTS_INBOX", "/v1/patron/reports/inbox", JSONObject().put("slot", slot).toString())
     }
 
+    fun paydayBundle(paymentDate: String): JSONObject {
+        require(paymentDate.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) { "Fecha de pago no válida" }
+        val body = JSONObject().put("paymentDate", paymentDate)
+        return deviceSigned("PATRON_PAYDAY_BUNDLE", "/v1/patron/payday/bundle", body.toString())
+    }
+
+    fun acknowledgePaydayBundle(deliveryId: String): JSONObject {
+        require(deliveryId.matches(Regex("(?i)^[0-9a-f-]{36}$"))) { "Identificador de entrega no válido" }
+        val body = JSONObject().put("deliveryId", deliveryId)
+        return deviceSigned("PATRON_PAYDAY_ACK", "/v1/patron/payday/ack", body.toString())
+    }
+
     fun correctionInbox(slot: String, all: Boolean = false): JSONObject {
         require(slot == "VENTAS_1" || slot == "VENTAS_2") { "Equipo no válido" }
         val body = JSONObject().put("slot", slot).put("status", if (all) "all" else "pending")
