@@ -188,6 +188,12 @@ class MainActivity : Activity() {
             try {
                 val api = SeneApiClient(this, baseUrl)
                 val result = api.paydayBundle(paymentDate)
+                if (result.optString("status") == "acked" && result.optBoolean("payloadCompacted")) {
+                    runOnUiThread {
+                        Toast.makeText(this, "El paquete de este día de pago ya fue recibido y confirmado en este teléfono.", Toast.LENGTH_LONG).show()
+                    }
+                    return@Thread
+                }
                 val deliveryId = result.optString("deliveryId")
                 check(deliveryId.isNotBlank()) { "El servidor no devolvió el folio de entrega." }
                 val payload = result.optJSONObject("payload") ?: JSONObject()
