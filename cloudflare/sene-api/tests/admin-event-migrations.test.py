@@ -99,6 +99,7 @@ issued_columns = {row[1] for row in db.execute("PRAGMA table_info(delivery_issue
 assert {"device_id", "license_id", "stream", "delivery_id", "payload_sha256", "cursor", "issued_at", "acknowledged_at"} <= issued_columns
 issued_indexes = {row[1] for row in db.execute("PRAGMA index_list(delivery_issued)")}
 assert "idx_delivery_issued_unacked" in issued_indexes
+assert "idx_delivery_issued_ack_retention" in issued_indexes
 assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 assert not db.execute("PRAGMA foreign_key_check").fetchall()
 print("PASS: altas, pagos, renovaciones, reposiciones, recuperaciones, vencimientos, auditoría y configuración generan eventos ADMIN durables")
