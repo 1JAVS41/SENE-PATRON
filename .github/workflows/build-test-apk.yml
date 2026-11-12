@@ -88,7 +88,7 @@ jobs:
             adb devices -l
             adb install -r "$APK_PATH"
             adb shell am force-stop com.sene.patron
-            adb shell am start -W -n com.sene.patron/.MainActivity
+            adb shell am start -n com.sene.patron/.MainActivity
             sleep 3
             adb shell pidof com.sene.patron
       - name: Preparar nombre de entrega
