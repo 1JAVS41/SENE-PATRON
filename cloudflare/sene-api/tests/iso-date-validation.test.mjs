@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../src/worker.mjs", import.meta.url), "utf8");
+const match = source.match(String.raw`function validIsoDate\(value\) \{\s*if \([^\n]*!\/(.*?)\/\.test\(value\)\)`);
 const match = source.match(/function validIsoDate\\(value\\) \\{\\s*if \\([^\\n]*!\\/(.*?)\\/\\.test\\(value\\)\\)/);
 assert.ok(match, "validIsoDate debe validar el formato ISO YYYY-MM-DD");
 const format = new RegExp(match[1]);
