@@ -126,7 +126,10 @@ const retry = await signedAck(body);
 assert.equal(retry.status, 200);
 assert.equal((await retry.json()).duplicate, true);
 
-const reusedAckId = await signedAck({ ...body, payloadSha256: "b".repeat(64) });
+const reusedAckId = await signedAck({
+  ...body, payloadSha256: "b".repeat(64),
+  deliveryId: "PATRON_REQUESTS:" + "b".repeat(48)
+});
 assert.equal(reusedAckId.status, 409, "Un ackId no puede reutilizarse con otro cuerpo");
 
 const reusedDelivery = await signedAck({ ...body, ackId: "123e4567-e89b-42d3-a456-426614174002" });
@@ -136,7 +139,7 @@ assert.equal((await reusedDelivery.json()).duplicate, true);
 const conflictingDelivery = await signedAck({
   ...body, ackId: "123e4567-e89b-42d3-a456-426614174003", payloadSha256: "c".repeat(64)
 });
-assert.equal(conflictingDelivery.status, 409, "Una entrega no puede confirmarse con otra huella");
+assert.equal(conflictingDelivery.status, 400, "El identificador de entrega debe estar ligado a la huella");
 
 assert.equal(acknowledgements.size, 1, "Los reintentos no deben duplicar el recibo");
 console.log("PASS: ACK firmado, durable, idempotente, sin duplicados y con conflictos detectados");
