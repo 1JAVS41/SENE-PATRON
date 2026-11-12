@@ -34,6 +34,7 @@ const license = { status: "active", expires_at: Math.floor(Date.now() / 1000) + 
 const challenges = new Map();
 const acknowledgements = new Map();
 const deliveries = new Map();
+const cursors = new Map();
 const db = {
   prepare(sql) {
     let args = [];
@@ -48,6 +49,9 @@ const db = {
         if (sql.includes("FROM delivery_acknowledgements WHERE ack_id = ?")) return acknowledgements.get(args[0]) ?? null;
         if (sql.includes("FROM delivery_acknowledgements WHERE device_id = ?")) {
           return deliveries.get([args[0], args[1], args[2]].join("|")) ?? null;
+        }
+        if (sql.includes("FROM delivery_ack_cursors")) {
+          return cursors.get([args[0], args[1]].join("|")) ?? null;
         }
         throw new Error("Unexpected first query: " + sql);
       },
@@ -75,9 +79,28 @@ const db = {
           deliveries.set([device_id, stream, delivery_id].join("|"), row);
           return { meta: { changes: 1 } };
         }
+        if (sql.includes("INSERT INTO delivery_ack_cursors")) {
+          const [device_id, stream, cursor, updated_at] = args;
+          const key = [device_id, stream].join("|");
+          const current = cursors.get(key);
+          if (current && current.last_cursor > cursor) return { meta: { changes: 0 } };
+          cursors.set(key, { last_cursor: cursor, updated_at });
+          return { meta: { changes: 1 } };
+        }
+        if (sql.includes("DELETE FROM delivery_acknowledgements")) {
+          const row = acknowledgements.get(args[0]);
+          if (row) deliveries.delete([row.device_id, row.stream, row.delivery_id].join("|"));
+          acknowledgements.delete(args[0]);
+          return { meta: { changes: row ? 1 : 0 } };
+        }
         throw new Error("Unexpected run query: " + sql);
       }
     };
+  },
+  async batch(statements) {
+    const results = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
   }
 };
 const env = { DB: db };
@@ -141,5 +164,13 @@ const conflictingDelivery = await signedAck({
 });
 assert.equal(conflictingDelivery.status, 400, "El identificador de entrega debe estar ligado a la huella");
 
-assert.equal(acknowledgements.size, 1, "Los reintentos no deben duplicar el recibo");
+const regressingCursor = await signedAck({
+  ...body,
+  ackId: "123e4567-e89b-42d3-a456-426614174004",
+  payloadSha256: "d".repeat(64),
+  deliveryId: "PATRON_REQUESTS:" + "d".repeat(48),
+  cursor: 0
+});
+assert.equal(regressingCursor.status, 409, "El cursor de un flujo no puede retroceder");
+assert.equal(acknowledgements.size, 1, "Los reintentos y conflictos no deben duplicar el recibo");
 console.log("PASS: ACK firmado, durable, idempotente, sin duplicados y con conflictos detectados");
