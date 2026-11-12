@@ -411,6 +411,7 @@ async function acknowledgeAdminEvents(request, env) {
       return json({ acknowledged: true, duplicate: true, ackId: raced.ack_id,
         cursor: Number(raced.through_cursor), acknowledgedAt: Number(raced.acknowledged_at) });
     }
+    if (raced) return json({ error: "ADMIN_EVENT_ACK_CONFLICT" }, 409);
     return json({ error: "ADMIN_EVENT_ACK_FAILED" }, 503);
   }
   return json({ acknowledged: true, duplicate: false, ackId, cursor: throughCursor, acknowledgedAt: now });
