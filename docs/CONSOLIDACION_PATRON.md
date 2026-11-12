@@ -47,3 +47,11 @@ Android Keystore no permite exportar ni reconstruir una clave privada eliminada 
 4. Desplegar manualmente esta rama al Worker/D1 de pruebas cuando se autorice esa validación.
 5. Probar QR de ambos slots, restauración, solicitudes, correcciones, reportes, nómina, renovación y reposición en teléfonos reales.
 6. Preparar APK Release firmada y comprobar instalación/actualización.
+
+## Bloqueos detectados en el Worker de pruebas
+
+El despliegue aislado de pruebas terminó correctamente y el endpoint `/health` respondió `status=ok`. El registro de despliegue confirmó que aún faltan:
+- `SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK`: sin esta clave, AYUDA firmado no estará disponible y PATRÓN debe ocultar contactos no verificables.
+- Los cuatro secretos `SENE_TEST_ADMIN_*`: sin ellos, el login de SENE ADMIN responde `ADMIN_AUTH_NOT_CONFIGURED`.
+
+Estos secretos no se inventan ni se incrustan en la APK o en el repositorio. Se deben configurar en GitHub Actions del repositorio `1JAVS41/SENE-PATRON` antes de dar por terminada la integración real de AYUDA y ADMIN.
