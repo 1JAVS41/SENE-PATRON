@@ -72,16 +72,7 @@ jobs:
           cores: 2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-snapshot-save
           script: |
-            APK="$(find build/outputs/apk/debug -maxdepth 1 -name "*.apk" -type f | head -n 1)"
-            test -s "$APK"
-            adb wait-for-device
-            adb install -r "$APK"
-            adb shell am start -W -n com.sene.patron/.MainActivity
-            sleep 5
-            if ! adb shell pidof com.sene.patron; then
-              adb logcat -d -t 500
-              exit 1
-            fi
+            adb wait-for-device && APK_PATH="$(find build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f | head -n 1)" && test -s "$APK_PATH" && adb install -r "$APK_PATH" && adb shell am start -W -n com.sene.patron/.MainActivity && sleep 5 && (adb shell pidof com.sene.patron || { adb logcat -d -t 500; exit 1; })
       - name: Preparar nombre de entrega
         run: |
           mkdir -p dist
