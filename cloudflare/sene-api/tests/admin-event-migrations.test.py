@@ -101,4 +101,4 @@ issued_indexes = {row[1] for row in db.execute("PRAGMA index_list(delivery_issue
 assert "idx_delivery_issued_unacked" in issued_indexes
 assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 assert not db.execute("PRAGMA foreign_key_check").fetchall()
-print("PASS: los cuatro flujos comerciales generan eventos administrativos durables, sin datos operativos de VENTAS")
+print("PASS: altas, pagos, renovaciones, reposiciones, recuperaciones, vencimientos, auditoría y configuración generan eventos ADMIN durables")
