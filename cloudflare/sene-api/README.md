@@ -34,7 +34,7 @@ SENE PATRÓN ya contiene una primera integración Android real, aún no validada
 
 SENE VENTAS ya incluye cliente HTTPS firmado, vinculación QR, solicitudes de trabajador, recepción de respuestas, cola local de cierres de turno y envío de reportes de nómina. La integración sigue pendiente de E2E y de ajustes de disponibilidad de envío en la fecha de pago.
 
-**Importante:** la interfaz Android y el cliente firmado no hacen que el servicio esté operativo por sí solos. La API aún no está desplegada en Cloudflare y la D1 real todavía no tiene las migraciones 0002–0015. No introducir la URL de Hello World como servidor productivo ni activar equipos hasta completar el entorno de pruebas.
+**Importante:** existe un entorno AISLADO de pruebas desplegado por GitHub Actions: Worker `sene-licensing-api-testing.1codex41.workers.dev` y D1 `sene-licencias-pruebas`. La aplicación de pruebas apunta a ese Worker. Esto no es producción y no debe usarse para cobrar clientes reales. El Worker y la D1 de producción permanecen separados y no se modifican desde este flujo.
 
 ## Panel privado de reposiciones
 
@@ -50,7 +50,7 @@ El panel pide `OPERATOR_TOKEN` en cada sesión y lo mantiene únicamente en memo
 
 ## Estado de despliegue
 
-**El código está en GitHub, pero no está desplegado en el Worker de Cloudflare.** El Worker remoto continúa en el estado de prueba Hello World. La D1 real contiene únicamente la migración inicial 0001; las migraciones 0002–0015 todavía no se aplican allí.
+**Estado separado por entorno:** el Worker de PRUEBAS sí se despliega automáticamente y el workflow aplica sus migraciones a `sene-licencias-pruebas` antes de desplegar. El Worker de PRODUCCIÓN y la D1 real (`sene-licencias`) permanecen sin cambios; no desplegar allí ni aplicar migraciones de producción sin autorización explícita.
 
 No desplegar ni aplicar migraciones remotas hasta completar revisión y pruebas E2E en un entorno de pruebas, y recibir autorización explícita.
 
@@ -59,7 +59,7 @@ No desplegar ni aplicar migraciones remotas hasta completar revisión y pruebas 
 El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 
 1. `node --check` para detectar errores de sintaxis.
-2. Migraciones 0001–0015 sobre SQLite temporal e `integrity_check`.
+2. Migraciones 0001–0016 sobre SQLite temporal e `integrity_check`.
 3. Prueba de autorización de reposición pagada de PATRÓN, almacenamiento cifrado y rechazo de reintento que intentaría sustituir el código.
 4. Prueba del límite semanal de 20 operaciones y rechazo de la número 21.
 5. Pruebas de renovación, pago inicial de $580 y activación por 30 días.
@@ -74,9 +74,9 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 - Base D1: `sene-licencias`.
 - ID: `22f73e97-e43e-44f1-870b-58fad88e7028`.
 - Binding del Worker: `DB`.
-- Migraciones versionadas: 0001 a 0015 (con numeración repetida en algunos prefijos; se aplican por nombre de archivo).
+- Migraciones versionadas: 0001 a 0016 (con numeración repetida en algunos prefijos; se aplican por nombre de archivo).
 - La migración 0001 ya se aplicó manualmente a la D1 real. **No volver a ejecutarla.**
-- Las migraciones 0002–0015 solo se han probado en CI sobre SQLite temporal.
+- Las migraciones 0002–0016 se aplican en la D1 aislada de PRUEBAS mediante el workflow; la suite CI también las valida sobre SQLite temporal. La D1 de PRODUCCIÓN no se ha actualizado.
 
 ## Pendientes antes de producción
 
@@ -86,6 +86,8 @@ El workflow `.github/workflows/cloudflare-check.yml` ejecuta:
 4. Revisar exhaustivamente transacciones, límites, reintentos, concurrencia y errores D1.
 5. Ejecutar E2E en un Worker y D1 de pruebas, incluidos retos vencidos/replay, pairing concurrente, pagos duplicados, cuota, reemplazos y correcciones.
 6. Completar la integración visual/funcional de los módulos restantes de ambas APK y probarlos en teléfonos reales.
+7. Validar E2E el envío diario de inventario por cada equipo, el paquete de día de pago y su ACK antes de borrar snapshots.
+8. Completar la reserva de 48 horas para que un aviso de pago presentado dentro del plazo siga siendo autorizable aunque el operador confirme después; este caso aún requiere cierre E2E.
 7. Compilar y probar ambas APK en dispositivos reales, con y sin Internet.
 8. Integrar notificaciones WhatsApp Business API solo si se habilita un proveedor oficial; actualmente no están automatizadas.
 
