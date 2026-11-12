@@ -193,9 +193,144 @@ function makeCode() {
   return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
 }
 
+function constantTimeTextEqual(left, right) {
+  if (typeof left !== "string" || typeof right !== "string" || left.length !== right.length) return false;
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= left.charCodeAt(i) ^ right.charCodeAt(i);
+  return diff === 0;
+}
+
+async function adminSessionSecretKey(env, usages) {
+  if (typeof env.ADMIN_SESSION_SECRET !== "string" || env.ADMIN_SESSION_SECRET.length < 32) return null;
+  return crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(env.ADMIN_SESSION_SECRET),
+    { name: "HMAC", hash: "SHA-256" }, false, usages
+  );
+}
+
+async function issueAdminSession(email, env) {
+  const now = Math.floor(Date.now() / 1000);
+  const sessionId = crypto.randomUUID();
+  const expiresAt = now + 12 * 60 * 60;
+  const payload = { sub: "sene-admin", role: "admin", sid: sessionId, iat: now, exp: expiresAt };
+  const encoded = base64Url(new TextEncoder().encode(JSON.stringify(payload)));
+  const key = await adminSessionSecretKey(env, ["sign"]);
+  if (!key) return { error: "ADMIN_AUTH_NOT_CONFIGURED" };
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(encoded));
+  const token = encoded + "." + base64Url(signature);
+  const tokenHash = await sha256(token);
+  await env.DB.prepare(
+    "INSERT INTO admin_sessions (session_id, token_sha256, role, created_at, expires_at, revoked_at) VALUES (?, ?, 'admin', ?, ?, NULL)"
+  ).bind(sessionId, tokenHash, now, expiresAt).run();
+  return { accessToken: token, tokenType: "Bearer", expiresAt, serverTime: now };
+}
+
+async function verifyAdminSession(request, env) {
+  const authorization = request.headers.get("authorization") || "";
+  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!token || token.length > 4096) return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const key = await adminSessionSecretKey(env, ["verify"]);
+  if (!key) return null;
+  let payload;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(fromBase64(parts[0])));
+  } catch { return null; }
+  if (!payload || payload.sub !== "sene-admin" || payload.role !== "admin" ||
+      typeof payload.sid !== "string" || !Number.isSafeInteger(payload.exp) ||
+      payload.exp <= Math.floor(Date.now() / 1000)) return null;
+  let signature;
+  try { signature = fromBase64(parts[1]); } catch { return null; }
+  const valid = await crypto.subtle.verify(
+    "HMAC", key, signature, new TextEncoder().encode(parts[0])
+  );
+  if (!valid) return null;
+  const session = await env.DB.prepare(
+    "SELECT token_sha256, role, expires_at, revoked_at FROM admin_sessions WHERE session_id = ? LIMIT 1"
+  ).bind(payload.sid).first();
+  if (!session || session.role !== "admin" || session.revoked_at !== null ||
+      Number(session.expires_at) !== payload.exp ||
+      !constantTimeTextEqual(session.token_sha256, await sha256(token))) return null;
+  return { sessionId: payload.sid, expiresAt: payload.exp };
+}
+
 async function requireAdmin(request, env) {
   const supplied = request.headers.get("authorization") || "";
-  return Boolean(env.ADMIN_TOKEN && supplied === `Bearer ${env.ADMIN_TOKEN}`);
+  if (env.ADMIN_TOKEN && supplied === `Bearer ${env.ADMIN_TOKEN}`) return true;
+  return Boolean(await verifyAdminSession(request, env));
+}
+
+async function adminLogin(request, env) {
+  let body;
+  try {
+    if (Number(request.headers.get("content-length") || 0) > 4096) return json({ error: "INVALID_REQUEST" }, 413);
+    body = await request.json();
+  } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  if (Object.keys(body || {}).some((key) => key !== "email" && key !== "password") ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+      password.length < 10 || password.length > 256) {
+    return json({ error: "INVALID_CREDENTIALS" }, 401);
+  }
+  if (typeof env.ADMIN_LOGIN_EMAIL !== "string" ||
+      typeof env.ADMIN_PASSWORD_HASH !== "string" ||
+      typeof env.ADMIN_PASSWORD_SALT !== "string" ||
+      typeof env.ADMIN_SESSION_SECRET !== "string") {
+    return json({ error: "ADMIN_AUTH_NOT_CONFIGURED" }, 503);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const ipHash = await sha256(env.ADMIN_SESSION_SECRET + ":" + ip);
+  const attempt = await env.DB.prepare(
+    "SELECT window_started_at, attempts, blocked_until FROM admin_login_attempts WHERE ip_hash = ? LIMIT 1"
+  ).bind(ipHash).first();
+  if (attempt && Number(attempt.blocked_until || 0) > now) {
+    return json({ error: "ADMIN_LOGIN_RATE_LIMITED", retryAfter: Number(attempt.blocked_until) - now }, 429);
+  }
+
+  let salt;
+  try { salt = fromBase64(env.ADMIN_PASSWORD_SALT); } catch { return json({ error: "ADMIN_AUTH_NOT_CONFIGURED" }, 503); }
+  if (salt.length < 16 || !/^[0-9a-f]{64}$/i.test(env.ADMIN_PASSWORD_HASH)) {
+    return json({ error: "ADMIN_AUTH_NOT_CONFIGURED" }, 503);
+  }
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]
+  );
+  const derived = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" }, key, 256
+  );
+  const candidate = hex(derived);
+  const valid = constantTimeTextEqual(email, env.ADMIN_LOGIN_EMAIL.trim().toLowerCase()) &&
+    constantTimeTextEqual(candidate, env.ADMIN_PASSWORD_HASH.toLowerCase());
+  if (!valid) {
+    const windowStarted = !attempt || now - Number(attempt.window_started_at) >= 900 ? now : Number(attempt.window_started_at);
+    const attempts = windowStarted === now ? 1 : Number(attempt.attempts || 0) + 1;
+    const blockedUntil = attempts >= 8 ? now + 900 : 0;
+    await env.DB.prepare(
+      "INSERT INTO admin_login_attempts (ip_hash, window_started_at, attempts, blocked_until) VALUES (?, ?, ?, ?) ON CONFLICT(ip_hash) DO UPDATE SET window_started_at=excluded.window_started_at, attempts=excluded.attempts, blocked_until=excluded.blocked_until"
+    ).bind(ipHash, windowStarted, attempts, blockedUntil).run();
+    return json({ error: blockedUntil ? "ADMIN_LOGIN_RATE_LIMITED" : "INVALID_CREDENTIALS" }, blockedUntil ? 429 : 401);
+  }
+  await env.DB.prepare("DELETE FROM admin_login_attempts WHERE ip_hash = ?").bind(ipHash).run();
+  try {
+    const session = await issueAdminSession(email, env);
+    if (session.error) return json(session, 503);
+    return json(session);
+  } catch {
+    return json({ error: "ADMIN_SESSION_CREATE_FAILED" }, 503);
+  }
+}
+
+async function adminLogout(request, env) {
+  const session = await verifyAdminSession(request, env);
+  if (!session) return json({ error: "ADMIN_UNAUTHORIZED" }, 401);
+  await env.DB.prepare(
+    "UPDATE admin_sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL"
+  ).bind(Math.floor(Date.now() / 1000), session.sessionId).run();
+  return json({ loggedOut: true });
 }
 
 const CHALLENGE_TARGETS = {
@@ -3210,6 +3345,8 @@ async function handle(request, env) {
     return json({ service: "SENE licensing API", status: "ok", version: 1 });
   }
 
+  if (request.method === "POST" && url.pathname === "/v1/admin/login") return adminLogin(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/admin/logout") return adminLogout(request, env);
   if (request.method === "POST" && url.pathname === "/v1/challenges") {
     return issueChallenge(request, env);
   }
