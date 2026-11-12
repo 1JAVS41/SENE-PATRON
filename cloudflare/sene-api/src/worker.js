@@ -294,6 +294,12 @@ async function recordUniversalDelivery(env, ctx, stream, payload) {
 async function listAdminEvents(request, env) {
   const session = await verifyAdminSession(request, env);
   if (!session) return json({ error: "ADMIN_UNAUTHORIZED" }, 401);
+  const now = Math.floor(Date.now() / 1000);
+  // Expiration is materialized lazily when ADMIN polls its event stream.
+  // The migration trigger records the transition in the durable outbox.
+  await env.DB.prepare(
+    "UPDATE licenses SET status='expired' WHERE status='active' AND expires_at IS NOT NULL AND expires_at<=?"
+  ).bind(now).run();
   let cursorRow = await env.DB.prepare(
     "SELECT last_cursor FROM admin_event_cursors WHERE session_id=? LIMIT 1"
   ).bind(session.sessionId).first();
