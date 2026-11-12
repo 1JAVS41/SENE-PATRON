@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: sene-patron-apk-\${{ github.ref }}
+  group: sene-patron-apk
   cancel-in-progress: true
 
 permissions:
