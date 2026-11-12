@@ -1396,10 +1396,10 @@ async function listOperatorAudit(request, env) {
   if (licenseId && !/^[0-9a-f-]{36}$/i.test(licenseId)) return json({ error: "INVALID_LICENSE_ID" }, 400);
   const rows = licenseId
     ? await env.DB.prepare(
-        "SELECT id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at FROM audit_log WHERE license_id=? ORDER BY created_at DESC,id DESC LIMIT ?"
+        "SELECT id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at FROM audit_log WHERE actor_type='operator' AND license_id=? ORDER BY created_at DESC,id DESC LIMIT ?"
       ).bind(licenseId, limit).all()
     : await env.DB.prepare(
-        "SELECT id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at FROM audit_log ORDER BY created_at DESC,id DESC LIMIT ?"
+        "SELECT id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at FROM audit_log WHERE actor_type='operator' ORDER BY created_at DESC,id DESC LIMIT ?"
       ).bind(limit).all();
   return json({ items: rows.results || [], serverTime: Math.floor(Date.now() / 1000) });
 }
