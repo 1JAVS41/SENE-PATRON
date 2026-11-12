@@ -214,14 +214,50 @@ const ackBody = {
   ackId, fromCursor: batch.fromCursor, throughCursor: batch.throughCursor,
   deliveryId: batch.deliveryId, payloadSha256: await sha256(canonicalJson(batch.items))
 };
-const ackRequest = () => new Request("https://sene.test/v1/admin/events/ack", {
+const ackRequest = (body = ackBody) => new Request("https://sene.test/v1/admin/events/ack", {
   method: "POST",
   headers: { "content-type": "application/json", authorization: "Bearer " + session.accessToken },
-  body: JSON.stringify(ackBody)
+  body: JSON.stringify(body)
 });
+
+// El ACK no puede confirmar una huella inventada aunque el deliveryId coincida
+// con esa huella, ni saltar a un cursor que no termina en una entrega emitida.
+const forgedHash = "f".repeat(64);
+const forgedAck = await worker.fetch(ackRequest({
+  ...ackBody,
+  ackId: "123e4567-e89b-42d3-a456-426614174097",
+  payloadSha256: forgedHash,
+  deliveryId: "ADMIN_EVENTS:" + forgedHash.slice(0, 48)
+}), env);
+assert.equal(forgedAck.status, 409, "La huella del ACK debe coincidir con el lote durable del servidor");
+assert.equal((await forgedAck.json()).error, "ADMIN_EVENT_HASH_MISMATCH");
+
+const skippedCursor = await worker.fetch(ackRequest({
+  ...ackBody,
+  ackId: "123e4567-e89b-42d3-a456-426614174096",
+  throughCursor: 99
+}), env);
+assert.equal(skippedCursor.status, 409, "No se puede confirmar un cursor que el servidor no entregó");
+assert.equal((await skippedCursor.json()).error, "ADMIN_EVENT_BATCH_INCOMPLETE");
+
+const staleCursor = await worker.fetch(ackRequest({
+  ...ackBody,
+  ackId: "123e4567-e89b-42d3-a456-426614174095",
+  fromCursor: 1
+}), env);
+assert.equal(staleCursor.status, 409, "El ACK debe comenzar en el cursor vigente de esa sesión");
+assert.equal((await staleCursor.json()).error, "ADMIN_EVENT_CURSOR_CONFLICT");
+
 const ack = await worker.fetch(ackRequest(), env);
 assert.equal(ack.status, 200);
 assert.equal((await ack.json()).duplicate, false);
+const reusedAckId = await worker.fetch(ackRequest({
+  ...ackBody,
+  payloadSha256: "e".repeat(64),
+  deliveryId: "ADMIN_EVENTS:" + "e".repeat(48)
+}), env);
+assert.equal(reusedAckId.status, 409, "Un ACK ID no puede reutilizarse con otro cuerpo");
+assert.equal((await reusedAckId.json()).error, "ACK_ID_CONFLICT");
 assert.notEqual(JSON.parse(events[0].payload_json).compacted, true,
   "No se compacta mientras exista otra sesión activa sin ACK");
 
