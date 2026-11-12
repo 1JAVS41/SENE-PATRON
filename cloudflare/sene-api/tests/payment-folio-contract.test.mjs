@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const worker = readFileSync(new URL("../src/worker.mjs", import.meta.url), "utf8");
 const app = readFileSync(new URL("../../../src/main/java/com/sene/patron/MainActivity.kt", import.meta.url), "utf8");
+const client = readFileSync(new URL("../../../src/main/java/com/sene/patron/SeneApiClient.kt", import.meta.url), "utf8");
 
 function bodyOf(source, startName, endName) {
   const start = source.indexOf(startName);
@@ -28,6 +29,9 @@ assert.ok(replacement.includes("folio: requestId") && replacement.includes("foli
 assert.ok(replacement.includes("folio: ${requestId}"));
 
 assert.ok(app.includes("CREAR SOLICITUD Y OBTENER FOLIO"));
+assert.ok(app.includes("SOLICITAR REPOSICIÓN PAGADA · $500 MXN"));
+assert.ok(app.includes("api.listPatronDevices()") && app.includes("api.requestReplacement(deviceId, detail)"));
+assert.ok(client.includes("PATRON_DEVICES_LIST") && client.includes("PATRON_REPLACEMENT_REQUEST"));
 assert.ok(app.includes("private fun showPaymentFolioDialog"));
 assert.ok(app.includes("private fun sendPaymentNoticeToAyuda"));
 assert.ok(app.includes("Folio de solicitud: $folio"));
