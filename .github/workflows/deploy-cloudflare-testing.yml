@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - sene-cloudflare-backend
+      - integration/ack-universal
     paths:
       - "cloudflare/sene-api/**"
       - ".github/workflows/deploy-cloudflare-testing.yml"
@@ -21,6 +22,10 @@ jobs:
       SENE_TEST_OPERATOR_TOKEN: ${{ secrets.SENE_TEST_OPERATOR_TOKEN }}
       SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY: ${{ secrets.SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY }}
       SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK: ${{ secrets.SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK }}
+      SENE_TEST_ADMIN_LOGIN_EMAIL: ${{ secrets.SENE_TEST_ADMIN_LOGIN_EMAIL }}
+      SENE_TEST_ADMIN_PASSWORD_HASH: ${{ secrets.SENE_TEST_ADMIN_PASSWORD_HASH }}
+      SENE_TEST_ADMIN_PASSWORD_SALT: ${{ secrets.SENE_TEST_ADMIN_PASSWORD_SALT }}
+      SENE_TEST_ADMIN_SESSION_SECRET: ${{ secrets.SENE_TEST_ADMIN_SESSION_SECRET }}
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
@@ -39,6 +44,20 @@ jobs:
           [[ "$SENE_TEST_OPERATOR_TOKEN" != *$'\n'* ]] || { echo "SENE_TEST_OPERATOR_TOKEN no puede contener saltos de línea"; exit 1; }
           [[ "$SENE_TEST_OPERATOR_TOKEN" =~ .{32,} ]] || { echo "SENE_TEST_OPERATOR_TOKEN debe tener al menos 32 caracteres"; exit 1; }
           [[ "$SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY debe contener exactamente 64 caracteres hexadecimales"; exit 1; }
+          admin_secret_count=0
+          for value in "$SENE_TEST_ADMIN_LOGIN_EMAIL" "$SENE_TEST_ADMIN_PASSWORD_HASH" "$SENE_TEST_ADMIN_PASSWORD_SALT" "$SENE_TEST_ADMIN_SESSION_SECRET"; do
+            [[ -n "$value" ]] && admin_secret_count=$((admin_secret_count + 1))
+          done
+          if [ "$admin_secret_count" -ne 0 ] && [ "$admin_secret_count" -ne 4 ]; then
+            echo "Configura los cuatro secretos SENE_TEST_ADMIN_* juntos o deja los cuatro vacíos."
+            exit 1
+          fi
+          if [ "$admin_secret_count" -eq 4 ]; then
+            [[ "$SENE_TEST_ADMIN_LOGIN_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || { echo "Correo admin de pruebas no válido"; exit 1; }
+            [[ "$SENE_TEST_ADMIN_PASSWORD_HASH" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "El hash admin debe ser SHA-256 hexadecimal de 64 caracteres"; exit 1; }
+            [[ "$SENE_TEST_ADMIN_PASSWORD_SALT" =~ ^[A-Za-z0-9+/]{20,}={0,2}$ ]] || { echo "El salt admin debe estar codificado en Base64"; exit 1; }
+            [[ "$SENE_TEST_ADMIN_SESSION_SECRET" =~ .{32,} ]] || { echo "El secreto de sesión admin debe tener al menos 32 caracteres"; exit 1; }
+          fi
 
       - name: Aplicar migraciones únicamente a D1 de pruebas
         shell: bash
@@ -63,6 +82,14 @@ jobs:
             printf '%s' "$SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK" | npx --yes wrangler@4 secret put CONTACTS_SIGNING_PRIVATE_JWK --config cloudflare/sene-api/wrangler.testing.toml
           else
             echo "Aviso: CONTACTS_SIGNING_PRIVATE_JWK no está configurada; AYUDA firmado no estará disponible en este entorno."
+          fi
+          if [ -n "$SENE_TEST_ADMIN_LOGIN_EMAIL" ]; then
+            printf '%s' "$SENE_TEST_ADMIN_LOGIN_EMAIL" | npx --yes wrangler@4 secret put ADMIN_LOGIN_EMAIL --config cloudflare/sene-api/wrangler.testing.toml
+            printf '%s' "$SENE_TEST_ADMIN_PASSWORD_HASH" | npx --yes wrangler@4 secret put ADMIN_PASSWORD_HASH --config cloudflare/sene-api/wrangler.testing.toml
+            printf '%s' "$SENE_TEST_ADMIN_PASSWORD_SALT" | npx --yes wrangler@4 secret put ADMIN_PASSWORD_SALT --config cloudflare/sene-api/wrangler.testing.toml
+            printf '%s' "$SENE_TEST_ADMIN_SESSION_SECRET" | npx --yes wrangler@4 secret put ADMIN_SESSION_SECRET --config cloudflare/sene-api/wrangler.testing.toml
+          else
+            echo "Aviso: acceso SENE ADMIN no configurado; el login devolverá ADMIN_AUTH_NOT_CONFIGURED."
           fi
 
       - name: Verificar Worker de pruebas
