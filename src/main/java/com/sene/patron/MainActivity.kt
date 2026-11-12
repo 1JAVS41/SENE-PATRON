@@ -1434,7 +1434,6 @@ class MainActivity : Activity() {
                                 Toast.makeText(this, "No se recibió el folio de recuperación", Toast.LENGTH_LONG).show()
                             }
                         }
-                        }
                     } catch (error: Exception) { runOnUiThread { Toast.makeText(this, error.message ?: "No se pudo enviar la solicitud", Toast.LENGTH_LONG).show() } }
                 }.start()
             }.setNegativeButton("CANCELAR", null).show()
