@@ -379,6 +379,10 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return result
     }
 
+    fun listPatronDevices(): JSONObject {
+        return deviceSigned("PATRON_DEVICES_LIST", "/v1/patron/devices/list", JSONObject().toString())
+    }
+
     fun requestReplacement(deviceId: String, reason: String): JSONObject {
         val body = JSONObject().put("deviceId", deviceId).put("reason", reason.trim())
         return deviceSigned("PATRON_REPLACEMENT_REQUEST", "/v1/patron/devices/replacement-request", body.toString())
