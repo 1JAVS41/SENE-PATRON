@@ -796,3 +796,105 @@ jobs:
           assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
           print("Paid replacement lifecycle: OK")
           PY
+
+      - name: Probar normalización de contactos y recuperación PATRÓN sin efectos parciales
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, sqlite3
+
+          worker = pathlib.Path("cloudflare/sene-api/src/worker.js").read_text()
+          assert 'businessName.trim().replace(/\\s+/g, " ")' in worker
+          assert 'registeredPhone.replace(/\\D/g, "")' in worker
+          assert '!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)' in worker
+          assert "status = 'cancelled', consumed_at = ?" in worker
+          assert "r.status = 'cancelled' AND r.consumed_at = ?" in worker
+          assert "status = 'cancelled' AND consumed_at = ? AND EXISTS" in worker
+
+          def database():
+              db = sqlite3.connect(":memory:")
+              db.execute("PRAGMA foreign_keys=ON")
+              for migration in sorted(pathlib.Path("cloudflare/sene-api/migrations").glob("*.sql")):
+                  db.executescript(migration.read_text())
+              return db
+
+          def add_recovery(db, suffix, old_status):
+              license_id = "lic-" + suffix
+              device_id = "old-" + suffix
+              request_id = "req-" + suffix
+              code_hash = "hash-" + suffix
+              db.execute("""INSERT INTO licenses
+                  (id,business_name,status,max_devices,created_at,expires_at,registered_email,registered_phone)
+                  VALUES (?,?, 'active',3,1,9999999999,?,?)""",
+                  (license_id, "TIENDA " + suffix, suffix + "@example.invalid", "5211111111111"))
+              db.execute("""INSERT INTO devices
+                  (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at)
+                  VALUES (?,?, 'PATRON',?,?,x'01',?,1,?,1)""",
+                  (device_id, license_id, "install-" + suffix, "continuity-" + suffix, "fp-" + suffix, old_status))
+              db.execute("""INSERT INTO patron_recovery_requests
+                  (id,license_id,old_patron_device_id,code_hash,reason,status,created_at,created_by)
+                  VALUES (?,?,?,?,'lost device','pending',2,'operator')""",
+                  (request_id, license_id, device_id, code_hash))
+              db.execute("""INSERT INTO patron_recovery_payment_requests
+                  (id,license_id,old_patron_device_id,installation_id,fingerprint,registered_email,registered_phone,status,code_hash,created_at,authorized_at)
+                  VALUES (?,?,?,?,?,?,?,'authorized',?,2,3)""",
+                  ("pay-" + suffix, license_id, device_id, "new-install-" + suffix, "new-fp-" + suffix,
+                   suffix + "@example.invalid", "5211111111111", code_hash))
+              return license_id, device_id, request_id, code_hash
+
+          claim_sql = """UPDATE patron_recovery_requests SET status='cancelled',consumed_at=?
+              WHERE id=? AND code_hash=? AND status='pending'
+              AND EXISTS (SELECT 1 FROM devices WHERE id=patron_recovery_requests.old_patron_device_id
+                AND license_id=patron_recovery_requests.license_id AND device_type='PATRON'
+                AND slot_number=1 AND status='active')"""
+          revoke_sql = """UPDATE devices SET status='revoked' WHERE id=? AND license_id=?
+              AND device_type='PATRON' AND slot_number=1 AND status='active'
+              AND EXISTS (SELECT 1 FROM patron_recovery_requests
+                WHERE id=? AND code_hash=? AND status='cancelled' AND consumed_at=?)"""
+          insert_sql = """INSERT INTO devices
+              (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at)
+              SELECT ?,r.license_id,'PATRON',?,?,x'02',?,1,'active',?
+              FROM patron_recovery_requests r JOIN licenses l ON l.id=r.license_id
+              JOIN devices old ON old.id=r.old_patron_device_id
+              WHERE r.id=? AND r.code_hash=? AND r.status='cancelled' AND r.consumed_at=?
+                AND old.status='revoked' AND l.status IN ('active','expired')
+                AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=r.license_id
+                  AND d.slot_number=1 AND d.status='active')"""
+
+          # Regression: an already-revoked old PATRÓN must not create a new device,
+          # consume the payment, or consume the recovery request.
+          db = database()
+          lic, old, req, code = add_recovery(db, "already-revoked", "revoked")
+          now = 100
+          db.execute(claim_sql, (now, req, code))
+          assert db.execute("SELECT changes()").fetchone()[0] == 0
+          db.execute(insert_sql, ("new-" + lic, "new-install", "new-continuity", "new-fp", now, req, code, now))
+          assert db.execute("SELECT changes()").fetchone()[0] == 0
+          assert db.execute("SELECT status FROM patron_recovery_requests WHERE id=?", (req,)).fetchone()[0] == "pending"
+          assert db.execute("SELECT status FROM patron_recovery_payment_requests WHERE code_hash=?", (code,)).fetchone()[0] == "authorized"
+          assert db.execute("SELECT COUNT(*) FROM devices WHERE license_id=? AND id LIKE 'new-%'", (lic,)).fetchone()[0] == 0
+
+          # Positive path: a valid active old device is claimed, revoked and replaced once.
+          lic, old, req, code = add_recovery(db, "valid", "active")
+          db.execute(claim_sql, (now, req, code))
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          db.execute(revoke_sql, (old, lic, req, code, now))
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          db.execute(insert_sql, ("new-" + lic, "new-install", "new-continuity", "new-fp", now, req, code, now))
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          db.execute("""UPDATE patron_recovery_requests SET status='consumed',consumed_at=?
+              WHERE id=? AND code_hash=? AND status='cancelled' AND consumed_at=?
+              AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')""",
+              (now, req, code, now, "new-" + lic))
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          db.execute("""UPDATE patron_recovery_payment_requests SET status='consumed',consumed_at=?
+              WHERE code_hash=? AND status='authorized'
+              AND EXISTS (SELECT 1 FROM patron_recovery_requests WHERE id=? AND status='consumed' AND code_hash=?)""",
+              (now, code, req, code))
+          assert db.execute("SELECT changes()").fetchone()[0] == 1
+          assert db.execute("SELECT status FROM devices WHERE id=?", (old,)).fetchone()[0] == "revoked"
+          assert db.execute("SELECT status FROM devices WHERE id=?", ("new-" + lic,)).fetchone()[0] == "active"
+          assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+          assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+          print("Contact normalization and PATRON recovery regression tests: OK")
+          PY
