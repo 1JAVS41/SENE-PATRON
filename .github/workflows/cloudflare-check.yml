@@ -43,6 +43,9 @@ jobs:
       - name: Probar selección y retención de inventarios al pagar nómina
         run: python3 cloudflare/sene-api/tests/payday-inventory-retention.test.py
 
+      - name: Probar idempotencia de pagos y códigos de un solo uso
+        run: python3 cloudflare/sene-api/tests/payment-idempotency.test.py
+
       - name: Probar firma digital real de contactos AYUDA en el Worker
         run: |
           set -euo pipefail
