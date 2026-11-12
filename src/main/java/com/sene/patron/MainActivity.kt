@@ -35,12 +35,12 @@ import org.json.JSONObject
 private const val SENE_TEST_SERVER_URL = "https://sene-licensing-api-testing.1codex41.workers.dev"
 
 class MainActivity : Activity() {
-    private val bg = Color.rgb(244, 245, 250)
-    private val ink = Color.rgb(23, 33, 61)
-    private val muted = Color.rgb(111, 121, 145)
+    private val bg = Color.rgb(242, 248, 252)
+    private val ink = Color.rgb(12, 35, 52)
+    private val muted = Color.rgb(91, 115, 132)
     private val red = Color.rgb(190, 35, 48)
-    private val accent = Color.rgb(255, 181, 71)
-    private val success = Color.rgb(22, 139, 69)
+    private val accent = Color.rgb(24, 151, 224)
+    private val success = Color.rgb(40, 170, 125)
     private val white = Color.WHITE
     private var currentPage = "home"
     @Volatile private var lastNotificationRefreshAt = 0L
@@ -1354,7 +1354,7 @@ class MainActivity : Activity() {
         isFocusable = true
         val count = pendingAlertCount(destination)
         addView(horizontal(title, when { count > 0 -> "● $count ALERTA(S)"; count == 0 -> "ABRIR  ›"; else -> "SIN CONEXIÓN" }, ink,
-            when { count > 0 -> success; count == 0 -> red; else -> muted }))
+            when { count > 0 -> success; count == 0 -> muted; else -> muted }))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
@@ -1425,7 +1425,7 @@ class MainActivity : Activity() {
         val section = destination.substringAfter("_")
         val count = pendingAlertCount(team, section)
         addView(horizontal(title, when { count > 0 -> "● $count NUEVA(S)"; count == 0 -> "›"; else -> "SIN CONEXIÓN" }, ink,
-            when { count > 0 -> success; count == 0 -> red; else -> muted }))
+            when { count > 0 -> success; count == 0 -> muted; else -> muted }))
         addView(text(description, 12, muted))
         setOnClickListener { currentPage = destination; render() }
     }
@@ -1435,7 +1435,7 @@ class MainActivity : Activity() {
 
     private fun notificationCard(number: String) = card().apply {
         val count = pendingAlertCount(if (number == "1") "team1" else "team2")
-        addView(horizontal("NOTIFICACIONES · EQUIPO $number", when { count > 0 -> "● $count"; count == 0 -> "SIN AVISOS"; else -> "SIN CONEXIÓN" }, ink, when { count > 0 -> success; count == 0 -> red; else -> muted }))
+        addView(horizontal("NOTIFICACIONES · EQUIPO $number", when { count > 0 -> "● $count"; count == 0 -> "SIN AVISOS"; else -> "SIN CONEXIÓN" }, ink, when { count > 0 -> success; count == 0 -> muted; else -> muted }))
         gap(this, 4)
         addView(text("Aquí aparecerán exclusivamente los avisos, solicitudes y cambios de este equipo.", 12, muted))
         addView(text("La bandeja de este equipo se actualizará al consultar el servidor SENE.", 11, muted))
@@ -1514,12 +1514,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(13), dp(14), dp(13))
             background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(17, 26, 53), Color.rgb(38, 59, 112)))
+                intArrayOf(Color.rgb(8, 22, 34), Color.rgb(18, 88, 118)))
                 .apply { cornerRadius = dp(21).toFloat() }
             elevation = dp(4).toFloat()
         }
         val logoButton = FrameLayout(this).apply {
-            background = rounded(Color.rgb(52, 74, 130), 15, Color.rgb(90, 117, 180))
+            background = rounded(Color.rgb(16, 72, 99), 15, Color.rgb(24, 151, 224))
             setPadding(dp(4), dp(4), dp(4), dp(4))
             isClickable = true
             isFocusable = true
@@ -1530,7 +1530,7 @@ class MainActivity : Activity() {
             }
         }
         val logo = ImageView(this).apply {
-            setImageBitmap(redLogo())
+            setImageBitmap(officialLogo())
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "Logotipo original SENE. Tocar para abrir el menú."
         }
@@ -1542,7 +1542,7 @@ class MainActivity : Activity() {
             setPadding(dp(12), 0, 0, 0)
         }
         brand.addView(text("SENE / PATRÓN", 19, white, true).apply { letterSpacing = .04f })
-        brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(185, 201, 248), true).apply { letterSpacing = .12f })
+        brand.addView(text("GESTIÓN INTELIGENTE", 10, Color.rgb(174, 222, 239), true).apply { letterSpacing = .12f })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(top, LinearLayout.LayoutParams(-1, -2))
         root.addView(View(this).apply { background = rounded(accent, 3) },
@@ -1551,13 +1551,13 @@ class MainActivity : Activity() {
         root.addView(text("Todo bajo control.", 13, muted).apply { setPadding(0, 0, 0, dp(13)) })
     }
 
-    private fun redLogo(): Bitmap =
+    private fun officialLogo(): Bitmap =
         android.graphics.BitmapFactory.decodeResource(resources, R.drawable.logo_sene_pv)
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(15), dp(14), dp(15), dp(14))
-        background = rounded(white, 17, Color.rgb(226, 230, 240))
+        background = rounded(white, 17, Color.rgb(211, 228, 238))
         elevation = dp(1).toFloat()
     }
 
@@ -1607,7 +1607,7 @@ class MainActivity : Activity() {
         setTextColor(white)
         setPadding(dp(16), dp(15), dp(16), dp(15))
         background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.rgb(67, 95, 173), Color.rgb(40, 61, 120)))
+            intArrayOf(Color.rgb(24, 151, 224), Color.rgb(40, 170, 125)))
             .apply { cornerRadius = dp(14).toFloat() }
         elevation = dp(3).toFloat()
         isClickable = true
