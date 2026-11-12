@@ -321,6 +321,30 @@ class SeneApiClient(context: Context, baseUrl: String) {
         return deviceSigned("DELIVERY_ACK", "/v1/deliveries/ack", body.toString(), deviceId)
     }
 
+
+    /**
+     * Persiste un identificador estable de ACK antes de enviarlo. Puede
+     * llamarse únicamente después de que el llamador haya guardado el lote.
+     */
+    fun acknowledgePersistedDelivery(stream: String, payload: JSONObject): JSONObject {
+        val payloadText = payload.toString()
+        val payloadHash = sha256(payloadText)
+        val deliveryId = "$stream:${payloadHash.take(48)}"
+        val cursor = payload.optLong("cursor", 0L).coerceAtLeast(0L)
+        val key = "delivery_ack_${stream}_${payloadHash}"
+        val ackId = prefs.getString(key, null) ?: java.util.UUID.randomUUID().toString().also {
+            check(prefs.edit().putString(key, it).commit()) {
+                "No se pudo guardar el identificador de ACK para reintentar"
+            }
+        }
+        val result = acknowledgeDelivery(stream, deliveryId, payloadHash, cursor, ackId)
+        check(result.optBoolean("acknowledged", false)) { "El servidor no confirmó el ACK de la entrega" }
+        check(prefs.edit().remove(key).commit()) {
+            "El servidor confirmó el ACK, pero no se pudo cerrar el recibo local"
+        }
+        return result
+    }
+
     fun requestReplacement(deviceId: String, reason: String): JSONObject {
         val body = JSONObject().put("deviceId", deviceId).put("reason", reason.trim())
         return deviceSigned("PATRON_REPLACEMENT_REQUEST", "/v1/patron/devices/replacement-request", body.toString())
