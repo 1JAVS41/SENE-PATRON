@@ -221,6 +221,9 @@ const CHALLENGE_TARGETS = {
   VENTAS_SHIFT_REPORT: ["POST", "/v1/ventas/shift-reports"],
   VENTAS_PAYROLL_REPORT: ["POST", "/v1/ventas/payroll-reports"],
   PATRON_REPORTS_INBOX: ["POST", "/v1/patron/reports/inbox"],
+  VENTAS_DAILY_INVENTORY: ["POST", "/v1/ventas/inventory/daily"],
+  PATRON_PAYDAY_BUNDLE: ["POST", "/v1/patron/payday/bundle"],
+  PATRON_PAYDAY_ACK: ["POST", "/v1/patron/payday/ack"],
   PATRON_RENEWAL_REQUEST: ["POST", "/v1/patron/renewals/request"],
   PATRON_RENEWAL_REDEEM: ["POST", "/v1/patron/renewals/redeem"],
   PATRON_REPLACEMENT_REQUEST: ["POST", "/v1/patron/devices/replacement-request"],
@@ -2613,6 +2616,183 @@ async function patronReportsInbox(request, env) {
 }
 
 
+
+function mexicoLocalDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(new Date());
+}
+
+function validIsoDate(value) {
+  if (typeof value !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
+  const d = new Date(value + "T00:00:00Z");
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+async function saveDailyInventory(request, env) {
+  const checked = await verifyBusinessProof(request, env, "VENTAS_DAILY_INVENTORY");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "VENTAS");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some((k) => !["inventoryDate", "snapshot"].includes(k)) ||
+      !validIsoDate(body.inventoryDate) || !body.snapshot ||
+      typeof body.snapshot !== "object" || Array.isArray(body.snapshot)) {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const today = mexicoLocalDate();
+  const cutoff = new Date(today + "T00:00:00Z");
+  cutoff.setUTCDate(cutoff.getUTCDate() - 6);
+  const earliest = cutoff.toISOString().slice(0, 10);
+  if (body.inventoryDate > today || body.inventoryDate < earliest) {
+    return json({ error: "INVENTORY_DATE_OUT_OF_RANGE", serverDate: today }, 400);
+  }
+  const snapshotJson = JSON.stringify(body.snapshot);
+  if (snapshotJson.length > 32768) return json({ error: "REQUEST_TOO_LARGE" }, 413);
+  const device = await env.DB.prepare(
+    "SELECT slot_number FROM devices WHERE id=? AND license_id=? AND device_type='VENTAS' AND status='active' LIMIT 1"
+  ).bind(ctx.deviceId, ctx.licenseId).first();
+  if (!device || ![2, 3].includes(Number(device.slot_number))) return json({ error: "DEVICE_SLOT_INVALID" }, 403);
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      `INSERT INTO daily_inventory_snapshots
+       (id, license_id, ventas_device_id, inventory_date, snapshot_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(ventas_device_id, inventory_date) DO UPDATE
+         SET snapshot_json=excluded.snapshot_json, updated_at=excluded.updated_at`
+    ).bind(id, ctx.licenseId, ctx.deviceId, body.inventoryDate, snapshotJson, now).run();
+  } catch {
+    return json({ error: "INVENTORY_SAVE_FAILED" }, 503);
+  }
+  const saved = await env.DB.prepare(
+    "SELECT id, updated_at FROM daily_inventory_snapshots WHERE ventas_device_id=? AND inventory_date=? LIMIT 1"
+  ).bind(ctx.deviceId, body.inventoryDate).first();
+  return json({ inventoryId: saved?.id || id, inventoryDate: body.inventoryDate,
+    slot: Number(device.slot_number) === 2 ? "VENTAS_1" : "VENTAS_2",
+    updatedAt: Number(saved?.updated_at || now), received: true });
+}
+
+async function createOrReadPaydayBundle(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_PAYDAY_BUNDLE");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some((k) => k !== "paymentDate") ||
+      !validIsoDate(body.paymentDate) || body.paymentDate !== mexicoLocalDate()) {
+    return json({ error: "INVALID_PAYDAY_DATE", serverDate: mexicoLocalDate() }, 400);
+  }
+  const existing = await env.DB.prepare(
+    "SELECT id, payload_json, status, created_at FROM payday_deliveries WHERE license_id=? AND payment_date=? LIMIT 1"
+  ).bind(ctx.licenseId, body.paymentDate).first();
+  if (existing) return json({
+    deliveryId: existing.id, paymentDate: body.paymentDate,
+    status: existing.status, duplicate: true, payload: JSON.parse(existing.payload_json),
+    createdAt: Number(existing.created_at)
+  });
+  const start = new Date(body.paymentDate + "T00:00:00Z");
+  start.setUTCDate(start.getUTCDate() - 6);
+  const earliest = start.toISOString().slice(0, 10);
+  const inventoryRows = await env.DB.prepare(
+    `SELECT s.id, s.inventory_date, s.snapshot_json, s.updated_at, d.slot_number
+       FROM daily_inventory_snapshots s JOIN devices d ON d.id=s.ventas_device_id
+      WHERE s.license_id=? AND d.status IN ('active','revoked')
+        AND d.device_type='VENTAS' AND d.slot_number IN (2,3)
+        AND s.inventory_date>=? AND s.inventory_date<=?
+      ORDER BY d.slot_number ASC, s.inventory_date DESC, s.updated_at DESC`
+  ).bind(ctx.licenseId, earliest, body.paymentDate).all();
+  const latestBySlot = new Map();
+  for (const row of (inventoryRows.results || [])) {
+    if (!latestBySlot.has(Number(row.slot_number))) latestBySlot.set(Number(row.slot_number), row);
+  }
+  const payrollRows = await env.DB.prepare(
+    `SELECT p.id, p.period_key, p.report_json, p.created_at, d.slot_number
+       FROM payroll_reports p JOIN devices d ON d.id=p.ventas_device_id
+      WHERE p.license_id=? AND p.period_key=? AND d.device_type='VENTAS'
+        AND d.slot_number IN (2,3)
+      ORDER BY d.slot_number`
+  ).bind(ctx.licenseId, body.paymentDate).all();
+  const payload = {
+    paymentDate: body.paymentDate,
+    inventories: [2,3].map((slot) => {
+      const row = latestBySlot.get(slot);
+      return row ? { slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
+        inventoryDate: row.inventory_date, updatedAt: Number(row.updated_at),
+        inventoryId: row.id, snapshot: JSON.parse(row.snapshot_json) } : null;
+    }).filter(Boolean),
+    missingInventoryTeams: [2,3].filter((slot) => !latestBySlot.has(slot))
+      .map((slot) => slot === 2 ? "VENTAS_1" : "VENTAS_2"),
+    payrollReports: (payrollRows.results || []).map((row) => ({
+      slot: Number(row.slot_number) === 2 ? "VENTAS_1" : "VENTAS_2",
+      reportId: row.id, periodKey: row.period_key,
+      report: JSON.parse(row.report_json), createdAt: Number(row.created_at)
+    }))
+  };
+  const payloadJson = JSON.stringify(payload);
+  if (payloadJson.length > 131072) return json({ error: "PAYDAY_BUNDLE_TOO_LARGE" }, 413);
+  const deliveryId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO payday_deliveries (id,license_id,payment_date,payload_json,status,created_at) VALUES (?,?,?,?,'pending',?)"
+    ).bind(deliveryId, ctx.licenseId, body.paymentDate, payloadJson, now).run();
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT id,payload_json,status,created_at FROM payday_deliveries WHERE license_id=? AND payment_date=? LIMIT 1"
+    ).bind(ctx.licenseId, body.paymentDate).first();
+    if (!raced) return json({ error: "PAYDAY_BUNDLE_CREATE_FAILED" }, 503);
+    return json({ deliveryId: raced.id, paymentDate: body.paymentDate, status: raced.status,
+      duplicate: true, payload: JSON.parse(raced.payload_json), createdAt: Number(raced.created_at) });
+  }
+  return json({ deliveryId, paymentDate: body.paymentDate, status: "pending",
+    duplicate: false, payload, createdAt: now }, 201);
+}
+
+async function acknowledgePaydayBundle(request, env) {
+  const checked = await verifyBusinessProof(request, env, "PATRON_PAYDAY_ACK");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  const ctx = await signedDeviceContext(proof, "PATRON");
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const deliveryId = typeof body?.deliveryId === "string" ? body.deliveryId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(deliveryId) ||
+      Object.keys(body || {}).some((k) => k !== "deliveryId")) return json({ error: "INVALID_REQUEST" }, 400);
+  const delivery = await env.DB.prepare(
+    "SELECT id,payment_date,status FROM payday_deliveries WHERE id=? AND license_id=? LIMIT 1"
+  ).bind(deliveryId, ctx.licenseId).first();
+  if (!delivery) return json({ error: "PAYDAY_DELIVERY_NOT_FOUND" }, 404);
+  if (delivery.status === "acked") return json({ deliveryId, status: "acked", duplicate: true });
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE payday_deliveries SET status='acked',acked_at=? WHERE id=? AND license_id=? AND status='pending'"
+      ).bind(now, deliveryId, ctx.licenseId),
+      env.DB.prepare(
+        "DELETE FROM daily_inventory_snapshots WHERE license_id=? AND inventory_date<=? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id=? AND device_type='VENTAS' AND slot_number IN (2,3))"
+      ).bind(ctx.licenseId, delivery.payment_date, ctx.licenseId)
+    ]);
+  } catch {
+    return json({ error: "PAYDAY_ACK_FAILED" }, 503);
+  }
+  const confirmed = await env.DB.prepare(
+    "SELECT status FROM payday_deliveries WHERE id=? AND license_id=? LIMIT 1"
+  ).bind(deliveryId, ctx.licenseId).first();
+  if (confirmed?.status !== "acked") return json({ error: "PAYDAY_ACK_NOT_CONFIRMED" }, 503);
+  return json({ deliveryId, status: "acked", duplicate: false, acknowledgedAt: now,
+    inventoriesCleaned: true });
+}
+
 function validateOfficialContacts(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const allowed = ["officialEmail", "helpPhone1", "helpPhone2"];
@@ -2947,6 +3127,9 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/ventas/shift-reports") return saveReport(request, env, "VENTAS_SHIFT_REPORT", "shift_reports", "shiftKey", "shift_key");
   if (request.method === "POST" && url.pathname === "/v1/ventas/payroll-reports") return saveReport(request, env, "VENTAS_PAYROLL_REPORT", "payroll_reports", "periodKey", "period_key");
   if (request.method === "POST" && url.pathname === "/v1/patron/reports/inbox") return patronReportsInbox(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/ventas/inventory/daily") return saveDailyInventory(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/payday/bundle") return createOrReadPaydayBundle(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/patron/payday/ack") return acknowledgePaydayBundle(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/corrections") return createCorrectionRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/corrections/inbox") return patronCorrectionsInbox(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/corrections/decision") return decideCorrectionRequest(request, env);
