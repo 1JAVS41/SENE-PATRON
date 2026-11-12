@@ -224,6 +224,7 @@ const CHALLENGE_TARGETS = {
   VENTAS_DAILY_INVENTORY: ["POST", "/v1/ventas/inventory/daily"],
   PATRON_PAYDAY_BUNDLE: ["POST", "/v1/patron/payday/bundle"],
   PATRON_PAYDAY_ACK: ["POST", "/v1/patron/payday/ack"],
+  DELIVERY_ACK: ["POST", "/v1/deliveries/ack"],
   PATRON_RENEWAL_REQUEST: ["POST", "/v1/patron/renewals/request"],
   PATRON_RENEWAL_REDEEM: ["POST", "/v1/patron/renewals/redeem"],
   PATRON_REPLACEMENT_REQUEST: ["POST", "/v1/patron/devices/replacement-request"],
@@ -2140,7 +2141,7 @@ const WORK_REQUEST_TYPES = new Set([
   "REST_DAY_CHANGE", "SALARY_ADVANCE", "DAMAGED_EQUIPMENT", "SUGGESTION"
 ]);
 
-async function signedDeviceContext(proof, expectedType) {
+async function signedDeviceContext(proof, expectedType, consumeQuota = true) {
   const deviceId = proof.challenge.device_id;
   const row = await proof.env.DB.prepare(
     "SELECT d.id, d.device_type, d.slot_number, d.license_id, d.status, l.status AS license_status, l.expires_at FROM devices d JOIN licenses l ON l.id = d.license_id WHERE d.id = ? LIMIT 1"
@@ -2152,8 +2153,10 @@ async function signedDeviceContext(proof, expectedType) {
   if (row.license_status !== "active" || !row.expires_at || row.expires_at <= now) {
     return { error: "LICENSE_EXPIRED", status: 403 };
   }
-  const quotaError = await consumeWeeklyQuota(proof.env, deviceId);
-  if (quotaError) return quotaError;
+  if (consumeQuota) {
+    const quotaError = await consumeWeeklyQuota(proof.env, deviceId);
+    if (quotaError) return quotaError;
+  }
   return { deviceId, licenseId: row.license_id, deviceType: row.device_type, slotNumber: row.slot_number };
 }
 
@@ -3085,6 +3088,91 @@ button.secondary{background:#29415d}button:disabled{opacity:.5;cursor:wait}
   });
 }
 
+async function acknowledgeUniversalDelivery(request, env) {
+  const checked = await verifyBusinessProof(request, env, "DELIVERY_ACK");
+  if (checked.response) return checked.response;
+  const { proof } = checked;
+  // ACKs are control receipts: authenticate the device, but do not charge the
+  // weekly business-operation quota for retries or acknowledgements.
+  const ctx = await signedDeviceContext(proof, null, false);
+  if (ctx.error) return json({ error: ctx.error }, ctx.status);
+
+  let body;
+  try { body = JSON.parse(proof.bodyText); } catch {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  const ackId = typeof body.ackId === "string" ? body.ackId.toLowerCase() : "";
+  const deliveryId = typeof body.deliveryId === "string" ? body.deliveryId : "";
+  const stream = typeof body.stream === "string" ? body.stream : "";
+  const payloadSha256 = typeof body.payloadSha256 === "string" ? body.payloadSha256.toLowerCase() : "";
+  const cursor = body.cursor;
+  if (!/^[0-9a-f-]{36}$/.test(ackId) ||
+      !/^[A-Za-z0-9._:-]{1,120}$/.test(deliveryId) ||
+      !/^[A-Z][A-Z0-9_.-]{1,47}$/.test(stream) ||
+      !/^[0-9a-f]{64}$/.test(payloadSha256) ||
+      !Number.isSafeInteger(cursor) || cursor < 0 ||
+      (body.recipientDeviceId != null && body.recipientDeviceId !== ctx.deviceId)) {
+    return json({ error: "INVALID_ACK" }, 400);
+  }
+
+  const requestHash = await sha256(proof.bodyText);
+  const byAckId = await env.DB.prepare(
+    "SELECT ack_id, device_id, stream, delivery_id, payload_sha256, cursor, request_sha256, acknowledged_at FROM delivery_acknowledgements WHERE ack_id = ? LIMIT 1"
+  ).bind(ackId).first();
+  if (byAckId) {
+    if (byAckId.device_id !== ctx.deviceId || byAckId.request_sha256 !== requestHash) {
+      return json({ error: "ACK_ID_CONFLICT" }, 409);
+    }
+    return json({
+      acknowledged: true, duplicate: true, ackId: byAckId.ack_id,
+      deliveryId: byAckId.delivery_id, stream: byAckId.stream,
+      cursor: Number(byAckId.cursor), acknowledgedAt: Number(byAckId.acknowledged_at)
+    });
+  }
+
+  const byDelivery = await env.DB.prepare(
+    "SELECT ack_id, payload_sha256, cursor, acknowledged_at FROM delivery_acknowledgements WHERE device_id = ? AND stream = ? AND delivery_id = ? LIMIT 1"
+  ).bind(ctx.deviceId, stream, deliveryId).first();
+  if (byDelivery) {
+    if (byDelivery.payload_sha256 !== payloadSha256 || Number(byDelivery.cursor) !== cursor) {
+      return json({ error: "DELIVERY_ACK_CONFLICT" }, 409);
+    }
+    return json({
+      acknowledged: true, duplicate: true, ackId: byDelivery.ack_id,
+      deliveryId, stream, cursor,
+      acknowledgedAt: Number(byDelivery.acknowledged_at)
+    });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO delivery_acknowledgements (ack_id, license_id, device_id, stream, delivery_id, payload_sha256, cursor, request_sha256, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(ackId, ctx.licenseId, ctx.deviceId, stream, deliveryId, payloadSha256, cursor, requestHash, now).run();
+  } catch {
+    // A concurrent retry may have won the unique-key race. Re-read and
+    // accept only an exact replay; never reinterpret a conflicting body.
+    const raced = await env.DB.prepare(
+      "SELECT ack_id, device_id, payload_sha256, cursor, request_sha256, acknowledged_at FROM delivery_acknowledgements WHERE ack_id = ? OR (device_id = ? AND stream = ? AND delivery_id = ?) LIMIT 1"
+    ).bind(ackId, ctx.deviceId, stream, deliveryId).first();
+    if (raced && raced.device_id === ctx.deviceId &&
+        raced.payload_sha256 === payloadSha256 && Number(raced.cursor) === cursor &&
+        (raced.ack_id !== ackId || raced.request_sha256 === requestHash)) {
+      return json({
+        acknowledged: true, duplicate: true, ackId: raced.ack_id,
+        deliveryId, stream, cursor,
+        acknowledgedAt: Number(raced.acknowledged_at)
+      });
+    }
+    return json({ error: "ACK_CONFLICT" }, 409);
+  }
+
+  return json({
+    acknowledged: true, duplicate: false, ackId, deliveryId, stream,
+    cursor, acknowledgedAt: now
+  });
+}
+
 async function handle(request, env) {
   const url = new URL(request.url);
 
@@ -3164,6 +3252,7 @@ async function handle(request, env) {
   if (request.method === "POST" && url.pathname === "/v1/ventas/inventory/daily") return saveDailyInventory(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/payday/bundle") return createOrReadPaydayBundle(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/payday/ack") return acknowledgePaydayBundle(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/deliveries/ack") return acknowledgeUniversalDelivery(request, env);
   if (request.method === "POST" && url.pathname === "/v1/ventas/corrections") return createCorrectionRequest(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/corrections/inbox") return patronCorrectionsInbox(request, env);
   if (request.method === "POST" && url.pathname === "/v1/patron/corrections/decision") return decideCorrectionRequest(request, env);
