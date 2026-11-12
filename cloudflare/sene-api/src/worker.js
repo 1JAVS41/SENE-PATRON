@@ -2690,6 +2690,19 @@ async function createOrReadPaydayBundle(request, env) {
       !validIsoDate(body.paymentDate) || body.paymentDate !== mexicoLocalDate()) {
     return json({ error: "INVALID_PAYDAY_DATE", serverDate: mexicoLocalDate() }, 400);
   }
+  const settingsRows = await env.DB.prepare(
+    "SELECT slot_number, payment_day, payment_dates_json FROM payroll_settings WHERE license_id=? AND slot_number IN (2,3)"
+  ).bind(ctx.licenseId).all();
+  const dayOfMonth = Number(body.paymentDate.slice(8, 10));
+  const dueSlots = [];
+  for (const setting of (settingsRows.results || [])) {
+    let dates = [];
+    try { dates = JSON.parse(setting.payment_dates_json || "[]"); } catch { return json({ error: "PAYROLL_SETTINGS_INVALID" }, 503); }
+    const due = (setting.payment_day !== null && Number(setting.payment_day) === dayOfMonth) ||
+      (Array.isArray(dates) && dates.includes(body.paymentDate));
+    if (due) dueSlots.push(Number(setting.slot_number));
+  }
+  if (dueSlots.length === 0) return json({ error: "PAYROLL_NOT_DUE" }, 403);
   const existing = await env.DB.prepare(
     "SELECT id, payload_json, status, created_at FROM payday_deliveries WHERE license_id=? AND payment_date=? LIMIT 1"
   ).bind(ctx.licenseId, body.paymentDate).first();
@@ -2711,24 +2724,25 @@ async function createOrReadPaydayBundle(request, env) {
   ).bind(ctx.licenseId, earliest, body.paymentDate).all();
   const latestBySlot = new Map();
   for (const row of (inventoryRows.results || [])) {
-    if (!latestBySlot.has(Number(row.slot_number))) latestBySlot.set(Number(row.slot_number), row);
+    if (dueSlots.includes(Number(row.slot_number)) && !latestBySlot.has(Number(row.slot_number))) latestBySlot.set(Number(row.slot_number), row);
   }
   const payrollRows = await env.DB.prepare(
     `SELECT p.id, p.period_key, p.report_json, p.created_at, d.slot_number
        FROM payroll_reports p JOIN devices d ON d.id=p.ventas_device_id
       WHERE p.license_id=? AND p.period_key=? AND d.device_type='VENTAS'
-        AND d.slot_number IN (2,3)
+        AND d.slot_number IN (${dueSlots.map(() => "?").join(",")})
       ORDER BY d.slot_number`
-  ).bind(ctx.licenseId, body.paymentDate).all();
+  ).bind(ctx.licenseId, body.paymentDate, ...dueSlots).all();
   const payload = {
     paymentDate: body.paymentDate,
-    inventories: [2,3].map((slot) => {
+    dueTeams: dueSlots.map((slot) => slot === 2 ? "VENTAS_1" : "VENTAS_2"),
+    inventories: dueSlots.map((slot) => {
       const row = latestBySlot.get(slot);
       return row ? { slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
         inventoryDate: row.inventory_date, updatedAt: Number(row.updated_at),
         inventoryId: row.id, snapshot: JSON.parse(row.snapshot_json) } : null;
     }).filter(Boolean),
-    missingInventoryTeams: [2,3].filter((slot) => !latestBySlot.has(slot))
+    missingInventoryTeams: dueSlots.filter((slot) => !latestBySlot.has(slot))
       .map((slot) => slot === 2 ? "VENTAS_1" : "VENTAS_2"),
     payrollReports: (payrollRows.results || []).map((row) => ({
       slot: Number(row.slot_number) === 2 ? "VENTAS_1" : "VENTAS_2",
@@ -2779,8 +2793,17 @@ async function acknowledgePaydayBundle(request, env) {
         "UPDATE payday_deliveries SET status='acked',acked_at=? WHERE id=? AND license_id=? AND status='pending'"
       ).bind(now, deliveryId, ctx.licenseId),
       env.DB.prepare(
-        "DELETE FROM daily_inventory_snapshots WHERE license_id=? AND inventory_date<=? AND ventas_device_id IN (SELECT id FROM devices WHERE license_id=? AND device_type='VENTAS' AND slot_number IN (2,3))"
-      ).bind(ctx.licenseId, delivery.payment_date, ctx.licenseId)
+        `DELETE FROM daily_inventory_snapshots
+          WHERE license_id=? AND inventory_date<=?
+            AND ventas_device_id IN (
+              SELECT s.ventas_device_id FROM daily_inventory_snapshots s
+               WHERE s.id IN (
+                 SELECT json_extract(j.value, '$.inventoryId')
+                   FROM payday_deliveries p, json_each(p.payload_json, '$.inventories') j
+                  WHERE p.id=? AND p.license_id=?
+               )
+            )`
+      ).bind(ctx.licenseId, delivery.payment_date, deliveryId, ctx.licenseId)
     ]);
   } catch {
     return json({ error: "PAYDAY_ACK_FAILED" }, 503);
