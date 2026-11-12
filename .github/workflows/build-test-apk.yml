@@ -53,6 +53,21 @@ jobs:
           grep -F "application-label:'SENE PATRÓN'" <<< "$BADGING"
           unzip -l "$APK" | grep -q 'logo_sene_pv'
           sha256sum "$APK"
+      - name: Smoke test de arranque en emulador Android 35
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            APK="$(find build/outputs/apk/debug -maxdepth 1 -name "*.apk" -type f | head -n 1)"
+            test -s "$APK"
+            adb install -r "$APK"
+            adb shell am start -n com.sene.patron/.MainActivity
+            sleep 8
+            adb shell pidof com.sene.patron
       - name: Preparar nombre de entrega
         run: |
           mkdir -p dist
