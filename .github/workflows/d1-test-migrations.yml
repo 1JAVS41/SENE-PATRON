@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   migrate-test-d1:
-    if: ${{ github.ref == 'refs/heads/sene-cloudflare-backend' && inputs.confirm_test_database == 'sene-licencias-pruebas' }}
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_test_database == 'sene-licencias-pruebas' }}
     runs-on: ubuntu-latest
     steps:
       - name: Descargar código
