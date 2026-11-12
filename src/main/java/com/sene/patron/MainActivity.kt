@@ -870,7 +870,7 @@ class MainActivity : Activity() {
         form.addView(text(
             "REGISTRO INICIAL · $580 MXN\\n\\n" +
                 "1. Realiza el pago de $580 MXN ($500 de alta + $80 de primera mensualidad) a los datos oficiales de SENE.\\n" +
-                "2. En el concepto escribe el nombre exacto de tu empresa.\\n" +
+                "2. En el concepto o referencia escribe exactamente el FOLIO DE SOLICITUD que recibirás al enviar este formulario.\\n" +
                 "3. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\\n" +
                 "4. Después pulsa ENVIAR SOLICITUD AL SERVIDOR.\\n\\n" +
                 "Enviar la solicitud no confirma el pago ni activa la licencia. SENE verificará el pago y después entregará el código de activación.",
@@ -934,7 +934,7 @@ class MainActivity : Activity() {
                                 "Empresa: " + result.optString("businessName", businessName) +
                                     "\\nFolio de solicitud: " + requestId +
                                     "\\nImporte informado: $580 MXN" +
-                                    "\\nConcepto de pago: " + result.optString("businessName", businessName) +
+                                    "\\nConcepto / referencia exacta: " + requestId +
                                     "\\n\\nLa solicitud quedó registrada en el servidor de pruebas. Esto no significa que el pago esté confirmado. Conserva tu comprobante y espera la validación y el código de activación."
                             )
                             .setPositiveButton("CONTINUAR") { _, _ -> showActivationDialog() }
@@ -970,48 +970,96 @@ class MainActivity : Activity() {
             showServerConfig()
             return
         }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val timer = TextView(this).apply {
+            textSize = 15f
+            setTextColor(success)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(4), 0, dp(12))
+        }
         val field = EditText(this).apply {
             hint = "Código de activación de 12 caracteres"
             setSingleLine(true)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
             setPadding(dp(16), dp(13), dp(16), dp(13))
         }
-        AlertDialog.Builder(this)
+        content.addView(timer)
+        content.addView(TextView(this).apply {
+            text = "Introduce el código que recibiste después de confirmar el pago. Si pagaste dentro del plazo, conserva tu folio y comprobante aunque el contador llegue a cero."
+            textSize = 13f
+            setTextColor(muted)
+            setPadding(0, 0, 0, dp(10))
+        })
+        content.addView(field)
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val tick = object : Runnable {
+            override fun run() {
+                val expiry = prefs.getLong("registration_expires_at", 0L)
+                val serverTime = prefs.getLong("registration_server_time", 0L)
+                val elapsedAnchor = prefs.getLong("registration_server_elapsed", 0L)
+                if (expiry <= 0L || serverTime <= 0L || elapsedAnchor <= 0L) {
+                    timer.text = "Reserva: plazo de 48 horas registrado en el servidor."
+                    return
+                }
+                val elapsedNow = SystemClock.elapsedRealtime()
+                val estimatedServerNow = serverTime + ((elapsedNow - elapsedAnchor).coerceAtLeast(0L) / 1000L)
+                val remaining = (expiry - estimatedServerNow).coerceAtLeast(0L)
+                if (remaining <= 0L) {
+                    timer.setTextColor(red)
+                    timer.text = "RESERVA DE 48 HORAS VENCIDA · Si pagaste dentro del plazo, no vuelvas a registrarte; contacta AYUDA con tu folio y comprobante."
+                    return
+                }
+                val hours = remaining / 3600L
+                val minutes = (remaining % 3600L) / 60L
+                val seconds = remaining % 60L
+                timer.setTextColor(success)
+                timer.text = "TIEMPO DE RESERVA: " + String.format(java.util.Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+                handler.postDelayed(this, 1000L)
+            }
+        }
+        val dialog = AlertDialog.Builder(this)
             .setTitle("VINCULAR SENE PATRÓN")
-            .setMessage("Introduce el código que recibiste después de confirmar el pago inicial.")
-            .setView(field)
-            .setPositiveButton("VINCULAR") { _, _ ->
+            .setView(content)
+            .setPositiveButton("VINCULAR", null)
+            .setNegativeButton("CERRAR", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val code = field.text?.toString()?.trim().orEmpty()
                 if (code.length != 12) {
-                    Toast.makeText(this, "El código debe tener 12 caracteres", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+                    field.error = "El código debe tener 12 caracteres"
+                    field.requestFocus()
+                    return@setOnClickListener
                 }
+                val button = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                button.isEnabled = false
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).activate(code)
                         runOnUiThread {
-                            Toast.makeText(
-                                this,
-                                "SENE PATRÓN vinculado. Estado: " + result.optString("licenseStatus"),
-                                Toast.LENGTH_LONG
-                            ).show()
+                            if (isFinishing || isDestroyed) return@runOnUiThread
+                            handler.removeCallbacks(tick)
+                            dialog.dismiss()
+                            Toast.makeText(this, "SENE PATRÓN vinculado. Estado: " + result.optString("licenseStatus"), Toast.LENGTH_LONG).show()
                             lastNotificationRefreshAt = 0L
                             render()
                         }
                     } catch (error: Exception) {
                         runOnUiThread {
-                            Toast.makeText(
-                                this,
-                                "No se pudo vincular. Comprueba el servidor y el código. " +
-                                    (error.message ?: ""),
-                                Toast.LENGTH_LONG
-                            ).show()
+                            if (isFinishing || isDestroyed) return@runOnUiThread
+                            button.isEnabled = true
+                            Toast.makeText(this, "No se pudo vincular. Comprueba el servidor y el código. " + (error.message ?: ""), Toast.LENGTH_LONG).show()
                         }
                     }
                 }.start()
             }
-            .setNegativeButton("CANCELAR", null)
-            .show()
+        }
+        dialog.setOnDismissListener { handler.removeCallbacks(tick) }
+        dialog.show()
+        handler.post(tick)
     }
 
     private fun refreshNotificationsFromServer(force: Boolean = false) {
