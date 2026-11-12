@@ -798,7 +798,8 @@ class MainActivity : Activity() {
                             } else {
                                 showPaymentFolioDialog(
                                     "FOLIO DE REPOSICIÓN · EQUIPO $number",
-                                    folio, "$500 MXN", "REPOSICIÓN SENE VENTAS"
+                                    folio, "$500 MXN", "REPOSICIÓN SENE VENTAS",
+                                    duplicate = result.optBoolean("duplicate")
                                 )
                             }
                         }
@@ -1202,12 +1203,14 @@ class MainActivity : Activity() {
         amount: String,
         paymentType: String,
         nextLabel: String? = null,
-        nextAction: (() -> Unit)? = null
+        nextAction: (() -> Unit)? = null,
+        duplicate: Boolean = false
     ) {
         val message = "FOLIO DE SOLICITUD\n$folio\n\n" +
             "CONCEPTO / REFERENCIA EXACTA\n$folio\n\n" +
             "Importe: $amount\n\n" +
             "No cambies ni recortes el folio. Inclúyelo también en el mensaje de AYUDA junto con el comprobante. " +
+            (if (duplicate) "Esta solicitud ya existe: no realices otro pago si ya enviaste el comprobante. " else "") +
             "El comprobante no confirma el pago; SENE debe validarlo."
         val dialog = AlertDialog.Builder(this)
             .setTitle(title)
@@ -1295,8 +1298,10 @@ class MainActivity : Activity() {
                             if (requestId.isNotBlank()) {
                                 showPaymentFolioDialog(
                                     "FOLIO DE RENOVACIÓN", requestId, "$80 MXN", "RENOVACIÓN",
-                                    "INTRODUCIR CÓDIGO"
-                                ) { showRenewalCodeDialog(requestId) }
+                                    nextLabel = "INTRODUCIR CÓDIGO",
+                                    nextAction = { showRenewalCodeDialog(requestId) },
+                                    duplicate = result.optBoolean("duplicate")
+                                )
                             } else {
                                 Toast.makeText(this, "No se recibió el folio de renovación", Toast.LENGTH_LONG).show()
                             }
@@ -1495,8 +1500,10 @@ class MainActivity : Activity() {
                             if (folio.isNotBlank()) {
                                 showPaymentFolioDialog(
                                     "FOLIO DE RECUPERACIÓN", folio, "$500 MXN", "RECUPERACIÓN SENE PATRÓN",
-                                    "INTRODUCIR CÓDIGO"
-                                ) { showPatronRecoveryCodeDialog() }
+                                    nextLabel = "INTRODUCIR CÓDIGO",
+                                    nextAction = { showPatronRecoveryCodeDialog() },
+                                    duplicate = result.optBoolean("duplicate")
+                                )
                             } else {
                                 Toast.makeText(this, "No se recibió el folio de recuperación", Toast.LENGTH_LONG).show()
                             }
