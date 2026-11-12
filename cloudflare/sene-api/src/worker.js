@@ -1546,7 +1546,8 @@ async function listOperatorLicenses(request, env) {
   const rows = await env.DB.prepare(
     `SELECT l.id,l.business_name,l.status,l.max_devices,l.expires_at,l.created_at,
             l.setup_paid_at,l.first_rent_paid_at,
-            (SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id AND d.status='active') AS active_devices
+            (SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id AND d.status='active') AS active_devices,
+            (SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id AND d.device_type='PATRON' AND d.slot_number=1 AND d.status='active') AS active_patron_devices
        FROM licenses l ORDER BY l.created_at DESC,l.id DESC LIMIT ?`
   ).bind(limit).all();
   return json({ items: rows.results || [], serverTime: Math.floor(Date.now() / 1000) });
