@@ -8,6 +8,24 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
+private fun isStrictIsoDate(value: String): Boolean {
+    if (!value.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) return false
+    return try {
+        val year = value.substring(0, 4).toInt()
+        val month = value.substring(5, 7).toInt()
+        val day = value.substring(8, 10).toInt()
+        if (year !in 1..9999) return false
+        java.util.GregorianCalendar(java.util.TimeZone.getTimeZone("UTC"), java.util.Locale.ROOT).apply {
+            isLenient = false
+            clear()
+            set(year, month - 1, day)
+        }.timeInMillis
+        true
+    } catch (_: Exception) {
+        false
+    }
+}
+
 class SeneApiException(val httpStatus: Int, val responseBody: String) :
     IOException("SENE API HTTP $httpStatus: $responseBody")
 
