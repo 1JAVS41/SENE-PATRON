@@ -51,6 +51,7 @@ db.execute("""INSERT INTO payday_deliveries
     (id,license_id,payment_date,payload_json,status,created_at)
     VALUES ('payday-delivery','lic-payday','2026-11-12',?,'pending',50)""",
     (json.dumps(payload,separators=(',',':')),))
+db.commit()
 
 # Reproduce the Worker's ACK batch in one SQLite transaction.
 db.execute("BEGIN")
