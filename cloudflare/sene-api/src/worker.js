@@ -212,15 +212,16 @@ async function issueAdminSession(email, env) {
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(encoded));
   const token = encoded + "." + base64Url(signature);
   const tokenHash = await sha256(token);
-  await env.DB.prepare(
-    "INSERT INTO admin_sessions (session_id, token_sha256, role, created_at, expires_at, revoked_at) VALUES (?, ?, 'admin', ?, ?, NULL)"
-  ).bind(sessionId, tokenHash, now, expiresAt).run();
-  // Start at zero: the event query excludes payloads already compacted
-  // after every active admin session acknowledged them. New sessions still
-  // receive any durable event that has not yet been acknowledged globally.
-  await env.DB.prepare(
-    "INSERT INTO admin_event_cursors (session_id,last_cursor,updated_at) VALUES (?,0,?)"
-  ).bind(sessionId, now).run();
+  // Create the revocable session and its initial event cursor atomically.
+  // Start at zero; compacted payloads are filtered by the event inbox query.
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO admin_sessions (session_id, token_sha256, role, created_at, expires_at, revoked_at) VALUES (?, ?, 'admin', ?, ?, NULL)"
+    ).bind(sessionId, tokenHash, now, expiresAt),
+    env.DB.prepare(
+      "INSERT INTO admin_event_cursors (session_id,last_cursor,updated_at) VALUES (?,0,?)"
+    ).bind(sessionId, now)
+  ]);
   return { accessToken: token, tokenType: "Bearer", expiresAt, serverTime: now };
 }
 
