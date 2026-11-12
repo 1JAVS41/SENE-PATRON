@@ -76,6 +76,20 @@ const login = async (email, pass) => worker.fetch(new Request("https://sene.test
 
 const bad = await login("admin@sene.invalid", "Incorrect-Password-2026!");
 assert.equal(bad.status, 401, "Las credenciales incorrectas deben rechazarse");
+for (let i = 0; i < 7; i++) {
+  const response = await worker.fetch(new Request("https://sene.test/v1/admin/login", {
+    method: "POST",
+    headers: { "content-type": "application/json", "CF-Connecting-IP": "192.0.2.20" },
+    body: JSON.stringify({ email: "admin@sene.invalid", password: "Wrong-Password-2026!" })
+  }), env);
+  assert.equal(response.status, i === 6 ? 429 : 401);
+}
+const blocked = await worker.fetch(new Request("https://sene.test/v1/admin/login", {
+  method: "POST",
+  headers: { "content-type": "application/json", "CF-Connecting-IP": "192.0.2.20" },
+  body: JSON.stringify({ email: "admin@sene.invalid", password })
+}), env);
+assert.equal(blocked.status, 429, "El bloqueo por IP debe impedir intentos de contraseña posteriores");
 const good = await login("ADMIN@sene.invalid", password);
 assert.equal(good.status, 200, "El correo debe normalizarse y aceptar la contraseña válida");
 const session = await good.json();
