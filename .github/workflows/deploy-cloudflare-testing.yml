@@ -1,0 +1,68 @@
+name: Deploy SENE testing Worker
+
+on:
+  push:
+    branches:
+      - sene-cloudflare-backend
+    paths:
+      - "cloudflare/sene-api/**"
+      - ".github/workflows/deploy-cloudflare-testing.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-testing:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: "4f666119f747154055a6d0a04dece552"
+      SENE_TEST_OPERATOR_TOKEN: ${{ secrets.SENE_TEST_OPERATOR_TOKEN }}
+      SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY: ${{ secrets.SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY }}
+      SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK: ${{ secrets.SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK }}
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validar credenciales y secretos exclusivos de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Falta el secreto CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$SENE_TEST_OPERATOR_TOKEN" || { echo "Falta el secreto SENE_TEST_OPERATOR_TOKEN"; exit 1; }
+          [[ "$SENE_TEST_OPERATOR_TOKEN" != *$'\n'* ]] || { echo "SENE_TEST_OPERATOR_TOKEN no puede contener saltos de línea"; exit 1; }
+          [[ "$SENE_TEST_OPERATOR_TOKEN" =~ .{32,} ]] || { echo "SENE_TEST_OPERATOR_TOKEN debe tener al menos 32 caracteres"; exit 1; }
+          [[ "$SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY debe contener exactamente 64 caracteres hexadecimales"; exit 1; }
+
+      - name: Desplegar Worker aislado de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config cloudflare/sene-api/wrangler.testing.toml 2>&1 | tee /tmp/sene-deploy.log
+          WORKER_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/sene-deploy.log | tail -n 1 || true)"
+          if [ -z "$WORKER_URL" ]; then
+            echo "Wrangler no devolvió una URL workers.dev verificable."
+            exit 1
+          fi
+          echo "WORKER_URL=$WORKER_URL" >> "$GITHUB_ENV"
+          printf '%s' "$SENE_TEST_OPERATOR_TOKEN" | npx --yes wrangler@4 secret put OPERATOR_TOKEN --config cloudflare/sene-api/wrangler.testing.toml
+          printf '%s' "$SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY" | npx --yes wrangler@4 secret put PAIRING_TOKEN_ENCRYPTION_KEY --config cloudflare/sene-api/wrangler.testing.toml
+          if [ -n "$SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK" ]; then
+            printf '%s' "$SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK" | npx --yes wrangler@4 secret put CONTACTS_SIGNING_PRIVATE_JWK --config cloudflare/sene-api/wrangler.testing.toml
+          else
+            echo "Aviso: CONTACTS_SIGNING_PRIVATE_JWK no está configurada; AYUDA firmado no estará disponible en este entorno."
+          fi
+
+      - name: Verificar Worker de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$WORKER_URL/health" | tee /tmp/sene-health.json
+          grep -q '"status":"ok"' /tmp/sene-health.json
+          echo "Worker de pruebas operativo: $WORKER_URL"
