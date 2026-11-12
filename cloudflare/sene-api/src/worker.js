@@ -2711,7 +2711,7 @@ async function createOrReadPaydayBundle(request, env) {
   ).bind(ctx.licenseId, body.paymentDate).first();
   if (existing?.status === "acked") return json({
     deliveryId: existing.id, paymentDate: body.paymentDate,
-    status: existing.status, duplicate: true, payload: JSON.parse(existing.payload_json),
+    status: existing.status, duplicate: true, payload: null, payloadCompacted: true,
     createdAt: Number(existing.created_at)
   });
   const start = new Date(body.paymentDate + "T00:00:00Z");
@@ -2788,7 +2788,7 @@ async function acknowledgePaydayBundle(request, env) {
   const checked = await verifyBusinessProof(request, env, "PATRON_PAYDAY_ACK");
   if (checked.response) return checked.response;
   const { proof } = checked;
-  const ctx = await signedDeviceContext(proof, "PATRON");
+  const ctx = await signedDeviceContext(proof, "PATRON", false);
   if (ctx.error) return json({ error: ctx.error }, ctx.status);
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
@@ -2799,8 +2799,22 @@ async function acknowledgePaydayBundle(request, env) {
     "SELECT id,payment_date,status FROM payday_deliveries WHERE id=? AND license_id=? LIMIT 1"
   ).bind(deliveryId, ctx.licenseId).first();
   if (!delivery) return json({ error: "PAYDAY_DELIVERY_NOT_FOUND" }, 404);
-  if (delivery.status === "acked") return json({ deliveryId, status: "acked", duplicate: true });
   const now = Math.floor(Date.now() / 1000);
+  if (delivery.status === "acked") {
+    const receipt = JSON.stringify({
+      deliveryId, paymentDate: delivery.payment_date,
+      status: "acked", acknowledgedAt: now
+    });
+    try {
+      await env.DB.prepare(
+        "UPDATE payday_deliveries SET payload_json=? WHERE id=? AND license_id=? AND status='acked'"
+      ).bind(receipt, deliveryId, ctx.licenseId).run();
+    } catch {
+      return json({ error: "PAYDAY_ACK_COMPACTION_FAILED" }, 503);
+    }
+    return json({ deliveryId, status: "acked", duplicate: true,
+      acknowledgedAt: now, payloadCompacted: true });
+  }
   try {
     await env.DB.batch([
       env.DB.prepare(
@@ -2826,8 +2840,19 @@ async function acknowledgePaydayBundle(request, env) {
     "SELECT status FROM payday_deliveries WHERE id=? AND license_id=? LIMIT 1"
   ).bind(deliveryId, ctx.licenseId).first();
   if (confirmed?.status !== "acked") return json({ error: "PAYDAY_ACK_NOT_CONFIRMED" }, 503);
+  const receipt = JSON.stringify({
+    deliveryId, paymentDate: delivery.payment_date,
+    status: "acked", acknowledgedAt: now
+  });
+  try {
+    await env.DB.prepare(
+      "UPDATE payday_deliveries SET payload_json=? WHERE id=? AND license_id=? AND status='acked'"
+    ).bind(receipt, deliveryId, ctx.licenseId).run();
+  } catch {
+    return json({ error: "PAYDAY_ACK_COMPACTION_FAILED" }, 503);
+  }
   return json({ deliveryId, status: "acked", duplicate: false, acknowledgedAt: now,
-    inventoriesCleaned: true });
+    inventoriesCleaned: true, payloadCompacted: true });
 }
 
 function validateOfficialContacts(body) {
