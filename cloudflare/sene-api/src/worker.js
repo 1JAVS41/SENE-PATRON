@@ -593,7 +593,7 @@ async function restorePatron(request, env) {
     return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
   }
   const oldPatron = await env.DB.prepare(
-    "SELECT id FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? LIMIT 1"
+    "SELECT id,fingerprint FROM devices WHERE license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? LIMIT 1"
   ).bind(license.id, identity.continuityId).first();
   if (!oldPatron) return json({ error: "SAME_PHONE_NOT_VERIFIED" }, 409);
   const pendingRecovery = await env.DB.prepare(
@@ -601,40 +601,41 @@ async function restorePatron(request, env) {
   ).bind(license.id).first();
   if (pendingRecovery) return json({ error: "PAID_RECOVERY_REQUEST_PENDING" }, 409);
 
-  const newDeviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
+  const newFingerprint = identity.fingerprint;
   let results;
   try {
     results = await env.DB.batch([
+      // Conservar el mismo deviceId mantiene las relaciones de licencia, renovaciones y auditoría.
       env.DB.prepare(
-        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized'))"
-      ).bind(oldPatron.id, license.id, identity.continuityId, license.id, license.id),
+        "UPDATE devices SET installation_id=?,public_key=?,fingerprint=? WHERE id=? AND license_id=? AND device_type='PATRON' AND slot_number=1 AND status='active' AND continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM patron_recovery_payment_requests WHERE license_id=? AND status IN ('pending_payment','authorized'))"
+      ).bind(identity.installationId, identity.publicKey, newFingerprint, oldPatron.id, license.id,
+        identity.continuityId, license.id, license.id),
       env.DB.prepare(
-        "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='revoked')"
-      ).bind(now, license.id, oldPatron.id),
+        "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active' AND fingerprint=?)"
+      ).bind(now, license.id, oldPatron.id, newFingerprint),
       env.DB.prepare(
-        "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT ?,?,?,?,?,?, ?,1,'active',? FROM devices old WHERE old.id=? AND old.license_id=? AND old.status='revoked' AND old.continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=1 AND d.status='active')"
-      ).bind(newDeviceId, license.id, "PATRON", identity.installationId, identity.continuityId, identity.publicKey, identity.fingerprint, now, oldPatron.id, license.id, identity.continuityId, license.id),
-      env.DB.prepare(
-        "UPDATE renewal_requests SET patron_device_id=? WHERE license_id=? AND patron_device_id=? AND status IN ('pending_payment','authorized') AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
-      ).bind(newDeviceId, license.id, oldPatron.id, newDeviceId),
-      env.DB.prepare(
-        "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?, 'system','patron_restore','patron_device_restored',?,? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
-      ).bind(crypto.randomUUID(), license.id, newDeviceId, JSON.stringify({ oldDeviceId: oldPatron.id, samePhone: true }), now, newDeviceId)
+        "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?, 'system','patron_restore','patron_device_restored_same_id',?,? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active' AND fingerprint=?)"
+      ).bind(crypto.randomUUID(), license.id, oldPatron.id,
+        JSON.stringify({ samePhone: true, sameDeviceId: true,
+          previousFingerprint: oldPatron.fingerprint, currentFingerprint: newFingerprint }),
+        now, oldPatron.id, newFingerprint)
     ]);
   } catch {
     return json({ error: "PATRON_RESTORE_CONFLICT" }, 409);
   }
-  if ([0, 2, 4].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1)) {
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+      (results?.[2]?.meta?.changes ?? 0) !== 1) {
     return json({ error: "PATRON_RESTORE_CONFLICT" }, 409);
   }
   return json({
-    deviceId: newDeviceId,
+    deviceId: oldPatron.id,
     slot: "PATRON",
     licenseStatus: license.status === "active" && Number(license.expires_at || 0) > now ? "ACTIVE" : "EXPIRED",
     periodEndsAt: license.expires_at ?? null,
-    restored: true
-  }, 201);
+    restored: true,
+    sameDeviceId: true
+  }, 200);
 }
 
 async function createPatronRecovery(request, env) {
@@ -873,7 +874,7 @@ async function restoreVentas(request, env) {
     return json({ error: "REGISTERED_DETAILS_NOT_MATCH" }, 404);
   }
   const oldDevice = await env.DB.prepare(
-    "SELECT id,slot_number FROM devices WHERE license_id=? AND device_type='VENTAS' AND status='active' AND continuity_id=? AND slot_number IN (2,3) LIMIT 1"
+    "SELECT id,slot_number,fingerprint FROM devices WHERE license_id=? AND device_type='VENTAS' AND status='active' AND continuity_id=? AND slot_number IN (2,3) LIMIT 1"
   ).bind(license.id, identity.continuityId).first();
   if (!oldDevice) return json({ error: "SAME_PHONE_NOT_VERIFIED" }, 409);
   const pendingReplacement = await env.DB.prepare(
@@ -881,38 +882,43 @@ async function restoreVentas(request, env) {
   ).bind(license.id, Number(oldDevice.slot_number)).first();
   if (pendingReplacement) return json({ error: "PAID_REPLACEMENT_PENDING" }, 409);
 
-  const newDeviceId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
+  const newFingerprint = identity.fingerprint;
   let results;
   try {
     results = await env.DB.batch([
+      // Mantener el mismo deviceId conserva reportes, solicitudes, historial y slot.
+      // Solo se actualiza la clave pública tras validar la continuidad del mismo teléfono.
       env.DB.prepare(
-        "UPDATE devices SET status='revoked' WHERE id=? AND license_id=? AND device_type='VENTAS' AND slot_number=? AND status='active' AND continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM replacement_requests WHERE license_id=? AND slot_number=? AND status='pending')"
-      ).bind(oldDevice.id, license.id, Number(oldDevice.slot_number), identity.continuityId, license.id, license.id, Number(oldDevice.slot_number)),
+        "UPDATE devices SET installation_id=?,public_key=?,fingerprint=? WHERE id=? AND license_id=? AND device_type='VENTAS' AND status='active' AND continuity_id=? AND slot_number=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM replacement_requests WHERE license_id=? AND slot_number=? AND status='pending')"
+      ).bind(identity.installationId, identity.publicKey, newFingerprint, oldDevice.id, license.id,
+        identity.continuityId, Number(oldDevice.slot_number), license.id, license.id, Number(oldDevice.slot_number)),
       env.DB.prepare(
-        "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND slot_number=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='revoked')"
-      ).bind(now, license.id, Number(oldDevice.slot_number), oldDevice.id),
+        "UPDATE pairing_tokens SET revoked_at=? WHERE license_id=? AND slot_number=? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active' AND fingerprint=?)"
+      ).bind(now, license.id, Number(oldDevice.slot_number), oldDevice.id, newFingerprint),
       env.DB.prepare(
-        "INSERT INTO devices (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at) SELECT ?,?,?,?,?,?,?,?,'active',? FROM devices old WHERE old.id=? AND old.license_id=? AND old.status='revoked' AND old.slot_number=? AND old.continuity_id=? AND EXISTS (SELECT 1 FROM licenses WHERE id=? AND status IN ('active','expired')) AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.license_id=old.license_id AND d.slot_number=old.slot_number AND d.status='active')"
-      ).bind(newDeviceId, license.id, "VENTAS", identity.installationId, identity.continuityId, identity.publicKey, identity.fingerprint, Number(oldDevice.slot_number), now, oldDevice.id, license.id, Number(oldDevice.slot_number), identity.continuityId, license.id),
-      env.DB.prepare(
-        "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?, 'system','ventas_restore','ventas_device_restored',?,? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active')"
-      ).bind(crypto.randomUUID(), license.id, newDeviceId, JSON.stringify({ oldDeviceId: oldDevice.id, slotNumber: Number(oldDevice.slot_number), samePhone: true }), now, newDeviceId)
+        "INSERT INTO audit_log (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at) SELECT ?,?,?, 'system','ventas_restore','ventas_device_restored_same_id',?,? WHERE EXISTS (SELECT 1 FROM devices WHERE id=? AND status='active' AND fingerprint=?)"
+      ).bind(crypto.randomUUID(), license.id, oldDevice.id,
+        JSON.stringify({ samePhone: true, sameDeviceId: true, slotNumber: Number(oldDevice.slot_number),
+          previousFingerprint: oldDevice.fingerprint, currentFingerprint: newFingerprint }),
+        now, oldDevice.id, newFingerprint)
     ]);
   } catch {
     return json({ error: "VENTAS_RESTORE_CONFLICT" }, 409);
   }
-  if ([0, 2, 3].some((index) => (results?.[index]?.meta?.changes ?? 0) !== 1)) {
+  if ((results?.[0]?.meta?.changes ?? 0) !== 1 ||
+      (results?.[2]?.meta?.changes ?? 0) !== 1) {
     return json({ error: "VENTAS_RESTORE_CONFLICT" }, 409);
   }
   return json({
-    deviceId: newDeviceId,
+    deviceId: oldDevice.id,
     slot: Number(oldDevice.slot_number) === 2 ? "VENTAS_1" : "VENTAS_2",
     businessName: license.business_name,
     licenseStatus: license.status === "active" && Number(license.expires_at || 0) > now ? "ACTIVE" : "EXPIRED",
     periodEndsAt: license.expires_at ?? null,
-    restored: true
-  }, 201);
+    restored: true,
+    sameDeviceId: true
+  }, 200);
 }
 
 async function pairVentas(request, env) {
