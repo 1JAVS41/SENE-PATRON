@@ -118,6 +118,9 @@ const db = {
         if (sql.includes("UPDATE registration_requests SET status='cancelled'")) {
           return { meta: { changes: 0 } };
         }
+        if (sql.includes("UPDATE licenses SET status='expired'")) {
+          return { meta: { changes: 0 } };
+        }
         throw new Error("Unexpected run query: " + sql);
       },
       async all() {
