@@ -1206,29 +1206,34 @@ class MainActivity : Activity() {
             showServerConfig()
             return
         }
-        val business = prefs.getString("business_name", null).orEmpty().ifBlank { "el nombre exacto de tu empresa" }
         AlertDialog.Builder(this)
-            .setTitle("PAGAR MENSUALIDAD")
+            .setTitle("SOLICITAR RENOVACIÓN")
             .setMessage(
                 "RENOVACIÓN SENE · $80 MXN\n\n" +
-                    "1. Realiza el pago de $80 MXN.\n" +
-                    "2. En el concepto escribe exactamente:\n$business\n" +
-                    "3. Envía la captura del comprobante a los números oficiales de Ayuda por WhatsApp.\n" +
-                    "4. Después pulsa YA REALICÉ EL PAGO para enviar la solicitud y espera la confirmación del pago y el código de autorización.\n\n" +
-                    "La licencia se renueva 30 días cuando introduces el código correcto."
+                    "1. Primero crea la solicitud; el servidor te entregará un folio único.\n" +
+                    "2. Después realiza el pago de $80 MXN.\n" +
+                    "3. En el concepto o referencia escribe exactamente el folio recibido.\n" +
+                    "4. Envía el comprobante a AYUDA por WhatsApp e incluye el mismo folio.\n\n" +
+                    "No realices un segundo pago si ya existe una solicitud pendiente. La licencia se renueva 30 días después de validar el pago e introducir el código."
             )
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+            .setPositiveButton("CREAR SOLICITUD Y OBTENER FOLIO") { _, _ ->
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestRenewal()
-                        val requestId = result.optString("requestId")
+                        val requestId = result.optString("folio").ifBlank { result.optString("requestId") }
                         runOnUiThread {
-                            if (requestId.isNotBlank()) showRenewalCodeDialog(requestId)
-                            else Toast.makeText(this, "No se recibió la solicitud de renovación", Toast.LENGTH_LONG).show()
+                            if (requestId.isNotBlank()) {
+                                showPaymentFolioDialog(
+                                    "FOLIO DE RENOVACIÓN", requestId, "$80 MXN", "RENOVACIÓN",
+                                    "INTRODUCIR CÓDIGO"
+                                ) { showRenewalCodeDialog(requestId) }
+                            } else {
+                                Toast.makeText(this, "No se recibió el folio de renovación", Toast.LENGTH_LONG).show()
+                            }
                         }
                     } catch (error: Exception) {
                         runOnUiThread {
-                            Toast.makeText(this, "No se pudo enviar la solicitud de pago. " + (error.message ?: ""), Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, "No se pudo crear la solicitud. " + (error.message ?: ""), Toast.LENGTH_LONG).show()
                         }
                     }
                 }.start()
