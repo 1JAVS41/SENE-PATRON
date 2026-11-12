@@ -69,7 +69,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 d1 migrations list sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml | tee /tmp/sene-d1-migrations.log
+          find cloudflare/sene-api/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' | sort | tee /tmp/sene-local-migrations.log
+          grep -q '^0022_admin_event_lifecycle.sql
+      - name: Desplegar Worker aislado de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config cloudflare/sene-api/wrangler.testing.toml 2>&1 | tee /tmp/sene-deploy.log
+          WORKER_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/sene-deploy.log | tail -n 1 || true)"
+          if [ -z "$WORKER_URL" ]; then
+            echo "Wrangler no devolvió una URL workers.dev verificable."
+            exit 1
+          fi
+          echo "WORKER_URL=$WORKER_URL" >> "$GITHUB_ENV"
+          printf '%s' "$SENE_TEST_OPERATOR_TOKEN" | npx --yes wrangler@4 secret put OPERATOR_TOKEN --config cloudflare/sene-api/wrangler.testing.toml
+          printf '%s' "$SENE_TEST_PAIRING_TOKEN_ENCRYPTION_KEY" | npx --yes wrangler@4 secret put PAIRING_TOKEN_ENCRYPTION_KEY --config cloudflare/sene-api/wrangler.testing.toml
+          if [ -n "$SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK" ]; then
+            printf '%s' "$SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK" | npx --yes wrangler@4 secret put CONTACTS_SIGNING_PRIVATE_JWK --config cloudflare/sene-api/wrangler.testing.toml
+          else
+            echo "Aviso: CONTACTS_SIGNING_PRIVATE_JWK no está configurada; AYUDA firmado no estará disponible en este entorno."
+          fi
+          if [ -n "$SENE_TEST_ADMIN_LOGIN_EMAIL" ]; then
+            printf '%s' "$SENE_TEST_ADMIN_LOGIN_EMAIL" | npx --yes wrangler@4 secret put ADMIN_LOGIN_EMAIL --config cloudflare/sene-api/wrangler.testing.toml
+            printf '%s' "$SENE_TEST_ADMIN_PASSWORD_HASH" | npx --yes wrangler@4 secret put ADMIN_PASSWORD_HASH --config cloudflare/sene-api/wrangler.testing.toml
+            printf '%s' "$SENE_TEST_ADMIN_PASSWORD_SALT" | npx --yes wrangler@4 secret put ADMIN_PASSWORD_SALT --config cloudflare/sene-api/wrangler.testing.toml
+            printf '%s' "$SENE_TEST_ADMIN_SESSION_SECRET" | npx --yes wrangler@4 secret put ADMIN_SESSION_SECRET --config cloudflare/sene-api/wrangler.testing.toml
+          else
+            echo "Aviso: acceso SENE ADMIN no configurado; el login devolverá ADMIN_AUTH_NOT_CONFIGURED."
+          fi
+
+      - name: Verificar Worker de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$WORKER_URL/health" | tee /tmp/sene-health.json
+          grep -q '"status":"ok"' /tmp/sene-health.json
+          echo "Worker de pruebas operativo: $WORKER_URL"
+ /tmp/sene-local-migrations.log
+          npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM d1_migrations ORDER BY id;" | tee /tmp/sene-d1-migrations.log
           grep -q '0022_admin_event_lifecycle' /tmp/sene-d1-migrations.log
 
       - name: Desplegar Worker aislado de pruebas
