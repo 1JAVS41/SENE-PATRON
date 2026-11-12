@@ -845,74 +845,122 @@ class MainActivity : Activity() {
             showActivationDialog()
             return
         }
-        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
-        fun field(hintText: String, type: Int): EditText = EditText(this).apply {
-            hint = hintText; setSingleLine(true); inputType = type
-            setPadding(dp(12), dp(10), dp(12), dp(10)); form.addView(this)
+
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
         }
-        val field = field("Nombre exacto de tu empresa", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
-        val emailField = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        fun field(hintText: String, type: Int): EditText = EditText(this).apply {
+            hint = hintText
+            setSingleLine(true)
+            inputType = type
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            form.addView(this, LinearLayout.LayoutParams(-1, -2))
+        }
+        val businessField = field(
+            "Nombre exacto de tu empresa",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        )
+        val emailField = field(
+            "Correo electrónico registrado",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        )
         val phoneField = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
-        AlertDialog.Builder(this)
-            .setTitle("REGISTRO INICIAL · $580 MXN")
-            .setMessage(
-                "Para registrar SENE PATRÓN y sus dos equipos SENE VENTAS:\n\n" +
-                "1. Realiza un pago total de $580 MXN ($500 de alta + $80 de primera mensualidad), usando los datos oficiales de pago proporcionados por SENE.\n" +
-                "2. En el concepto escribe ÚNICAMENTE el nombre exacto de tu empresa.\n" +
-                "3. Envía el comprobante a uno de los dos números oficiales del botón AYUDA por WhatsApp.\n" +
-                "4. Después de enviar el comprobante, pulsa YA REALICÉ EL PAGO.\n\n" +
-                "El servidor crea una sola solicitud. El código de activación se entrega a través de los números oficiales de AYUDA únicamente después de verificar el pago. No se activa la licencia antes de introducir el código."
-            )
-            .setView(form)
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
-                val businessName = field.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
-                if (businessName.isBlank() || businessName.length > 100) {
-                    Toast.makeText(this, "Escribe el nombre exacto de tu empresa", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
-                }
-                val email = emailField.text?.toString()?.trim().orEmpty()
-                val phone = phoneField.text?.toString()?.trim().orEmpty()
-                if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() ||
-                    phone.filter { it.isDigit() }.length !in 10..15) {
-                    Toast.makeText(this, "Escribe un correo y teléfono válidos", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
-                }
-                Thread {
-                    try {
-                        val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
-                        val requestId = result.optString("requestId")
-                        runOnUiThread {
-                            if (requestId.isBlank()) {
-                                Toast.makeText(this, "No se recibió el folio de registro", Toast.LENGTH_LONG).show()
-                            } else {
-                                AlertDialog.Builder(this)
-                                    .setTitle("SOLICITUD DE REGISTRO RECIBIDA")
-                                    .setMessage(
-                                        "Empresa: " + result.optString("businessName", businessName) +
-                                        "\nImporte: $580 MXN\nConcepto: " +
-                                        result.optString("businessName", businessName) +
-                                        "\n\nLa solicitud quedó registrada. Conserva el comprobante y espera el código enviado por los canales oficiales de AYUDA. Cuando lo recibas, vuelve a VINCULAR SENE PATRÓN para introducirlo."
-                                    )
-                                    .setPositiveButton("CERRAR", null)
-                                    .show()
-                            }
-                        }
-                    } catch (error: Exception) {
-                        runOnUiThread {
-                            val message = when {
-                                error.message?.contains("BUSINESS_NAME_ALREADY_REGISTERED") == true ->
-                                    "Ese nombre de empresa ya está registrado."
-                                error.message?.contains("BUSINESS_NAME_REGISTRATION_PENDING") == true ->
-                                    "Ya existe una solicitud pendiente para ese nombre. Contacta AYUDA para continuar."
-                                else -> "No se pudo registrar la solicitud. " + (error.message ?: "")
-                            }
-                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }.start()
-            }
+
+        form.addView(text(
+            "REGISTRO INICIAL · $580 MXN\\n\\n" +
+                "1. Realiza el pago de $580 MXN ($500 de alta + $80 de primera mensualidad) a los datos oficiales de SENE.\\n" +
+                "2. En el concepto escribe el nombre exacto de tu empresa.\\n" +
+                "3. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\\n" +
+                "4. Después pulsa ENVIAR SOLICITUD AL SERVIDOR.\\n\\n" +
+                "Enviar la solicitud no confirma el pago ni activa la licencia. SENE verificará el pago y después entregará el código de activación.",
+            13, muted
+        ).apply { setPadding(0, dp(12), 0, dp(8)) })
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            isVerticalScrollBarEnabled = true
+            addView(form)
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll, LinearLayout.LayoutParams(-1, dp(390), 1f))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("REGISTRO INICIAL SENE")
+            .setView(content)
             .setNegativeButton("CANCELAR", null)
-            .show()
+            .create()
+        dialog.setOnShowListener {
+            val sendButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            sendButton?.isEnabled = true
+        }
+        dialog.setButton(AlertDialog.BUTTON_POSITIVE, "ENVIAR SOLICITUD AL SERVIDOR") { _, _ -> }
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val businessName = businessField.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
+            val email = emailField.text?.toString()?.trim().orEmpty()
+            val phone = phoneField.text?.toString()?.trim().orEmpty()
+            if (businessName.isBlank() || businessName.length > 100) {
+                businessField.error = "Escribe el nombre exacto (máximo 100 caracteres)"
+                businessField.requestFocus()
+                return@setOnClickListener
+            }
+            if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+                emailField.error = "Escribe un correo válido"
+                emailField.requestFocus()
+                return@setOnClickListener
+            }
+            if (phone.filter { it.isDigit() }.length !in 10..15) {
+                phoneField.error = "Escribe un teléfono válido de 10 a 15 dígitos"
+                phoneField.requestFocus()
+                return@setOnClickListener
+            }
+
+            val button = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            button.isEnabled = false
+            button.text = "ENVIANDO…"
+            Thread {
+                try {
+                    val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
+                    val requestId = result.optString("requestId")
+                    check(requestId.isNotBlank()) { "El servidor no devolvió el folio de registro." }
+                    runOnUiThread {
+                        if (isFinishing) return@runOnUiThread
+                        dialog.dismiss()
+                        AlertDialog.Builder(this)
+                            .setTitle("SOLICITUD ENVIADA AL SERVIDOR")
+                            .setMessage(
+                                "Empresa: " + result.optString("businessName", businessName) +
+                                    "\\nFolio de solicitud: " + requestId +
+                                    "\\nImporte informado: $580 MXN" +
+                                    "\\nConcepto de pago: " + result.optString("businessName", businessName) +
+                                    "\\n\\nLa solicitud quedó registrada en el servidor de pruebas. Esto no significa que el pago esté confirmado. Conserva tu comprobante y espera la validación y el código de activación."
+                            )
+                            .setPositiveButton("CONTINUAR") { _, _ -> showActivationDialog() }
+                            .show()
+                    }
+                } catch (error: Exception) {
+                    runOnUiThread {
+                        if (isFinishing) return@runOnUiThread
+                        button.isEnabled = true
+                        button.text = "ENVIAR SOLICITUD AL SERVIDOR"
+                        val message = when {
+                            error.message?.contains("BUSINESS_NAME_ALREADY_REGISTERED") == true ->
+                                "Ese nombre de empresa ya está registrado."
+                            error.message?.contains("BUSINESS_NAME_REGISTRATION_PENDING") == true ->
+                                "Ya existe una solicitud pendiente para ese nombre. No crees otra; contacta AYUDA para continuar."
+                            else -> "No se pudo enviar la solicitud. " + (error.message ?: "Error de conexión")
+                        }
+                        AlertDialog.Builder(this)
+                            .setTitle("NO SE ENVIÓ LA SOLICITUD")
+                            .setMessage(message)
+                            .setPositiveButton("REINTENTAR", null)
+                            .show()
+                    }
+                }
+            }.start()
+        }
     }
 
     private fun showActivationDialog() {
