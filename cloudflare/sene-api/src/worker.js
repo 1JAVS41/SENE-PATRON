@@ -1364,7 +1364,7 @@ async function createPatronRecoveryPaymentRequest(request, env) {
       ).bind(proof.challenge.fingerprint.toLowerCase(), existing.id, proof.challenge.installation_id, existing.fingerprint).run();
       if ((rebound.meta?.changes ?? 0) !== 1) return json({ error: "RECOVERY_IDENTITY_REBIND_CONFLICT" }, 409);
     }
-    return json({ requestId:existing.id,status:existing.status,createdAt:existing.created_at,amountCents:50000,currency:"MXN",duplicate:true });
+    return json({ requestId:existing.id,folio:existing.id,status:existing.status,createdAt:existing.created_at,amountCents:50000,currency:"MXN",duplicate:true });
   }
   const id=crypto.randomUUID(), now=Math.floor(Date.now()/1000);
   try {
@@ -1389,7 +1389,7 @@ async function createPatronRecoveryPaymentRequest(request, env) {
     }
     return json({error:"RECOVERY_REQUEST_FAILED"},503);
   }
-  return json({requestId:id,status:"pending_payment",createdAt:now,amountCents:50000,currency:"MXN",businessName:license.business_name,
+  return json({requestId:id,folio:id,status:"pending_payment",createdAt:now,amountCents:50000,currency:"MXN",businessName:license.business_name,
     instructions:`Reposición de SENE PATRÓN: realiza un pago de $500 MXN. En el concepto o referencia escribe exactamente el folio: ${id}. Envía el comprobante a un número oficial de AYUDA por WhatsApp e incluye el mismo folio. El código se entrega únicamente después de verificar el pago.`},201);
 }
 
