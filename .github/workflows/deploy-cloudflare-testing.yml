@@ -5,6 +5,7 @@ on:
     branches:
       - sene-cloudflare-backend
       - integration/ack-universal
+      - consolidation/patron-unificada-v2
     paths:
       - "cloudflare/sene-api/**"
       - ".github/workflows/deploy-cloudflare-testing.yml"
