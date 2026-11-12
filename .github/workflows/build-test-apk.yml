@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: sene-patron-apk-${{ github.ref }}
+  group: sene-patron-apk-\${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -42,19 +42,11 @@ jobs:
       - name: Verificar identidad y recursos del APK
         shell: bash
         run: |
-          APK="build/outputs/apk/debug/$(ls build/outputs/apk/debug | grep '\\.apk        run: |
-          mkdir -p dist
-          cp build/outputs/apk/debug/*.apk "dist/SENE PATRON-online.apk"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SENE PATRON-online
-          path: dist/SENE PATRON-online.apk
-          if-no-files-found: error
-          retention-days: 14
- | head -n 1)"
+          APK="$(find build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
           test -s "$APK"
           AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
-          BADGING="$($AAPT dump badging "$APK")"
+          BADGING="$("$AAPT" dump badging "$APK")"
           echo "$BADGING"
           grep -F "name='com.sene.patron'" <<< "$BADGING"
           grep -F "application-label:'SENE PATRÓN'" <<< "$BADGING"
@@ -63,7 +55,8 @@ jobs:
       - name: Preparar nombre de entrega
         run: |
           mkdir -p dist
-          cp build/outputs/apk/debug/*.apk "dist/SENE PATRON-online.apk"
+          APK="$(find build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f | head -n 1)"
+          cp "$APK" "dist/SENE PATRON-online.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: SENE PATRON-online
