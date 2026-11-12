@@ -2733,9 +2733,12 @@ async function createOrReadPaydayBundle(request, env) {
         AND d.slot_number IN (${dueSlots.map(() => "?").join(",")})
       ORDER BY d.slot_number`
   ).bind(ctx.licenseId, body.paymentDate, ...dueSlots).all();
+  const receivedPayrollSlots = new Set((payrollRows.results || []).map((row) => Number(row.slot_number)));
   const payload = {
     paymentDate: body.paymentDate,
     dueTeams: dueSlots.map((slot) => slot === 2 ? "VENTAS_1" : "VENTAS_2"),
+    missingPayrollTeams: dueSlots.filter((slot) => !receivedPayrollSlots.has(slot))
+      .map((slot) => slot === 2 ? "VENTAS_1" : "VENTAS_2"),
     inventories: dueSlots.map((slot) => {
       const row = latestBySlot.get(slot);
       return row ? { slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
