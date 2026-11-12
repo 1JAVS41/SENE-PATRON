@@ -4,17 +4,19 @@ on:
   push:
     branches:
       - sene-cloudflare-backend
+      - consolidation/patron-unificada
     paths:
       - "src/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/build-test-apk.yml"
+      - ".github/scripts/**"
   workflow_dispatch:
 
 concurrency:
-  group: sene-patron-apk
-  cancel-in-progress: true
+  group: sene-patron-apk-${{ github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -39,6 +41,13 @@ jobs:
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
       - name: Compilar APK de pruebas
         run: gradle --no-daemon assembleDebug
+      - name: Localizar APK para prueba de arranque
+        id: apk
+        shell: bash
+        run: |
+          APK_PATH="$(find "$GITHUB_WORKSPACE/build/outputs/apk" -type f -name '*.apk' | sort | head -n 1)"
+          test -n "$APK_PATH" && test -s "$APK_PATH"
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
       - name: Verificar identidad y recursos del APK
         shell: bash
         run: |
@@ -52,6 +61,30 @@ jobs:
           grep -F "application-label:'SENE PATRÓN'" <<< "$BADGING"
           unzip -l "$APK" | grep -q 'logo_sene_pv'
           sha256sum "$APK"
+      - name: Smoke test de arranque en emulador Android 35
+        timeout-minutes: 20
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK_PATH: ${{ steps.apk.outputs.path }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 600
+          cores: 2
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-snapshot-save
+          script: sh .github/scripts/smoke-test.sh
+      - name: Subir diagnóstico del smoke test
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SENE-PATRON-smoke-diagnostics
+          path: diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Preparar nombre de entrega
         run: |
           mkdir -p dist
