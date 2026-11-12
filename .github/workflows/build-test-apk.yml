@@ -12,12 +12,17 @@ on:
       - ".github/workflows/build-test-apk.yml"
   workflow_dispatch:
 
+concurrency:
+  group: sene-patron-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -34,6 +39,27 @@ jobs:
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
       - name: Compilar APK de pruebas
         run: gradle --no-daemon assembleDebug
+      - name: Verificar identidad y recursos del APK
+        shell: bash
+        run: |
+          APK="build/outputs/apk/debug/$(ls build/outputs/apk/debug | grep '\\.apk        run: |
+          mkdir -p dist
+          cp build/outputs/apk/debug/*.apk "dist/SENE PATRON-online.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SENE PATRON-online
+          path: dist/SENE PATRON-online.apk
+          if-no-files-found: error
+          retention-days: 14
+ | head -n 1)"
+          test -s "$APK"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          BADGING="$($AAPT dump badging "$APK")"
+          echo "$BADGING"
+          grep -F "name='com.sene.patron'" <<< "$BADGING"
+          grep -F "application-label:'SENE PATRÓN'" <<< "$BADGING"
+          unzip -l "$APK" | grep -q 'logo_sene_pv'
+          sha256sum "$APK"
       - name: Preparar nombre de entrega
         run: |
           mkdir -p dist
