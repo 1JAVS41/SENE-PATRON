@@ -1407,10 +1407,10 @@ class MainActivity : Activity() {
         val company = field("Nombre exacto de la empresa registrada", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
         val email = field("Correo electrónico registrado", android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
         val phone = field("Número telefónico registrado", android.text.InputType.TYPE_CLASS_PHONE)
-        val instructions = text("REPOSICIÓN DE SENE PATRÓN · $500 MXN\n\n1. Realiza el pago de $500 MXN con el concepto exacto: Reposición SENE PATRÓN.\n2. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\n3. Después pulsa YA REALICÉ EL PAGO.\n\nEl servidor comprobará que empresa, correo y teléfono coincidan con los datos registrados. Tras verificar el pago, el código de reposición se entregará únicamente por los números oficiales de AYUDA.", 14, ink, false)
+        val instructions = text("RECUPERACIÓN DE SENE PATRÓN · $500 MXN\n\n1. Primero envía estos datos para crear una solicitud única.\n2. El servidor te entregará un folio.\n3. Después paga $500 MXN y escribe exactamente ese folio en el concepto o referencia.\n4. Envía el comprobante a AYUDA por WhatsApp e incluye el mismo folio.\n\nNo realices otro pago si la solicitud ya existe. El servidor comprobará empresa, correo y teléfono; el código se entrega únicamente después de validar el pago.", 14, ink, false)
         form.addView(instructions)
         AlertDialog.Builder(this).setTitle("PERDÍ MI EQUIPO SENE PATRÓN").setView(form)
-            .setPositiveButton("YA REALICÉ EL PAGO") { _, _ ->
+            .setPositiveButton("CREAR SOLICITUD Y OBTENER FOLIO") { _, _ ->
                 val name = company.text?.toString()?.trim().orEmpty()
                 val mail = email.text?.toString()?.trim().orEmpty()
                 val number = phone.text?.toString()?.trim().orEmpty()
@@ -1420,13 +1420,17 @@ class MainActivity : Activity() {
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestPatronRecovery(name, mail, number)
+                        val folio = result.optString("folio").ifBlank { result.optString("requestId") }
                         runOnUiThread {
-                            AlertDialog.Builder(this)
-                                .setTitle("SOLICITUD DE REPOSICIÓN RECIBIDA")
-                                .setMessage("Folio: ${result.optString("requestId")}\n\nEstado: ${result.optString("status", "pendiente de verificación")}\n\nImporte: $500 MXN\n\nEl código se entregará después de verificar el comprobante, exclusivamente por los números oficiales de AYUDA. Puedes introducirlo aquí o volver más tarde desde la pantalla principal.")
-                                .setPositiveButton("INTRODUCIR CÓDIGO") { _, _ -> showPatronRecoveryCodeDialog() }
-                                .setNegativeButton("CERRAR", null)
-                                .show()
+                            if (folio.isNotBlank()) {
+                                showPaymentFolioDialog(
+                                    "FOLIO DE RECUPERACIÓN", folio, "$500 MXN", "RECUPERACIÓN SENE PATRÓN",
+                                    "INTRODUCIR CÓDIGO"
+                                ) { showPatronRecoveryCodeDialog() }
+                            } else {
+                                Toast.makeText(this, "No se recibió el folio de recuperación", Toast.LENGTH_LONG).show()
+                            }
+                        }
                         }
                     } catch (error: Exception) { runOnUiThread { Toast.makeText(this, error.message ?: "No se pudo enviar la solicitud", Toast.LENGTH_LONG).show() } }
                 }.start()
