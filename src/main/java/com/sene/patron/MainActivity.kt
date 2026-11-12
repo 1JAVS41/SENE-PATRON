@@ -487,7 +487,7 @@ class MainActivity : Activity() {
                     val labels = (0 until reasons.length()).map { reasons.optString(it) }.filter { it.isNotBlank() }
                     if (labels.isNotEmpty()) correction.addView(text("Categorías: " + labels.joinToString(", "), 12, muted))
                 }
-                val cashImpact = item.optInt("cashImpact", 0) == 1
+                val cashImpact = item.optBoolean("cashImpact", false)
                 correction.addView(text(
                     if (cashImpact) "Impacto en caja: SÍ · requiere revisión" else "Impacto en caja: NO",
                     12, if (cashImpact) accent else success, true
@@ -558,12 +558,19 @@ class MainActivity : Activity() {
                 val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
                 val api = SeneApiClient(this, baseUrl)
                 val result = api.requestsInbox(slot, all = true)
+                val correctionResult = api.correctionInbox(slot, all = true)
+                // Mantener ambas bandejas juntas en caché, pero con listas separadas.
+                // La API de correcciones devuelve "items"; la pantalla usa "corrections".
+                val combined = JSONObject(result.toString()).put(
+                    "corrections",
+                    correctionResult.optJSONArray("items") ?: org.json.JSONArray()
+                )
                 prefs.edit()
-                    .putString("requests_$team", result.toString())
+                    .putString("requests_$team", combined.toString())
                     .putLong("requests_updated_$team", System.currentTimeMillis())
                     .putBoolean("requests_refreshing_$team", false)
                     .apply()
-                updateTeamNotificationCount(result)
+                updateTeamNotificationCount(correctionResult)
                 runOnUiThread { if (!isFinishing && (currentPage == "${team}_requests" || currentPage == "team1" || currentPage == "team2" || currentPage == "menu")) render() }
             } catch (error: Exception) {
                 prefs.edit().putBoolean("requests_refreshing_$team", false).apply()
