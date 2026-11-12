@@ -70,6 +70,15 @@ db.execute("""INSERT INTO audit_log
     (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at)
     VALUES ('audit-admin-events','lic-admin-events',NULL,'operator','operator',
             'manual_review_completed','{}',26)""")
+# Operational VENTAS/PATRON audit entries must stay out of ADMIN's feed.
+db.execute("""INSERT INTO audit_log
+    (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at)
+    VALUES ('audit-ventas-private','lic-admin-events','ventas-admin-events','ventas','ventas-admin-events',
+            'correction_requested','{}',27)""")
+db.execute("""INSERT INTO audit_log
+    (id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at)
+    VALUES ('audit-patron-private','lic-admin-events','patron-admin-events','patron','patron-admin-events',
+            'payroll_settings_updated','{}',28)""")
 db.execute("""INSERT INTO official_support_contacts
     (id,official_email,help_phone_1,help_phone_2,revision,registered_at,updated_at,updated_by)
     VALUES (1,'ayuda@example.invalid','+5211111111111','+5222222222222',1,30,30,'operator-bootstrap')""")
