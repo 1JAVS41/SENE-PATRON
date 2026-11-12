@@ -956,6 +956,9 @@ class MainActivity : Activity() {
                                     "\\nConcepto / referencia exacta: " + requestId +
                                     "\\n\\nLa solicitud quedó registrada en el servidor de pruebas. Esto no significa que el pago esté confirmado. Conserva tu comprobante y espera la validación y el código de activación."
                             )
+                            .setNeutralButton("ENVIAR AVISO A AYUDA") { _, _ ->
+                                sendPaymentNoticeToAyuda(requestId, "$580 MXN", "REGISTRO INICIAL")
+                            }
                             .setPositiveButton("CONTINUAR") { _, _ -> showActivationDialog() }
                             .show()
                     }
