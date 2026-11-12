@@ -2684,7 +2684,7 @@ async function createOrReadPaydayBundle(request, env) {
   const checked = await verifyBusinessProof(request, env, "PATRON_PAYDAY_BUNDLE");
   if (checked.response) return checked.response;
   const { proof } = checked;
-  const ctx = await signedDeviceContext(proof, "PATRON");
+  const ctx = await signedDeviceContext(proof, "PATRON", false);
   if (ctx.error) return json({ error: ctx.error }, ctx.status);
   let body;
   try { body = JSON.parse(proof.bodyText); } catch { return json({ error: "INVALID_REQUEST" }, 400); }
