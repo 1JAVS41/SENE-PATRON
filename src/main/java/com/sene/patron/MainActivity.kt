@@ -749,6 +749,73 @@ class MainActivity : Activity() {
     }
 
 
+    private fun showVentasReplacementRequestDialog(team: String) {
+        val number = if (team == "team1") "1" else "2"
+        val reason = EditText(this).apply {
+            hint = "Describe qué pasó con el teléfono del trabajador"
+            minLines = 2
+            maxLines = 4
+        }
+        AlertDialog.Builder(this)
+            .setTitle("SOLICITAR REPOSICIÓN · EQUIPO $number")
+            .setMessage("La reposición cuesta $500 MXN. Primero crea la solicitud y recibe un folio único. Paga después usando ese folio como concepto o referencia. El QR solo se habilitará cuando SENE valide el pago y autorice la reposición.")
+            .setView(reason)
+            .setPositiveButton("CREAR SOLICITUD Y OBTENER FOLIO") { _, _ ->
+                val detail = reason.text?.toString()?.trim().orEmpty()
+                if (detail.isBlank()) {
+                    Toast.makeText(this, "Describe brevemente el motivo de la reposición", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
+                val baseUrl = prefs.getString("server_base_url", null)?.trim()
+                if (baseUrl.isNullOrBlank()) {
+                    showServerConfig()
+                    return@setPositiveButton
+                }
+                Thread {
+                    try {
+                        val api = SeneApiClient(this, baseUrl)
+                        val devices = api.listPatronDevices().optJSONArray("items")
+                            ?: throw IllegalStateException("No se pudo consultar el equipo vinculado.")
+                        val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
+                        var deviceId = ""
+                        for (index in 0 until devices.length()) {
+                            val item = devices.optJSONObject(index) ?: continue
+                            if (item.optString("slot") == slot) {
+                                deviceId = item.optString("deviceId")
+                                break
+                            }
+                        }
+                        if (deviceId.isBlank()) {
+                            throw IllegalStateException("No hay un teléfono activo vinculado al Equipo $number.")
+                        }
+                        val result = api.requestReplacement(deviceId, detail)
+                        val folio = result.optString("folio").ifBlank { result.optString("requestId") }
+                        runOnUiThread {
+                            if (isFinishing || isDestroyed) return@runOnUiThread
+                            if (folio.isBlank()) {
+                                Toast.makeText(this, "No se recibió el folio de reposición", Toast.LENGTH_LONG).show()
+                            } else {
+                                showPaymentFolioDialog(
+                                    "FOLIO DE REPOSICIÓN · EQUIPO $number",
+                                    folio, "$500 MXN", "REPOSICIÓN SENE VENTAS"
+                                )
+                            }
+                        }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                Toast.makeText(this, "No se pudo crear la solicitud. " + (error.message ?: ""),
+                                    Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("CANCELAR", null)
+            .show()
+    }
+
     private fun showPairingQr(team: String, operation: String = "NEW") {
         val slot = if (team == "team1") "VENTAS_1" else "VENTAS_2"
         val number = if (team == "team1") "1" else "2"
@@ -1509,6 +1576,11 @@ class MainActivity : Activity() {
         device.addView(text("Consulta la vinculación o genera el código QR para conectar SENE VENTAS a este espacio.", 13, muted))
         device.addView(primaryButton("GENERAR QR DE VINCULACIÓN · EQUIPO $number") { showPairingQr(team, "NEW") })
         gap(device, 7)
+        device.addView(primaryButton("SOLICITAR REPOSICIÓN PAGADA · $500 MXN") {
+            showVentasReplacementRequestDialog(team)
+        })
+        gap(device, 7)
+        device.addView(text("El QR de reposición se habilita después de validar el pago y autorizar la solicitud.", 11, muted))
         device.addView(primaryButton("GENERAR QR DE REPOSICIÓN · EQUIPO $number") { showPairingQr(team, "REPLACEMENT") })
         gap(device, 7)
         device.addView(primaryButton("VER ESTADO DE SEGURIDAD") {
