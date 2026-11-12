@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - sene-cloudflare-backend
+      - consolidation/patron-unificada
     paths:
       - "cloudflare/sene-api/**"
       - ".github/workflows/cloudflare-check.yml"
