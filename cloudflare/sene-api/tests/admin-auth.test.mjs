@@ -96,7 +96,12 @@ const db = {
         if (sql.includes("UPDATE admin_event_outbox") && sql.includes("SET payload_json")) {
           let changes = 0;
           for (const event of events) {
-            if (event.id <= args[0]) {
+            const pendingSession = [...sessions.values()].some(session => {
+              const cursor = cursors.get(session.session_id);
+              return session.revoked_at === null && session.expires_at > args[1] &&
+                Number(cursor?.last_cursor || 0) < event.id;
+            });
+            if (event.id <= args[0] && !pendingSession) {
               event.payload_json = JSON.stringify({
                 eventId: event.event_id, eventType: event.event_type, compacted: true
               });
@@ -172,6 +177,9 @@ const session = await good.json();
 assert.equal(session.tokenType, "Bearer");
 assert.ok(session.accessToken.length > 80);
 assert.ok(session.expiresAt > session.serverTime);
+const goodSecond = await login("admin@sene.invalid", password);
+assert.equal(goodSecond.status, 200);
+const secondSession = await goodSecond.json();
 
 const operatorInbox = await worker.fetch(new Request("https://sene.test/v1/operator/registrations/pending", {
   method: "GET", headers: { authorization: "Bearer " + session.accessToken }
@@ -214,21 +222,48 @@ const ackRequest = () => new Request("https://sene.test/v1/admin/events/ack", {
 const ack = await worker.fetch(ackRequest(), env);
 assert.equal(ack.status, 200);
 assert.equal((await ack.json()).duplicate, false);
+assert.notEqual(JSON.parse(events[0].payload_json).compacted, true,
+  "No se compacta mientras exista otra sesión activa sin ACK");
+
+const secondBatchResponse = await worker.fetch(new Request("https://sene.test/v1/admin/events", {
+  method: "GET", headers: { authorization: "Bearer " + secondSession.accessToken }
+}), env);
+assert.equal(secondBatchResponse.status, 200);
+const secondBatch = await secondBatchResponse.json();
+assert.equal(secondBatch.items.length, 1, "La segunda sesión debe recibir el mismo evento durable");
+const secondAckBody = {
+  ackId: "123e4567-e89b-42d3-a456-426614174098",
+  fromCursor: secondBatch.fromCursor,
+  throughCursor: secondBatch.throughCursor,
+  deliveryId: secondBatch.deliveryId,
+  payloadSha256: await sha256(canonicalJson(secondBatch.items))
+};
+const secondAck = await worker.fetch(new Request("https://sene.test/v1/admin/events/ack", {
+  method: "POST",
+  headers: { "content-type": "application/json", authorization: "Bearer " + secondSession.accessToken },
+  body: JSON.stringify(secondAckBody)
+}), env);
+assert.equal(secondAck.status, 200);
+assert.equal((await secondAck.json()).duplicate, false);
 assert.equal(JSON.parse(events[0].payload_json).compacted, true,
-  "El payload solo se compacta después del ACK durable");
+  "El payload se compacta cuando todas las sesiones activas confirman");
+
 const ackRetry = await worker.fetch(ackRequest(), env);
 assert.equal(ackRetry.status, 200);
 assert.equal((await ackRetry.json()).duplicate, true);
-const nextBatch = await worker.fetch(new Request("https://sene.test/v1/admin/events", {
-  method: "GET", headers: { authorization: "Bearer " + session.accessToken }
-}), env);
-assert.equal((await nextBatch.json()).items.length, 0, "El cursor solo avanza después del ACK");
+for (const token of [session.accessToken, secondSession.accessToken]) {
+  const nextBatch = await worker.fetch(new Request("https://sene.test/v1/admin/events", {
+    method: "GET", headers: { authorization: "Bearer " + token }
+  }), env);
+  assert.equal((await nextBatch.json()).items.length, 0, "El cursor solo avanza después del ACK");
+}
 
-const logout = await worker.fetch(new Request("https://sene.test/v1/admin/logout", {
-  method: "POST", headers: { authorization: "Bearer " + session.accessToken }
-}), env);
-assert.equal(logout.status, 200);
-assert.equal((await logout.json()).loggedOut, true);
+for (const token of [session.accessToken, secondSession.accessToken]) {
+  const logout = await worker.fetch(new Request("https://sene.test/v1/admin/logout", {
+    method: "POST", headers: { authorization: "Bearer " + token }
+  }), env);
+  assert.equal(logout.status, 200);
+}
 const replay = await worker.fetch(new Request("https://sene.test/v1/admin/logout", {
   method: "POST", headers: { authorization: "Bearer " + session.accessToken }
 }), env);
