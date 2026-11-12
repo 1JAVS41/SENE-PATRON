@@ -1,0 +1,64 @@
+name: Apply D1 migrations (TEST ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_test_database:
+        description: 'Escribe exactamente sene-licencias-pruebas para autorizar las migraciones en la base de PRUEBAS'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  migrate-test-d1:
+    if: ${{ github.ref == 'refs/heads/sene-cloudflare-backend' && inputs.confirm_test_database == 'sene-licencias-pruebas' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+        with:
+          ref: sene-cloudflare-backend
+
+      - name: Verificar configuración de destino (bloqueo de producción)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c '^name = "sene-licensing-api-testing"$' cloudflare/sene-api/wrangler.testing.toml)" = "1"
+          test "$(grep -c '^database_name = "sene-licencias-pruebas"$' cloudflare/sene-api/wrangler.testing.toml)" = "1"
+          test "$(grep -c '^database_id = "92ffc66c-e9f6-4b9f-9c85-0531d20a1fb9"$' cloudflare/sene-api/wrangler.testing.toml)" = "1"
+          ! grep -q 'sene-licencias"$' cloudflare/sene-api/wrangler.testing.toml
+          echo "Destino verificado: sene-licencias-pruebas (92ffc66c-e9f6-4b9f-9c85-0531d20a1fb9)"
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar Wrangler
+        run: npm install --global wrangler@4
+
+      - name: Comprobar credenciales Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Falta el secreto CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Falta el secreto CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+
+      - name: Aplicar migraciones solo en D1 de pruebas
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          wrangler d1 migrations apply sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml
+
+      - name: Verificar tablas creadas
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          wrangler d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
