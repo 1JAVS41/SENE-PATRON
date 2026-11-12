@@ -272,6 +272,25 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+async function recordUniversalDelivery(env, ctx, stream, payload) {
+  const stablePayload = { ...payload };
+  delete stablePayload.serverTime;
+  const payloadSha256 = await sha256(canonicalJson(stablePayload));
+  const deliveryId = stream + ":" + payloadSha256.slice(0, 48);
+  const cursor = Number.isSafeInteger(stablePayload.cursor) ? stablePayload.cursor : 0;
+  const issuedAt = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    "INSERT INTO delivery_issued (device_id,license_id,stream,delivery_id,payload_sha256,cursor,issued_at,acknowledged_at) VALUES (?,?,?,?,?,?,?,NULL) ON CONFLICT(device_id,stream,delivery_id) DO UPDATE SET issued_at=excluded.issued_at WHERE delivery_issued.payload_sha256=excluded.payload_sha256 AND delivery_issued.cursor=excluded.cursor"
+  ).bind(ctx.deviceId, ctx.licenseId, stream, deliveryId, payloadSha256, cursor, issuedAt).run();
+  const issued = await env.DB.prepare(
+    "SELECT payload_sha256,cursor FROM delivery_issued WHERE device_id=? AND stream=? AND delivery_id=? LIMIT 1"
+  ).bind(ctx.deviceId, stream, deliveryId).first();
+  if (!issued || issued.payload_sha256 !== payloadSha256 || Number(issued.cursor) !== cursor) {
+    throw new Error("DELIVERY_ISSUE_CONFLICT");
+  }
+  return payload;
+}
+
 async function listAdminEvents(request, env) {
   const session = await verifyAdminSession(request, env);
   if (!session) return json({ error: "ADMIN_UNAUTHORIZED" }, 401);
@@ -2278,7 +2297,9 @@ async function patronCorrectionsInbox(request, env) {
     planHash: r.plan_hash, status: r.status, createdAt: r.created_at, decidedAt: r.decided_at
   }));
   const cursor = Math.max(0, ...items.map((r) => Number(r.decidedAt || r.createdAt || 0)));
-  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", pendingByTeam, items, cursor });
+  const stream = "PATRON_CORRECTIONS_" + (slot === 2 ? "VENTAS_1" : "VENTAS_2");
+  const payload = { slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", pendingByTeam, items, cursor };
+  return json(await recordUniversalDelivery(env, ctx, stream, payload));
 }
 
 async function decideCorrectionRequest(request, env) {
@@ -2583,7 +2604,9 @@ async function patronRequestsInbox(request, env) {
     ...items.map((r) => Number(r.decidedAt || r.createdAt || 0)),
     ...corrections.map((r) => Number(r.decidedAt || r.createdAt || 0))
   );
-  return json({ pendingByTeam, items, corrections, cursor });
+  const stream = "PATRON_REQUESTS_" + slot;
+  const payload = { pendingByTeam, items, corrections, cursor };
+  return json(await recordUniversalDelivery(env, ctx, stream, payload));
 }
 
 async function ventasPayrollSettingsGet(request, env) {
@@ -2730,11 +2753,12 @@ async function patronNotifications(request, env) {
        SELECT MAX(COALESCE(decided_at,created_at)) AS value FROM correction_requests WHERE license_id=?
      )`
   ).bind(ctx.licenseId, ctx.licenseId).first();
-  return json({
+  const payload = {
     pendingByTeam,
     cursor: Number(cursorRow?.cursor || 0),
     serverTime: Math.floor(Date.now() / 1000)
-  });
+  };
+  return json(await recordUniversalDelivery(env, ctx, "PATRON_NOTIFICATIONS", payload));
 }
 
 async function decideWorkRequest(request, env) {
@@ -2860,7 +2884,8 @@ async function ventasRequestUpdates(request, env) {
     ...items.map((r) => Number(r.decidedAt || r.createdAt || 0)),
     ...corrections.map((r) => Number(r.decidedAt || r.createdAt || 0))
   );
-  return json({ items, corrections, cursor });
+  const payload = { items, corrections, cursor };
+  return json(await recordUniversalDelivery(env, ctx, "VENTAS_REQUEST_UPDATES", payload));
 }
 
 async function saveReport(request, env, purpose, table, keyField, keyName) {
@@ -2964,7 +2989,9 @@ async function patronReportsInbox(request, env) {
     ...payrollReports.map((r) => Number(r.createdAt || 0)),
     ...payrollEntries.map((r) => Number(r.decidedAt || r.createdAt || 0))
   );
-  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", shiftReports, payrollReports, payrollEntries, cursor });
+  const stream = "PATRON_REPORTS_" + (slot === 2 ? "VENTAS_1" : "VENTAS_2");
+  const payload = { slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", shiftReports, payrollReports, payrollEntries, cursor };
+  return json(await recordUniversalDelivery(env, ctx, stream, payload));
 }
 
 
@@ -3519,6 +3546,13 @@ async function acknowledgeUniversalDelivery(request, env) {
     });
   }
 
+  const issued = await env.DB.prepare(
+    "SELECT payload_sha256,cursor,acknowledged_at FROM delivery_issued WHERE device_id=? AND stream=? AND delivery_id=? LIMIT 1"
+  ).bind(ctx.deviceId, stream, deliveryId).first();
+  if (!issued || issued.payload_sha256 !== payloadSha256 || Number(issued.cursor) !== cursor) {
+    return json({ error: "DELIVERY_NOT_ISSUED" }, 409);
+  }
+
   const cursorRow = await env.DB.prepare(
     "SELECT last_cursor FROM delivery_ack_cursors WHERE device_id=? AND stream=? LIMIT 1"
   ).bind(ctx.deviceId, stream).first();
@@ -3535,7 +3569,10 @@ async function acknowledgeUniversalDelivery(request, env) {
       ).bind(ackId, ctx.licenseId, ctx.deviceId, stream, deliveryId, payloadSha256, cursor, requestHash, now),
       env.DB.prepare(
         "INSERT INTO delivery_ack_cursors (device_id,stream,last_cursor,updated_at) VALUES (?,?,?,?) ON CONFLICT(device_id,stream) DO UPDATE SET last_cursor=excluded.last_cursor,updated_at=excluded.updated_at WHERE delivery_ack_cursors.last_cursor<=excluded.last_cursor"
-      ).bind(ctx.deviceId, stream, cursor, now)
+      ).bind(ctx.deviceId, stream, cursor, now),
+      env.DB.prepare(
+        "UPDATE delivery_issued SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE device_id=? AND stream=? AND delivery_id=? AND payload_sha256=? AND cursor=?"
+      ).bind(now, ctx.deviceId, stream, deliveryId, payloadSha256, cursor)
     ]);
     if ((results?.[1]?.meta?.changes ?? 0) !== 1) {
       await env.DB.prepare("DELETE FROM delivery_acknowledgements WHERE ack_id=?").bind(ackId).run();
