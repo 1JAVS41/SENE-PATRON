@@ -178,6 +178,12 @@ jobs:
           cp cloudflare/sene-api/src/worker.js cloudflare/sene-api/src/worker.mjs
           node cloudflare/sene-api/tests/universal-ack.test.mjs
 
+      - name: Probar autenticación administrativa y sesiones revocables
+        run: |
+          set -euo pipefail
+          cp cloudflare/sene-api/src/worker.js cloudflare/sene-api/src/worker.mjs
+          node cloudflare/sene-api/tests/admin-auth.test.mjs
+
       - name: Instalar SQLite
         run: |
           sudo apt-get update
