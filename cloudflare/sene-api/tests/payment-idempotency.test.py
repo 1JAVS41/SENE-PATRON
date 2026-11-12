@@ -17,7 +17,7 @@ def insert_payment(payment_id, payment_type, amount, key, created_at):
         (id,license_id,payment_type,amount_cents,currency,status,reference,idempotency_key,
          created_at,confirmed_at,confirmed_by)
         VALUES (?,?,?,?,'MXN','CONFIRMED','TRANSFER-REF',?,?,?,'operator')""",
-        (payment_id,'lic-payment-test',payment_type,amount,'MXN',key,created_at,created_at))
+        (payment_id,'lic-payment-test',payment_type,amount,key,created_at,created_at))
 
 insert_payment('setup-payment','SETUP',50000,'initial-setup:lic-payment-test',10)
 insert_payment('first-rent-payment','FIRST_RENT',8000,'initial-rent:lic-payment-test',10)
