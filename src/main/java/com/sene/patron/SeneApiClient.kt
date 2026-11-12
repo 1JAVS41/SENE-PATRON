@@ -326,9 +326,22 @@ class SeneApiClient(context: Context, baseUrl: String) {
      * Persiste un identificador estable de ACK antes de enviarlo. Puede
      * llamarse únicamente después de que el llamador haya guardado el lote.
      */
+    private fun canonicalJson(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(",", "{", "}") {
+            JSONObject.quote(it) + ":" + canonicalJson(value.get(it))
+        }
+        is org.json.JSONArray -> (0 until value.length()).joinToString(",", "[", "]") {
+            canonicalJson(value.get(it))
+        }
+        is String -> JSONObject.quote(value)
+        is Number, is Boolean -> value.toString()
+        else -> JSONObject.quote(value.toString())
+    }
+
     fun acknowledgePersistedDelivery(stream: String, payload: JSONObject): JSONObject {
-        val payloadText = payload.toString()
-        val payloadHash = sha256(payloadText)
+        val stablePayload = JSONObject(payload.toString()).apply { remove("serverTime") }
+        val payloadHash = sha256(canonicalJson(stablePayload))
         val deliveryId = "$stream:${payloadHash.take(48)}"
         val cursor = payload.optLong("cursor", 0L).coerceAtLeast(0L)
         val key = "delivery_ack_${stream}_${payloadHash}"
