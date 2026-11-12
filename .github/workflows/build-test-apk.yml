@@ -85,17 +85,17 @@ jobs:
             test -n "$APK_PATH" && test -s "$APK_PATH"
             adb wait-for-device
             for attempt in $(seq 1 180); do
-              BOOTED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' || true)"
+              BOOTED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
               [ "$BOOTED" = "1" ] && break
               sleep 2
             done
-            [ "$(adb shell getprop sys.boot_completed | tr -d '\\r')" = "1" ]
+            [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]
             adb devices -l
             adb install -r "$APK_PATH"
             adb shell am force-stop com.sene.patron
             adb shell am start -W -n com.sene.patron/.MainActivity
             for attempt in $(seq 1 30); do
-              PID="$(adb shell pidof com.sene.patron 2>/dev/null | tr -d '\\r' || true)"
+              PID="$(adb shell pidof com.sene.patron 2>/dev/null | tr -d '\r' || true)"
               [ -n "$PID" ] && exit 0
               sleep 1
             done
