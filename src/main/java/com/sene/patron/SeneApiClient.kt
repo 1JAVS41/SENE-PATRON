@@ -345,7 +345,10 @@ class SeneApiClient(context: Context, baseUrl: String) {
         val deliveryId = "$stream:${payloadHash.take(48)}"
         val cursor = payload.optLong("cursor", 0L).coerceAtLeast(0L)
         val key = "delivery_ack_${stream}_${payloadHash}"
-        val ackId = prefs.getString(key, null) ?: java.util.UUID.randomUUID().toString().also {
+        val savedAckId = prefs.getString(key, null)?.takeIf {
+            it.matches(Regex("(?i)^[0-9a-f-]{36}$"))
+        }
+        val ackId = savedAckId ?: java.util.UUID.randomUUID().toString().also {
             check(prefs.edit().putString(key, it).commit()) {
                 "No se pudo guardar el identificador de ACK para reintentar"
             }
