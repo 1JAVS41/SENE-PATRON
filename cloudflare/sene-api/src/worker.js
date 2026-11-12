@@ -1374,6 +1374,36 @@ async function registerLegacyLicenseContacts(request, env) {
   return json({ licenseId, contactsRegistered: true, recoveryAvailable: true }, 200);
 }
 
+async function listOperatorLicenses(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const limitRaw = Number(new URL(request.url).searchParams.get("limit") || 100);
+  const limit = Number.isSafeInteger(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 100;
+  const rows = await env.DB.prepare(
+    `SELECT l.id,l.business_name,l.status,l.max_devices,l.expires_at,l.created_at,
+            l.setup_paid_at,l.first_rent_paid_at,
+            (SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id AND d.status='active') AS active_devices
+       FROM licenses l ORDER BY l.created_at DESC,l.id DESC LIMIT ?`
+  ).bind(limit).all();
+  return json({ items: rows.results || [], serverTime: Math.floor(Date.now() / 1000) });
+}
+
+async function listOperatorAudit(request, env) {
+  if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
+  const url = new URL(request.url);
+  const limitRaw = Number(url.searchParams.get("limit") || 100);
+  const limit = Number.isSafeInteger(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 100;
+  const licenseId = url.searchParams.get("licenseId");
+  if (licenseId && !/^[0-9a-f-]{36}$/i.test(licenseId)) return json({ error: "INVALID_LICENSE_ID" }, 400);
+  const rows = licenseId
+    ? await env.DB.prepare(
+        "SELECT id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at FROM audit_log WHERE license_id=? ORDER BY created_at DESC,id DESC LIMIT ?"
+      ).bind(licenseId, limit).all()
+    : await env.DB.prepare(
+        "SELECT id,license_id,device_id,actor_type,actor_id,event_type,details_json,created_at FROM audit_log ORDER BY created_at DESC,id DESC LIMIT ?"
+      ).bind(limit).all();
+  return json({ items: rows.results || [], serverTime: Math.floor(Date.now() / 1000) });
+}
+
 async function listOperatorRegistrations(request, env) {
   if (!(await requireOperator(request, env))) return json({ error: "UNAUTHORIZED" }, 401);
   const now = Math.floor(Date.now() / 1000);
@@ -3356,6 +3386,8 @@ async function handle(request, env) {
   if (request.method === "GET" && url.pathname === "/v1/operator/patron-recovery-payments/pending") return listOperatorPatronRecoveryPayments(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/patron-recovery-payments/authorize") return authorizePatronRecoveryPayment(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/licenses/register-legacy-contacts") return registerLegacyLicenseContacts(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/operator/licenses") return listOperatorLicenses(request, env);
+  if (request.method === "GET" && url.pathname === "/v1/operator/audit") return listOperatorAudit(request, env);
   if (request.method === "GET" && url.pathname === "/v1/operator/registrations/pending") return listOperatorRegistrations(request, env);
   if (request.method === "POST" && url.pathname === "/v1/operator/registrations/authorize") return authorizePatronRegistration(request, env);
 
