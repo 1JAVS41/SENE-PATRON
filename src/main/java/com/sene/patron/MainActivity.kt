@@ -869,11 +869,11 @@ class MainActivity : Activity() {
 
         form.addView(text(
             "REGISTRO INICIAL · $580 MXN\\n\\n" +
-                "1. Realiza el pago de $580 MXN ($500 de alta + $80 de primera mensualidad) a los datos oficiales de SENE.\\n" +
-                "2. En el concepto o referencia escribe exactamente el FOLIO DE SOLICITUD que recibirás al enviar este formulario.\\n" +
-                "3. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp.\\n" +
-                "4. Después pulsa ENVIAR SOLICITUD AL SERVIDOR.\\n\\n" +
-                "Enviar la solicitud no confirma el pago ni activa la licencia. SENE verificará el pago y después entregará el código de activación.",
+                "1. Envía primero este formulario al servidor; recibirás un folio único de solicitud.\\n" +
+                "2. Realiza el pago de $580 MXN ($500 de alta + $80 de primera mensualidad) a los datos oficiales de SENE.\\n" +
+                "3. En el concepto o referencia escribe exactamente el folio que aparecerá al terminar el registro.\\n" +
+                "4. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp y conserva el folio.\\n\\n" +
+                "Enviar el formulario o el comprobante no confirma el pago ni activa la licencia. SENE verificará el pago y después entregará el código de activación.",
             13, muted
         ).apply { setPadding(0, dp(12), 0, dp(8)) })
 
@@ -974,11 +974,20 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
+        val folio = prefs.getString("registration_request_id", "").orEmpty()
+        val folioView = TextView(this).apply {
+            text = "FOLIO DE SOLICITUD / CONCEPTO DE PAGO\\n" + folio
+            textSize = 15f
+            setTextColor(ink)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(Color.rgb(234, 242, 255), 12, Color.rgb(205, 218, 242))
+        }
         val timer = TextView(this).apply {
             textSize = 15f
             setTextColor(success)
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(4), 0, dp(12))
+            setPadding(0, dp(12), 0, dp(12))
         }
         val field = EditText(this).apply {
             hint = "Código de activación de 12 caracteres"
@@ -986,6 +995,7 @@ class MainActivity : Activity() {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
             setPadding(dp(16), dp(13), dp(16), dp(13))
         }
+        content.addView(folioView)
         content.addView(timer)
         content.addView(TextView(this).apply {
             text = "Introduce el código que recibiste después de confirmar el pago. Si pagaste dentro del plazo, conserva tu folio y comprobante aunque el contador llegue a cero."
