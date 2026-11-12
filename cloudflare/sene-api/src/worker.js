@@ -1181,7 +1181,7 @@ async function createPatronRegistrationRequest(request, env) {
     requestId: id, businessName, status: "pending_payment", createdAt: now,
     expiresAt, serverTime: now, reservationSeconds: 48 * 60 * 60,
     amountCents: 58000, currency: "MXN", package: "1_PATRON_2_VENTAS",
-    instructions: "Realiza el pago inicial de $580 MXN. En el concepto escribe únicamente el nombre exacto de tu empresa. Envía el comprobante a uno de los números oficiales de AYUDA por WhatsApp. Después pulsa YA REALICÉ EL PAGO. El código se entrega únicamente después de verificar el pago."
+    instructions: `Realiza el pago inicial de $580 MXN. En el concepto o referencia escribe exactamente el folio de solicitud: ${id}. Conserva el comprobante y envíalo a un número oficial de AYUDA. El folio identifica tu solicitud; enviar el comprobante no confirma el pago. El código se entrega únicamente después de verificar el pago.`
   }, 201);
 }
 
