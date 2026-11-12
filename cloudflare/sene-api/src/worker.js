@@ -1124,8 +1124,11 @@ function constantTimeTextEqual(a, b) {
 async function requireOperator(request, env) {
   const expected = env.OPERATOR_TOKEN;
   const supplied = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  return typeof expected === "string" && expected.length >= 32 &&
-    constantTimeTextEqual(supplied, expected);
+  if (typeof expected === "string" && expected.length >= 32 &&
+      constantTimeTextEqual(supplied, expected)) return true;
+  // The mobile SENE ADMIN app authenticates with revocable HMAC sessions;
+  // legacy server automation may continue using OPERATOR_TOKEN.
+  return Boolean(await verifyAdminSession(request, env));
 }
 
 async function renewalPatronContext(proof, env) {
