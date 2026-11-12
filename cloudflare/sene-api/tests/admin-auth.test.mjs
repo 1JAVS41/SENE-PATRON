@@ -36,9 +36,6 @@ const db = {
       async first() {
         if (sql.includes("FROM admin_login_attempts")) return attempts.get(args[0]) ?? null;
         if (sql.includes("FROM admin_sessions")) return sessions.get(args[0]) ?? null;
-        if (sql.includes("COALESCE(MAX(id),0) AS last_cursor FROM admin_event_outbox")) {
-          return { last_cursor: events.length ? events[events.length - 1].id : 0 };
-        }
         if (sql.includes("FROM admin_event_cursors")) {
           const value = cursors.get(args[0]);
           return value ? { last_cursor: value.last_cursor } : null;
@@ -77,7 +74,10 @@ const db = {
             return { meta: { changes: 1 } };
           }
           if (sql.includes("OR IGNORE") && cursors.has(args[0])) return { meta: { changes: 0 } };
-          cursors.set(args[0], { last_cursor: args[1], updated_at: args[2] });
+          cursors.set(args[0], {
+            last_cursor: 0,
+            updated_at: args[1]
+          });
           return { meta: { changes: 1 } };
         }
         if (sql.includes("INSERT INTO admin_event_acknowledgements")) {
