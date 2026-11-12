@@ -243,7 +243,8 @@ assert.equal((await skippedCursor.json()).error, "ADMIN_EVENT_BATCH_INCOMPLETE")
 const staleCursor = await worker.fetch(ackRequest({
   ...ackBody,
   ackId: "123e4567-e89b-42d3-a456-426614174095",
-  fromCursor: 1
+  fromCursor: 1,
+  throughCursor: 2
 }), env);
 assert.equal(staleCursor.status, 409, "El ACK debe comenzar en el cursor vigente de esa sesión");
 assert.equal((await staleCursor.json()).error, "ADMIN_EVENT_CURSOR_CONFLICT");
