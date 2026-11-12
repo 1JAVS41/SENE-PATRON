@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const worker = readFileSync(new URL("../src/worker.mjs", import.meta.url), "utf8");
-const app = readFileSync(new URL("../../src/main/java/com/sene/patron/MainActivity.kt", import.meta.url), "utf8");
+const app = readFileSync(new URL("../../../src/main/java/com/sene/patron/MainActivity.kt", import.meta.url), "utf8");
 
 function bodyOf(source, startName, endName) {
   const start = source.indexOf(startName);
