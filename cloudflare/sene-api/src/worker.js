@@ -2268,12 +2268,14 @@ async function patronCorrectionsInbox(request, env) {
     if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.pending_count);
     if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.pending_count);
   }
-  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", pendingByTeam, items: (rows.results || []).map((r) => ({
+  const items = (rows.results || []).map((r) => ({
     requestId: r.id, saleId: r.sale_id, reason: r.reason,
     reasons: (() => { try { return JSON.parse(r.reasons_json || "[]"); } catch { return [r.reason]; } })(),
     cashImpact: Number(r.cash_impact) === 1, cashReason: r.cash_reason || "",
     planHash: r.plan_hash, status: r.status, createdAt: r.created_at, decidedAt: r.decided_at
-  })) });
+  }));
+  const cursor = Math.max(0, ...items.map((r) => Number(r.decidedAt || r.createdAt || 0)));
+  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", pendingByTeam, items, cursor });
 }
 
 async function decideCorrectionRequest(request, env) {
@@ -2565,18 +2567,20 @@ async function patronRequestsInbox(request, env) {
     if (row.slot_number === 2) pendingByTeam.VENTAS_1 = Number(row.pending_count);
     if (row.slot_number === 3) pendingByTeam.VENTAS_2 = Number(row.pending_count);
   }
-  return json({
-    pendingByTeam,
-    items: (rows.results || []).map((r) => ({
-      requestId: r.id, type: r.request_type, details: JSON.parse(r.details_json),
-      status: r.status, createdAt: r.created_at, decidedAt: r.decided_at,
-      slot: r.slot_number === 2 ? "VENTAS_1" : "VENTAS_2"
-    })),
-    corrections: (correctionRows.results || []).map((r) => ({
-      requestId: r.id, saleId: r.sale_id, reason: r.reason, status: r.status,
-      createdAt: r.created_at, decidedAt: r.decided_at
-    }))
-  });
+  const items = (rows.results || []).map((r) => ({
+    requestId: r.id, type: r.request_type, details: JSON.parse(r.details_json),
+    status: r.status, createdAt: r.created_at, decidedAt: r.decided_at,
+    slot: r.slot_number === 2 ? "VENTAS_1" : "VENTAS_2"
+  }));
+  const corrections = (correctionRows.results || []).map((r) => ({
+    requestId: r.id, saleId: r.sale_id, reason: r.reason, status: r.status,
+    createdAt: r.created_at, decidedAt: r.decided_at
+  }));
+  const cursor = Math.max(0,
+    ...items.map((r) => Number(r.decidedAt || r.createdAt || 0)),
+    ...corrections.map((r) => Number(r.decidedAt || r.createdAt || 0))
+  );
+  return json({ pendingByTeam, items, corrections, cursor });
 }
 
 async function ventasPayrollSettingsGet(request, env) {
@@ -2826,20 +2830,23 @@ async function ventasRequestUpdates(request, env) {
   const correctionRows = await env.DB.prepare(
     "SELECT r.id, r.sale_id, r.reason, r.reasons_json, r.cash_impact, r.cash_reason, r.plan_hash, r.status, r.created_at, r.decided_at, g.id AS grant_id FROM correction_requests r LEFT JOIN correction_grants g ON g.request_id = r.id WHERE r.ventas_device_id = ? AND r.decided_at IS NOT NULL AND r.decided_at > ? ORDER BY r.decided_at ASC LIMIT 100"
   ).bind(ctx.deviceId, since).all();
-  return json({
-    items: (rows.results || []).map((r) => ({
-      requestId: r.id, type: r.request_type, status: r.status,
-      decisionDetails: r.decision_json ? JSON.parse(r.decision_json) : {},
-      createdAt: r.created_at, decidedAt: r.decided_at
-    })),
-    corrections: (correctionRows.results || []).map((r) => ({
-      requestId: r.id, saleId: r.sale_id, reason: r.reason,
-      reasons: (() => { try { return JSON.parse(r.reasons_json || "[]"); } catch { return [r.reason]; } })(),
-      cashImpact: Number(r.cash_impact) === 1, cashReason: r.cash_reason || "",
-      planHash: r.plan_hash, grantId: r.grant_id || null,
-      status: r.status, createdAt: r.created_at, decidedAt: r.decided_at
-    }))
-  });
+  const items = (rows.results || []).map((r) => ({
+    requestId: r.id, type: r.request_type, status: r.status,
+    decisionDetails: r.decision_json ? JSON.parse(r.decision_json) : {},
+    createdAt: r.created_at, decidedAt: r.decided_at
+  }));
+  const corrections = (correctionRows.results || []).map((r) => ({
+    requestId: r.id, saleId: r.sale_id, reason: r.reason,
+    reasons: (() => { try { return JSON.parse(r.reasons_json || "[]"); } catch { return [r.reason]; } })(),
+    cashImpact: Number(r.cash_impact) === 1, cashReason: r.cash_reason || "",
+    planHash: r.plan_hash, grantId: r.grant_id || null,
+    status: r.status, createdAt: r.created_at, decidedAt: r.decided_at
+  }));
+  const cursor = Math.max(0,
+    ...items.map((r) => Number(r.decidedAt || r.createdAt || 0)),
+    ...corrections.map((r) => Number(r.decidedAt || r.createdAt || 0))
+  );
+  return json({ items, corrections, cursor });
 }
 
 async function saveReport(request, env, purpose, table, keyField, keyName) {
@@ -2936,12 +2943,14 @@ async function patronReportsInbox(request, env) {
       decidedAt: r.decided_at === null ? 0 : Number(r.decided_at)
     }));
   }
-  return json({
-    slot: slot === 2 ? "VENTAS_1" : "VENTAS_2",
-    shiftReports: (shifts.results || []).map((r) => ({ reportId: r.id, shiftKey: r.shift_key, report: JSON.parse(r.report_json), createdAt: r.created_at })),
-    payrollReports: payrollRows.map((r) => ({ reportId: r.id, periodKey: r.period_key, report: JSON.parse(r.report_json), createdAt: r.created_at })),
-    payrollEntries
-  });
+  const shiftReports = (shifts.results || []).map((r) => ({ reportId: r.id, shiftKey: r.shift_key, report: JSON.parse(r.report_json), createdAt: r.created_at }));
+  const payrollReports = payrollRows.map((r) => ({ reportId: r.id, periodKey: r.period_key, report: JSON.parse(r.report_json), createdAt: r.created_at }));
+  const cursor = Math.max(0,
+    ...shiftReports.map((r) => Number(r.createdAt || 0)),
+    ...payrollReports.map((r) => Number(r.createdAt || 0)),
+    ...payrollEntries.map((r) => Number(r.decidedAt || r.createdAt || 0))
+  );
+  return json({ slot: slot === 2 ? "VENTAS_1" : "VENTAS_2", shiftReports, payrollReports, payrollEntries, cursor });
 }
 
 
