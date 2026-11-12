@@ -397,6 +397,7 @@ async function acknowledgeAdminEvents(request, env) {
       `UPDATE admin_event_outbox
           SET payload_json=json_object('eventId',event_id,'eventType',event_type,'compacted',1)
         WHERE id <= ?
+          AND json_extract(payload_json,'$.compacted') IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM admin_sessions s
             LEFT JOIN admin_event_cursors c ON c.session_id=s.session_id
