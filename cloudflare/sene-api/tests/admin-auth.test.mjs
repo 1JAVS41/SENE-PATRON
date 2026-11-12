@@ -93,7 +93,7 @@ const db = {
           const removed = acknowledgements.delete(args[0]);
           return { meta: { changes: removed ? 1 : 0 } };
         }
-        if (sql.includes("UPDATE admin_event_outbox SET payload_json")) {
+        if (sql.includes("UPDATE admin_event_outbox") && sql.includes("SET payload_json")) {
           let changes = 0;
           for (const event of events) {
             if (event.id <= args[0]) {
