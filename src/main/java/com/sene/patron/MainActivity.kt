@@ -1010,6 +1010,8 @@ class MainActivity : Activity() {
             Thread {
                 try {
                     val result = SeneApiClient(this, baseUrl).requestRegistration(businessName, email, phone)
+                    getSharedPreferences("sene_patron_server", MODE_PRIVATE).edit()
+                        .putString("business_name", result.optString("businessName", businessName)).apply()
                     val requestId = result.optString("folio").ifBlank { result.optString("requestId") }
                     check(requestId.isNotBlank()) { "El servidor no devolvió el folio de registro." }
                     runOnUiThread {
@@ -1496,6 +1498,7 @@ class MainActivity : Activity() {
                 Thread {
                     try {
                         val result = SeneApiClient(this, baseUrl).requestPatronRecovery(name, mail, number)
+                        prefs.edit().putString("business_name", name).apply()
                         val folio = result.optString("folio").ifBlank { result.optString("requestId") }
                         runOnUiThread {
                             if (folio.isNotBlank()) {
