@@ -172,6 +172,12 @@ jobs:
 
           JS
 
+      - name: Probar ACK universal firmado e idempotente
+        run: |
+          set -euo pipefail
+          cp cloudflare/sene-api/src/worker.js cloudflare/sene-api/src/worker.mjs
+          node cloudflare/sene-api/tests/universal-ack.test.mjs
+
       - name: Instalar SQLite
         run: |
           sudo apt-get update
