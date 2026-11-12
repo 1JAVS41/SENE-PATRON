@@ -737,7 +737,7 @@ jobs:
               (token_hash,license_id,patron_device_id,remaining_uses,created_at,expires_at,slot_number,operation,encrypted_token)
               VALUES (?,?,?,1,4,9999999999,?,'NEW','cipher')""", [
               ('ventas-qr-pending','lic-restore','patron-device-original',2),
-              ('patron-qr-pending','lic-restore','patron-device-original',1)
+              ('patron-qr-pending','lic-restore','patron-device-original',3)
           ])
 
           # Restauración VENTAS: actualizar clave/huella sin cambiar la PK ni romper relaciones.
