@@ -70,13 +70,16 @@ jobs:
         run: |
           set -euo pipefail
           find cloudflare/sene-api/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' | sort | tee /tmp/sene-local-migrations.log
-          grep -Fq "0023_delivery_issued_retention.sql" /tmp/sene-local-migrations.log
+          grep -Fq "0024_admin_audit_scope.sql" /tmp/sene-local-migrations.log
           npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM d1_migrations ORDER BY id;" | tee /tmp/sene-d1-migrations.log
-          grep -Fq "0023_delivery_issued_retention.sql" /tmp/sene-d1-migrations.log
+          grep -Fq "0024_admin_audit_scope.sql" /tmp/sene-d1-migrations.log
           npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_admin_event_%' ORDER BY name;" | tee /tmp/sene-admin-triggers.log
           grep -Fq "trg_admin_event_payment_insert" /tmp/sene-admin-triggers.log
           grep -Fq "trg_admin_event_license_status" /tmp/sene-admin-triggers.log
           grep -Fq "trg_admin_event_audit_record" /tmp/sene-admin-triggers.log
+          npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='trg_admin_event_audit_record';" | tee /tmp/sene-admin-audit-trigger.log
+          grep -Fq "operator" /tmp/sene-admin-audit-trigger.log
+          grep -Fq "system" /tmp/sene-admin-audit-trigger.log
           npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_delivery_issued_ack_retention';" | tee /tmp/sene-retention-index.log
           grep -Fq "idx_delivery_issued_ack_retention" /tmp/sene-retention-index.log
 
