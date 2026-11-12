@@ -254,6 +254,142 @@ async function requireAdmin(request, env) {
   return Boolean(await verifyAdminSession(request, env));
 }
 
+function canonicalJson(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  if (typeof value === "object") {
+    return "{" + Object.keys(value).sort().map((key) =>
+      JSON.stringify(key) + ":" + canonicalJson(value[key])
+    ).join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
+
+async function listAdminEvents(request, env) {
+  const session = await verifyAdminSession(request, env);
+  if (!session) return json({ error: "ADMIN_UNAUTHORIZED" }, 401);
+  const cursorRow = await env.DB.prepare(
+    "SELECT last_cursor FROM admin_event_cursors WHERE session_id=? LIMIT 1"
+  ).bind(session.sessionId).first();
+  const fromCursor = Number(cursorRow?.last_cursor || 0);
+  const rows = await env.DB.prepare(
+    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? ORDER BY id ASC LIMIT 100"
+  ).bind(fromCursor).all();
+  const items = (rows.results || []).map((row) => ({
+    cursor: Number(row.id), eventId: row.event_id, eventType: row.event_type,
+    licenseId: row.license_id || null,
+    payload: JSON.parse(row.payload_json),
+    createdAt: Number(row.created_at)
+  }));
+  const throughCursor = items.length ? items[items.length - 1].cursor : fromCursor;
+  const payloadSha256 = await sha256(canonicalJson(items));
+  const stream = "ADMIN_EVENTS";
+  return json({
+    stream, fromCursor, throughCursor, cursor: throughCursor, items,
+    payloadSha256,
+    deliveryId: stream + ":" + payloadSha256.slice(0, 48),
+    hasMore: items.length === 100
+  });
+}
+
+async function acknowledgeAdminEvents(request, env) {
+  const session = await verifyAdminSession(request, env);
+  if (!session) return json({ error: "ADMIN_UNAUTHORIZED" }, 401);
+  let raw;
+  let body;
+  try { raw = await request.text(); body = JSON.parse(raw); } catch {
+    return json({ error: "INVALID_REQUEST" }, 400);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some((key) => !["ackId","fromCursor","throughCursor","deliveryId","payloadSha256"].includes(key))) {
+    return json({ error: "INVALID_ACK" }, 400);
+  }
+  const ackId = typeof body.ackId === "string" ? body.ackId.toLowerCase() : "";
+  const fromCursor = body.fromCursor;
+  const throughCursor = body.throughCursor;
+  const payloadSha256 = typeof body.payloadSha256 === "string" ? body.payloadSha256.toLowerCase() : "";
+  const deliveryId = typeof body.deliveryId === "string" ? body.deliveryId : "";
+  if (!/^[0-9a-f-]{36}$/.test(ackId) ||
+      !Number.isSafeInteger(fromCursor) || fromCursor < 0 ||
+      !Number.isSafeInteger(throughCursor) || throughCursor <= fromCursor ||
+      !/^[0-9a-f]{64}$/.test(payloadSha256) ||
+      deliveryId !== "ADMIN_EVENTS:" + payloadSha256.slice(0, 48)) {
+    return json({ error: "INVALID_ACK" }, 400);
+  }
+  const requestHash = await sha256(raw);
+  const existingAck = await env.DB.prepare(
+    "SELECT ack_id,session_id,from_cursor,through_cursor,payload_sha256,request_sha256,acknowledged_at FROM admin_event_acknowledgements WHERE ack_id=? LIMIT 1"
+  ).bind(ackId).first();
+  if (existingAck) {
+    if (existingAck.session_id !== session.sessionId || existingAck.request_sha256 !== requestHash) {
+      return json({ error: "ACK_ID_CONFLICT" }, 409);
+    }
+    return json({ acknowledged: true, duplicate: true, ackId,
+      cursor: Number(existingAck.through_cursor),
+      acknowledgedAt: Number(existingAck.acknowledged_at) });
+  }
+
+  const cursorRow = await env.DB.prepare(
+    "SELECT last_cursor FROM admin_event_cursors WHERE session_id=? LIMIT 1"
+  ).bind(session.sessionId).first();
+  const currentCursor = Number(cursorRow?.last_cursor || 0);
+  if (currentCursor !== fromCursor) return json({ error: "ADMIN_EVENT_CURSOR_CONFLICT", cursor: currentCursor }, 409);
+
+  const rows = await env.DB.prepare(
+    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? AND id<=? ORDER BY id ASC LIMIT 101"
+  ).bind(fromCursor, throughCursor).all();
+  if (!rows.results?.length || rows.results.length > 100 ||
+      Number(rows.results[rows.results.length - 1].id) !== throughCursor) {
+    return json({ error: "ADMIN_EVENT_BATCH_INCOMPLETE" }, 409);
+  }
+  const items = rows.results.map((row) => ({
+    cursor: Number(row.id), eventId: row.event_id, eventType: row.event_type,
+    licenseId: row.license_id || null,
+    payload: JSON.parse(row.payload_json),
+    createdAt: Number(row.created_at)
+  }));
+  if (await sha256(canonicalJson(items)) !== payloadSha256) {
+    return json({ error: "ADMIN_EVENT_HASH_MISMATCH" }, 409);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO admin_event_acknowledgements (ack_id,session_id,from_cursor,through_cursor,delivery_id,payload_sha256,request_sha256,acknowledged_at) VALUES (?,?,?,?,?,?,?,?)"
+      ).bind(ackId, session.sessionId, fromCursor, throughCursor, deliveryId, payloadSha256, requestHash, now),
+      env.DB.prepare(
+        "INSERT INTO admin_event_cursors (session_id,last_cursor,updated_at) VALUES (?,?,?) ON CONFLICT(session_id) DO UPDATE SET last_cursor=excluded.last_cursor,updated_at=excluded.updated_at WHERE admin_event_cursors.last_cursor=?"
+      ).bind(session.sessionId, throughCursor, now, fromCursor)
+    ]);
+    if ((results?.[0]?.meta?.changes ?? 0) !== 1) {
+      const raced = await env.DB.prepare(
+        "SELECT ack_id,session_id,request_sha256,through_cursor,acknowledged_at FROM admin_event_acknowledgements WHERE ack_id=? OR (session_id=? AND through_cursor=?) LIMIT 1"
+      ).bind(ackId, session.sessionId, throughCursor).first();
+      if (raced && raced.session_id === session.sessionId &&
+          raced.request_sha256 === requestHash) {
+        return json({ acknowledged: true, duplicate: true, ackId: raced.ack_id,
+          cursor: Number(raced.through_cursor), acknowledgedAt: Number(raced.acknowledged_at) });
+      }
+      return json({ error: "ADMIN_EVENT_ACK_CONFLICT" }, 409);
+    }
+    if ((results?.[1]?.meta?.changes ?? 0) !== 1) {
+      await env.DB.prepare("DELETE FROM admin_event_acknowledgements WHERE ack_id=?").bind(ackId).run();
+      return json({ error: "ADMIN_EVENT_CURSOR_CONFLICT", cursor: fromCursor }, 409);
+    }
+  } catch {
+    const raced = await env.DB.prepare(
+      "SELECT ack_id,session_id,request_sha256,through_cursor,acknowledged_at FROM admin_event_acknowledgements WHERE ack_id=? OR (session_id=? AND through_cursor=?) LIMIT 1"
+    ).bind(ackId, session.sessionId, throughCursor).first();
+    if (raced && raced.session_id === session.sessionId && raced.request_sha256 === requestHash) {
+      return json({ acknowledged: true, duplicate: true, ackId: raced.ack_id,
+        cursor: Number(raced.through_cursor), acknowledgedAt: Number(raced.acknowledged_at) });
+    }
+    return json({ error: "ADMIN_EVENT_ACK_FAILED" }, 503);
+  }
+  return json({ acknowledged: true, duplicate: false, ackId, cursor: throughCursor, acknowledgedAt: now });
+}
+
 async function adminLogin(request, env) {
   let body;
   try {
@@ -3373,6 +3509,8 @@ async function handle(request, env) {
     return json({ service: "SENE licensing API", status: "ok", version: 1 });
   }
 
+  if (request.method === "GET" && url.pathname === "/v1/admin/events") return listAdminEvents(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/admin/events/ack") return acknowledgeAdminEvents(request, env);
   if (request.method === "POST" && url.pathname === "/v1/admin/login") return adminLogin(request, env);
   if (request.method === "POST" && url.pathname === "/v1/admin/logout") return adminLogout(request, env);
   if (request.method === "POST" && url.pathname === "/v1/challenges") {
