@@ -46,6 +46,12 @@ jobs:
       - name: Probar idempotencia de pagos y códigos de un solo uso
         run: python3 cloudflare/sene-api/tests/payment-idempotency.test.py
 
+      - name: Probar folio único en registro, renovación, recuperación y reposición
+        run: |
+          set -euo pipefail
+          cp cloudflare/sene-api/src/worker.js cloudflare/sene-api/src/worker.mjs
+          node cloudflare/sene-api/tests/payment-folio-contract.test.mjs
+
       - name: Probar firma digital real de contactos AYUDA en el Worker
         run: |
           set -euo pipefail
