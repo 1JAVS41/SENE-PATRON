@@ -3496,11 +3496,24 @@ async function acknowledgeUniversalDelivery(request, env) {
     });
   }
 
+  const cursorRow = await env.DB.prepare(
+    "SELECT last_cursor FROM delivery_ack_cursors WHERE device_id=? AND stream=? LIMIT 1"
+  ).bind(ctx.deviceId, stream).first();
+  const currentCursor = Number(cursorRow?.last_cursor || 0);
+  if (cursor < currentCursor) {
+    return json({ error: "DELIVERY_CURSOR_REGRESSION", cursor: currentCursor }, 409);
+  }
+
   const now = Math.floor(Date.now() / 1000);
   try {
-    await env.DB.prepare(
-      "INSERT INTO delivery_acknowledgements (ack_id, license_id, device_id, stream, delivery_id, payload_sha256, cursor, request_sha256, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(ackId, ctx.licenseId, ctx.deviceId, stream, deliveryId, payloadSha256, cursor, requestHash, now).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO delivery_acknowledgements (ack_id, license_id, device_id, stream, delivery_id, payload_sha256, cursor, request_sha256, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).bind(ackId, ctx.licenseId, ctx.deviceId, stream, deliveryId, payloadSha256, cursor, requestHash, now),
+      env.DB.prepare(
+        "INSERT INTO delivery_ack_cursors (device_id,stream,last_cursor,updated_at) VALUES (?,?,?,?) ON CONFLICT(device_id,stream) DO UPDATE SET last_cursor=excluded.last_cursor,updated_at=excluded.updated_at WHERE delivery_ack_cursors.last_cursor<=excluded.last_cursor"
+      ).bind(ctx.deviceId, stream, cursor, now)
+    ]);
   } catch {
     // A concurrent retry may have won the unique-key race. Re-read and
     // accept only an exact replay; never reinterpret a conflicting body.
