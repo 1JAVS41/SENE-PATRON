@@ -33,7 +33,16 @@ class SeneApiClient(context: Context, baseUrl: String) {
         require(android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) { "Escribe un correo válido" }
         require(phone.length in 10..15) { "Escribe el número registrado (10 a 15 dígitos)" }
         val identity = PatronDeviceIdentity.get(app)
-        val body = JSONObject().put("businessName", normalizedName).put("registeredEmail", email).put("registeredPhone", phone)
+        // La prueba de identidad también viaja en el cuerpo firmado final.
+        // El desafío y la solicitud usan exactamente la misma instantánea.
+        val body = JSONObject()
+            .put("businessName", normalizedName)
+            .put("registeredEmail", email)
+            .put("registeredPhone", phone)
+            .put("installationId", identity.installationId)
+            .put("continuityId", identity.continuityId)
+            .put("publicKeyBase64", identity.publicKeyBase64)
+            .put("fingerprint", identity.fingerprint)
         val result = bootstrapSigned("PATRON_REGISTRATION_REQUEST", "/v1/patron/registrations/request", body.toString(), identity)
         val requestId = result.optString("requestId")
         if (requestId.isNotBlank()) {
@@ -47,7 +56,14 @@ class SeneApiClient(context: Context, baseUrl: String) {
         val phone = registeredPhone.filter { it.isDigit() }
         require(businessName.isNotBlank() && android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() && phone.length in 10..15) { "Revisa los datos registrados" }
         val identity = PatronDeviceIdentity.get(app)
-        val body = JSONObject().put("businessName", businessName.trim()).put("registeredEmail", email).put("registeredPhone", phone)
+        val body = JSONObject()
+            .put("businessName", businessName.trim())
+            .put("registeredEmail", email)
+            .put("registeredPhone", phone)
+            .put("installationId", identity.installationId)
+            .put("continuityId", identity.continuityId)
+            .put("publicKeyBase64", identity.publicKeyBase64)
+            .put("fingerprint", identity.fingerprint)
         val result = bootstrapSigned("PATRON_RECOVERY_REQUEST", "/v1/patron/recovery/request", body.toString(), identity)
         val requestId = result.optString("requestId")
         if (requestId.isNotBlank()) {
