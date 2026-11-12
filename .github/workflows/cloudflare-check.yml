@@ -777,8 +777,8 @@ jobs:
           db.executemany("""INSERT INTO devices
               (id,license_id,device_type,installation_id,continuity_id,public_key,fingerprint,slot_number,status,created_at)
               VALUES (?,?,?,?,?,?,?,?,?,?)""", [
-              ('patron-restore-test','license-ventas-restore','PATRON','patron-install','patron-continuity',x'01','patron-fingerprint',1,'active',1),
-              ('ventas-original','license-ventas-restore','VENTAS','old-install','same-phone-continuity',x'02','old-ventas-fingerprint',2,'active',2)
+              ('patron-restore-test','license-ventas-restore','PATRON','patron-install','patron-continuity',bytes([1]),'patron-fingerprint',1,'active',1),
+              ('ventas-original','license-ventas-restore','VENTAS','old-install','same-phone-continuity',bytes([2]),'old-ventas-fingerprint',2,'active',2)
           ])
           db.execute("""INSERT INTO pairing_tokens
               (token_hash,license_id,patron_device_id,remaining_uses,created_at,expires_at,slot_number,operation,encrypted_token)
