@@ -3580,7 +3580,12 @@ async function acknowledgeUniversalDelivery(request, env) {
       ).bind(ctx.deviceId, stream, cursor, now),
       env.DB.prepare(
         "UPDATE delivery_issued SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE device_id=? AND stream=? AND delivery_id=? AND payload_sha256=? AND cursor=?"
-      ).bind(now, ctx.deviceId, stream, deliveryId, payloadSha256, cursor)
+      ).bind(now, ctx.deviceId, stream, deliveryId, payloadSha256, cursor),
+      // Retain unacknowledged deliveries; prune only old, already-acknowledged
+      // issue receipts after 90 days to bound the registry without losing data.
+      env.DB.prepare(
+        "DELETE FROM delivery_issued WHERE acknowledged_at IS NOT NULL AND acknowledged_at < ?"
+      ).bind(now - 90 * 86400)
     ]);
     if ((results?.[1]?.meta?.changes ?? 0) !== 1) {
       await env.DB.prepare("DELETE FROM delivery_acknowledgements WHERE ack_id=?").bind(ackId).run();
