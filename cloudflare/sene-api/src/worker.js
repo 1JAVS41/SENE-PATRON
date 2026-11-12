@@ -215,6 +215,12 @@ async function issueAdminSession(email, env) {
   await env.DB.prepare(
     "INSERT INTO admin_sessions (session_id, token_sha256, role, created_at, expires_at, revoked_at) VALUES (?, ?, 'admin', ?, ?, NULL)"
   ).bind(sessionId, tokenHash, now, expiresAt).run();
+  const eventCursor = await env.DB.prepare(
+    "SELECT COALESCE(MAX(id),0) AS last_cursor FROM admin_event_outbox"
+  ).first();
+  await env.DB.prepare(
+    "INSERT INTO admin_event_cursors (session_id,last_cursor,updated_at) VALUES (?,?,?)"
+  ).bind(sessionId, Number(eventCursor?.last_cursor || 0), now).run();
   return { accessToken: token, tokenType: "Bearer", expiresAt, serverTime: now };
 }
 
@@ -268,14 +274,21 @@ function canonicalJson(value) {
 async function listAdminEvents(request, env) {
   const session = await verifyAdminSession(request, env);
   if (!session) return json({ error: "ADMIN_UNAUTHORIZED" }, 401);
-  const cursorRow = await env.DB.prepare(
+  let cursorRow = await env.DB.prepare(
     "SELECT last_cursor FROM admin_event_cursors WHERE session_id=? LIMIT 1"
   ).bind(session.sessionId).first();
-  const fromCursor = Number(cursorRow?.last_cursor || 0);
+  if (!cursorRow) {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO admin_event_cursors (session_id,last_cursor,updated_at) VALUES (?,0,?)"
+    ).bind(session.sessionId, Math.floor(Date.now() / 1000)).run();
+    cursorRow = { last_cursor: 0 };
+  }
+  const fromCursor = Number(cursorRow.last_cursor || 0);
   const rows = await env.DB.prepare(
-    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? ORDER BY id ASC LIMIT 100"
+    "SELECT id,event_id,event_type,license_id,payload_json,created_at FROM admin_event_outbox WHERE id>? ORDER BY id ASC LIMIT 101"
   ).bind(fromCursor).all();
-  const items = (rows.results || []).map((row) => ({
+  const hasMore = (rows.results || []).length > 100;
+  const items = (rows.results || []).slice(0, 100).map((row) => ({
     cursor: Number(row.id), eventId: row.event_id, eventType: row.event_type,
     licenseId: row.license_id || null,
     payload: JSON.parse(row.payload_json),
@@ -288,7 +301,7 @@ async function listAdminEvents(request, env) {
     stream, fromCursor, throughCursor, cursor: throughCursor, items,
     payloadSha256,
     deliveryId: stream + ":" + payloadSha256.slice(0, 48),
-    hasMore: items.length === 100
+    hasMore
   });
 }
 
@@ -377,6 +390,19 @@ async function acknowledgeAdminEvents(request, env) {
       await env.DB.prepare("DELETE FROM admin_event_acknowledgements WHERE ack_id=?").bind(ackId).run();
       return json({ error: "ADMIN_EVENT_CURSOR_CONFLICT", cursor: fromCursor }, 409);
     }
+    // Compacta el payload solo cuando todas las sesiones administrativas
+    // activas ya confirmaron el evento; conserva recibo, tipo y trazabilidad.
+    await env.DB.prepare(
+      `UPDATE admin_event_outbox
+          SET payload_json=json_object('eventId',event_id,'eventType',event_type,'compacted',1)
+        WHERE id <= ?
+          AND NOT EXISTS (
+            SELECT 1 FROM admin_sessions s
+            LEFT JOIN admin_event_cursors c ON c.session_id=s.session_id
+             WHERE s.revoked_at IS NULL AND s.expires_at > ?
+               AND COALESCE(c.last_cursor,0) < admin_event_outbox.id
+          )`
+    ).bind(throughCursor, now).run();
   } catch {
     const raced = await env.DB.prepare(
       "SELECT ack_id,session_id,request_sha256,through_cursor,acknowledged_at FROM admin_event_acknowledgements WHERE ack_id=? OR (session_id=? AND through_cursor=?) LIMIT 1"
