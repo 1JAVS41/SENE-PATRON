@@ -2706,7 +2706,7 @@ async function createOrReadPaydayBundle(request, env) {
   const existing = await env.DB.prepare(
     "SELECT id, payload_json, status, created_at FROM payday_deliveries WHERE license_id=? AND payment_date=? LIMIT 1"
   ).bind(ctx.licenseId, body.paymentDate).first();
-  if (existing) return json({
+  if (existing?.status === "acked") return json({
     deliveryId: existing.id, paymentDate: body.paymentDate,
     status: existing.status, duplicate: true, payload: JSON.parse(existing.payload_json),
     createdAt: Number(existing.created_at)
@@ -2752,8 +2752,16 @@ async function createOrReadPaydayBundle(request, env) {
   };
   const payloadJson = JSON.stringify(payload);
   if (payloadJson.length > 131072) return json({ error: "PAYDAY_BUNDLE_TOO_LARGE" }, 413);
-  const deliveryId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
+  if (existing?.status === "pending") {
+    const refreshed = await env.DB.prepare(
+      "UPDATE payday_deliveries SET payload_json=? WHERE id=? AND license_id=? AND status='pending'"
+    ).bind(payloadJson, existing.id, ctx.licenseId).run();
+    if ((refreshed.meta?.changes ?? 0) !== 1) return json({ error: "PAYDAY_BUNDLE_REFRESH_CONFLICT" }, 409);
+    return json({ deliveryId: existing.id, paymentDate: body.paymentDate, status: "pending",
+      duplicate: true, payload, createdAt: Number(existing.created_at) });
+  }
+  const deliveryId = crypto.randomUUID();
   try {
     await env.DB.prepare(
       "INSERT INTO payday_deliveries (id,license_id,payment_date,payload_json,status,created_at) VALUES (?,?,?,?,'pending',?)"
