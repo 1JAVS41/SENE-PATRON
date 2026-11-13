@@ -3726,7 +3726,14 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204 });
     try {
       return await handle(request, env);
-    } catch {
+    } catch (error) {
+      // Keep response details private; expose the server-side cause only in
+      // the isolated testing Worker logs so HTTP 500 failures are diagnosable.
+      console.error("SENE_WORKER_UNHANDLED_ERROR", {
+        path: new URL(request.url).pathname,
+        method: request.method,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return json({ error: "internal_error" }, 500);
     }
   },
