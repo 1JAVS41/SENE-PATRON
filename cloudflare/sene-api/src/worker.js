@@ -511,9 +511,12 @@ async function adminPasswordResetRequest(request, env) {
   }
 
   const passwordRecord = await hashAdminPassword(password);
-  const codeBytes = crypto.getRandomValues(new Uint32Array(1));
-  const code = String(codeBytes[0] % 100000000).padStart(8, "0");
-  const tokenHash = await sha256(code);
+  let codeValue;
+  const codeRange = 100000000;
+  const unbiasedLimit = Math.floor(0x100000000 / codeRange) * codeRange;
+  do { codeValue = crypto.getRandomValues(new Uint32Array(1))[0]; } while (codeValue >= unbiasedLimit);
+  const code = String(codeValue % codeRange).padStart(8, "0");
+  const tokenHash = await sha256(env.ADMIN_SESSION_SECRET + ":" + code);
   const resetId = crypto.randomUUID();
   await env.DB.prepare(
     "UPDATE admin_password_reset_requests SET consumed_at = ? WHERE email = ? AND consumed_at IS NULL"
@@ -553,7 +556,7 @@ async function adminPasswordResetConfirm(request, env) {
   if (!pending || Number(pending.expires_at) < now || Number(pending.attempts) >= 5) {
     return json({ error: "RESET_CODE_INVALID_OR_EXPIRED" }, 400);
   }
-  const tokenHash = await sha256(code);
+  const tokenHash = await sha256(env.ADMIN_SESSION_SECRET + ":" + code);
   if (!constantTimeTextEqual(tokenHash, pending.token_sha256)) {
     await env.DB.prepare(
       "UPDATE admin_password_reset_requests SET attempts = attempts + 1, consumed_at = CASE WHEN attempts + 1 >= 5 THEN ? ELSE consumed_at END WHERE id = ? AND consumed_at IS NULL"
