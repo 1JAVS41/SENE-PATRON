@@ -4,13 +4,19 @@ mkdir -p diagnostics
 STAGE=initial
 record_failure() {
   code=$?
+  [ "$code" -eq 0 ] && return 0
+  trap - EXIT HUP INT TERM
   echo "Fallo en etapa: $STAGE (código $code)" > diagnostics/result.txt
   timeout 30s adb logcat -d -v threadtime > diagnostics/logcat.txt 2>&1 || true
   timeout 20s adb shell dumpsys activity activities > diagnostics/activity.txt 2>&1 || true
+  timeout 20s adb shell dumpsys window windows > diagnostics/window.txt 2>&1 || true
   timeout 20s adb shell dumpsys package com.sene.patron > diagnostics/package.txt 2>&1 || true
   exit "$code"
 }
-trap record_failure EXIT HUP INT TERM
+trap record_failure EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 test -n "${APK_PATH:-}" && test -s "$APK_PATH"
 STAGE=espera-adb
 timeout 90s adb wait-for-device
@@ -43,7 +49,7 @@ while [ "$attempt" -lt 45 ]; do
   PID="$(timeout 15s adb shell pidof com.sene.patron 2>/dev/null | tr -d '\r' || true)"
   if [ -n "$PID" ]; then
     echo "$PID" > diagnostics/pid.txt
-    echo "Smoke test de arranque correcto para PATRON." > diagnostics/result.txt
+    echo "Smoke test de arranque correcto para PATRÓN." > diagnostics/result.txt
     echo "Proceso activo: $PID" >> diagnostics/stages.txt
     trap - EXIT HUP INT TERM
     exit 0
