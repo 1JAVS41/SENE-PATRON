@@ -10,7 +10,7 @@ record_failure() {
   timeout 20s adb shell dumpsys package com.sene.patron > diagnostics/package.txt 2>&1 || true
   exit "$code"
 }
-trap record_failure HUP INT TERM
+trap record_failure EXIT HUP INT TERM
 test -n "${APK_PATH:-}" && test -s "$APK_PATH"
 STAGE=espera-adb
 timeout 90s adb wait-for-device
@@ -45,7 +45,7 @@ while [ "$attempt" -lt 45 ]; do
     echo "$PID" > diagnostics/pid.txt
     echo "Smoke test de arranque correcto para PATRON." > diagnostics/result.txt
     echo "Proceso activo: $PID" >> diagnostics/stages.txt
-    trap - HUP INT TERM
+    trap - EXIT HUP INT TERM
     exit 0
   fi
   attempt=$((attempt + 1))
