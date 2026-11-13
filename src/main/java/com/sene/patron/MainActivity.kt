@@ -177,6 +177,20 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun officialPaymentDate(prefs: android.content.SharedPreferences): String {
+        val serverTime = prefs.getLong("server_time", 0L)
+        val elapsedAnchor = prefs.getLong("server_time_elapsed", 0L)
+        val elapsedNow = SystemClock.elapsedRealtime()
+        check(serverTime > 0L && elapsedAnchor > 0L && elapsedNow >= elapsedAnchor) {
+            "No hay hora oficial del servidor. Conéctate y vuelve a sincronizar la licencia antes de recibir la nómina."
+        }
+        val officialNowMillis = serverTime * 1000L + (elapsedNow - elapsedAnchor)
+        val formatter = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getDefault()
+        }
+        return formatter.format(java.util.Date(officialNowMillis))
+    }
+
     private fun receivePaydayBundle() {
         val prefs = getSharedPreferences("sene_patron_server", MODE_PRIVATE)
         val baseUrl = prefs.getString("server_base_url", null)?.takeIf { it.isNotBlank() }
@@ -184,7 +198,12 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Primero vincula SENE PATRÓN con el servidor de pruebas.", Toast.LENGTH_LONG).show()
             return
         }
-        val paymentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val paymentDate = try {
+            officialPaymentDate(prefs)
+        } catch (error: Exception) {
+            Toast.makeText(this, error.message ?: "No se pudo validar la hora oficial.", Toast.LENGTH_LONG).show()
+            return
+        }
         Toast.makeText(this, "Consultando inventarios y nómina del día de pago…", Toast.LENGTH_LONG).show()
         Thread {
             try {
