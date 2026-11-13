@@ -76,12 +76,12 @@ jobs:
           APK_PATH: ${{ steps.apk.outputs.path }}
         with:
           api-level: 35
-          target: google_apis
+          target: default
           arch: x86_64
-          profile: pixel_6
+          profile: pixel_2
           disable-animations: true
           emulator-boot-timeout: 600
-          cores: 2
+          cores: 4
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-snapshot-save
           script: sh .github/scripts/smoke-test.sh
       - name: Subir diagnóstico del smoke test
