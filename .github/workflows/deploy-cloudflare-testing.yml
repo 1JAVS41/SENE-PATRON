@@ -102,7 +102,22 @@ jobs:
           else
             echo "Aviso: CONTACTS_SIGNING_PRIVATE_JWK no está configurada; AYUDA firmado no estará disponible en este entorno."
           fi
-          if [ -n "$SENE_TEST_ADMIN_LOGIN_EMAIL" ]; then
+          ADMIN_SECRET_COUNT=0
+          for value in \
+            "$SENE_TEST_ADMIN_LOGIN_EMAIL" \
+            "$SENE_TEST_ADMIN_PASSWORD_HASH" \
+            "$SENE_TEST_ADMIN_PASSWORD_SALT" \
+            "$SENE_TEST_ADMIN_SESSION_SECRET"; do
+            if [ -n "$value" ]; then ADMIN_SECRET_COUNT=$((ADMIN_SECRET_COUNT + 1)); fi
+          done
+          if [ "$ADMIN_SECRET_COUNT" -ne 0 ] && [ "$ADMIN_SECRET_COUNT" -ne 4 ]; then
+            echo "::error::Configura los cuatro secretos SENE_TEST_ADMIN_* juntos o deja los cuatro vacíos. No se permite desplegar una autenticación administrativa parcial."
+            exit 1
+          fi
+          if [ "$ADMIN_SECRET_COUNT" -eq 4 ]; then
+            [[ "$SENE_TEST_ADMIN_PASSWORD_HASH" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "::error::SENE_TEST_ADMIN_PASSWORD_HASH debe ser SHA-256 hexadecimal de 64 caracteres."; exit 1; }
+            [[ "$SENE_TEST_ADMIN_PASSWORD_SALT" =~ ^[A-Za-z0-9+/]{20,}={0,2}$ ]] || { echo "::error::SENE_TEST_ADMIN_PASSWORD_SALT debe ser Base64 válido."; exit 1; }
+            [[ ${#SENE_TEST_ADMIN_SESSION_SECRET} -ge 32 ]] || { echo "::error::SENE_TEST_ADMIN_SESSION_SECRET debe tener al menos 32 caracteres."; exit 1; }
             printf '%s' "$SENE_TEST_ADMIN_LOGIN_EMAIL" | npx --yes wrangler@4 secret put ADMIN_LOGIN_EMAIL --config cloudflare/sene-api/wrangler.testing.toml
             printf '%s' "$SENE_TEST_ADMIN_PASSWORD_HASH" | npx --yes wrangler@4 secret put ADMIN_PASSWORD_HASH --config cloudflare/sene-api/wrangler.testing.toml
             printf '%s' "$SENE_TEST_ADMIN_PASSWORD_SALT" | npx --yes wrangler@4 secret put ADMIN_PASSWORD_SALT --config cloudflare/sene-api/wrangler.testing.toml
