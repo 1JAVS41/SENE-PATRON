@@ -25,7 +25,19 @@ if [[ ! -f "$WORKER" ]]; then
   exit 2
 fi
 
-cleanup() { rm -f "$WORKER_MJS"; }
+WORKER_MJS_BACKUP=""
+if [[ -f "$WORKER_MJS" ]]; then
+  WORKER_MJS_BACKUP="$(mktemp)"
+  cp "$WORKER_MJS" "$WORKER_MJS_BACKUP"
+fi
+cleanup() {
+  if [[ -n "$WORKER_MJS_BACKUP" ]]; then
+    cp "$WORKER_MJS_BACKUP" "$WORKER_MJS"
+    rm -f "$WORKER_MJS_BACKUP"
+  else
+    rm -f "$WORKER_MJS"
+  fi
+}
 trap cleanup EXIT
 cp "$WORKER" "$WORKER_MJS"
 
