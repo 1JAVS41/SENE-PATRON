@@ -32,6 +32,15 @@ assert.ok(app.includes("CREAR SOLICITUD Y OBTENER FOLIO"));
 assert.ok(app.includes("SOLICITAR REPOSICIÓN PAGADA · $500 MXN"));
 assert.ok(app.includes("api.listPatronDevices()") && app.includes("api.requestReplacement(deviceId, detail)"));
 assert.ok(client.includes("PATRON_DEVICES_LIST") && client.includes("PATRON_REPLACEMENT_REQUEST"));
+const recoveryAuthorization = bodyOf(worker, "async function authorizePatronRecoveryPayment", "async function createPatronRegistrationRequest");
+assert.ok(recoveryAuthorization.includes("reference!==requestId"));
+const registrationAuthorization = bodyOf(worker, "async function authorizePatronRegistration", "async function createRenewalRequest");
+assert.ok(registrationAuthorization.includes("reference !== requestId"));
+const renewalAuthorization = bodyOf(worker, "async function authorizeRenewal", "async function cancelRenewal");
+assert.ok(renewalAuthorization.includes("reference !== requestId"));
+const replacementAuthorization = bodyOf(worker, "async function authorizeOperatorReplacement", "async function redeemReplacement");
+assert.ok(replacementAuthorization.includes("paymentReference !== requestId"));
+
 assert.ok(app.includes("private fun showPaymentFolioDialog"));
 assert.ok(app.includes("private fun sendPaymentNoticeToAyuda"));
 assert.ok(app.includes("Folio de solicitud: $folio"));
