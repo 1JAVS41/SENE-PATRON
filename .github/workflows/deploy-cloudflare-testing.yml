@@ -6,6 +6,7 @@ on:
       - sene-cloudflare-backend
       - integration/ack-universal
       - consolidation/patron-unificada-v2
+      - fix/admin-password-recovery-testing
     paths:
       - "cloudflare/sene-api/**"
       - ".github/workflows/deploy-cloudflare-testing.yml"
@@ -27,6 +28,8 @@ jobs:
       SENE_TEST_ADMIN_PASSWORD_HASH: ${{ secrets.SENE_TEST_ADMIN_PASSWORD_HASH }}
       SENE_TEST_ADMIN_PASSWORD_SALT: ${{ secrets.SENE_TEST_ADMIN_PASSWORD_SALT }}
       SENE_TEST_ADMIN_SESSION_SECRET: ${{ secrets.SENE_TEST_ADMIN_SESSION_SECRET }}
+      SENE_TEST_RESEND_API_KEY: ${{ secrets.SENE_TEST_RESEND_API_KEY }}
+      SENE_TEST_RESEND_FROM_EMAIL: ${{ secrets.SENE_TEST_RESEND_FROM_EMAIL }}
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
@@ -113,6 +116,12 @@ jobs:
           if [ "$ADMIN_SECRET_COUNT" -ne 0 ] && [ "$ADMIN_SECRET_COUNT" -ne 4 ]; then
             echo "::error::Configura los cuatro secretos SENE_TEST_ADMIN_* juntos o deja los cuatro vacíos. No se permite desplegar una autenticación administrativa parcial."
             exit 1
+          fi
+          if [ -n "$SENE_TEST_RESEND_API_KEY" ]; then
+            printf '%s' "$SENE_TEST_RESEND_API_KEY" | npx --yes wrangler@4 secret put RESEND_API_KEY --config cloudflare/sene-api/wrangler.testing.toml
+          fi
+          if [ -n "$SENE_TEST_RESEND_FROM_EMAIL" ]; then
+            printf '%s' "$SENE_TEST_RESEND_FROM_EMAIL" | npx --yes wrangler@4 secret put RESEND_FROM_EMAIL --config cloudflare/sene-api/wrangler.testing.toml
           fi
           if [ "$ADMIN_SECRET_COUNT" -eq 4 ]; then
             [[ "$SENE_TEST_ADMIN_PASSWORD_HASH" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "::error::SENE_TEST_ADMIN_PASSWORD_HASH debe ser SHA-256 hexadecimal de 64 caracteres."; exit 1; }
