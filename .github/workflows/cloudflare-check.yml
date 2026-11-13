@@ -6,6 +6,7 @@ on:
       - sene-cloudflare-backend
       - integration/ack-universal
       - consolidation/patron-unificada-v2
+      - fix/admin-password-recovery-testing
     paths:
       - "cloudflare/sene-api/**"
       - ".github/workflows/cloudflare-check.yml"
