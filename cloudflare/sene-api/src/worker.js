@@ -568,7 +568,7 @@ async function adminPasswordResetConfirm(request, env) {
     env.DB.prepare(
       "INSERT INTO admin_password_credentials (id,email,password_hash,password_salt,iterations,updated_at) SELECT 1,email,password_hash,password_salt,iterations,? FROM admin_password_reset_requests WHERE id = ? AND token_sha256 = ? AND consumed_at = ? ON CONFLICT(id) DO UPDATE SET email=excluded.email,password_hash=excluded.password_hash,password_salt=excluded.password_salt,iterations=excluded.iterations,updated_at=excluded.updated_at"
     ).bind(now, pending.id, tokenHash, now),
-    env.DB.prepare("UPDATE admin_sessions SET revoked_at = ? WHERE revoked_at IS NULL").bind(now)
+    env.DB.prepare("UPDATE admin_sessions SET revoked_at = ? WHERE revoked_at IS NULL AND EXISTS (SELECT 1 FROM admin_password_credentials WHERE id = 1 AND updated_at = ?)").bind(now, now)
   ]);
   if ((results[0]?.meta?.changes ?? 0) !== 1 || (results[1]?.meta?.changes ?? 0) !== 1) {
     return json({ error: "RESET_CODE_INVALID_OR_EXPIRED" }, 400);
