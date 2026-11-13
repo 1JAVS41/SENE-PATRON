@@ -55,3 +55,14 @@ El despliegue aislado de pruebas terminó correctamente y el endpoint `/health` 
 - Los cuatro secretos `SENE_TEST_ADMIN_*`: sin ellos, el login de SENE ADMIN responde `ADMIN_AUTH_NOT_CONFIGURED`.
 
 Estos secretos no se inventan ni se incrustan en la APK o en el repositorio. Se deben configurar en GitHub Actions del repositorio `1JAVS41/SENE-PATRON` antes de dar por terminada la integración real de AYUDA y ADMIN.
+
+## Preparar la firma de contactos AYUDA
+
+El repositorio incluye `cloudflare/sene-api/scripts/generate-contacts-key.mjs`. En una computadora segura:
+
+1. Ejecuta `node cloudflare/sene-api/scripts/generate-contacts-key.mjs`.
+2. Guarda el objeto `privateJwk` completo como secreto de GitHub Actions `SENE_TEST_CONTACTS_SIGNING_PRIVATE_JWK` en `1JAVS41/SENE-PATRON`.
+3. Copia `publicKeyX509Base64` a la constante `PUBLIC_KEY_X509` de `src/main/java/com/sene/patron/OfficialSupportVerifier.kt`.
+4. No subas ni compartas el `privateJwk` en el repositorio, APK, chat ni capturas.
+
+La clave pública debe coincidir con la privada configurada en el Worker. Después se vuelve a compilar PATRÓN y se despliega solo al entorno de pruebas para comprobar la firma.
