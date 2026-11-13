@@ -444,6 +444,138 @@ async function acknowledgeAdminEvents(request, env) {
   return json({ acknowledged: true, duplicate: false, ackId, cursor: throughCursor, acknowledgedAt: now });
 }
 
+
+async function hashAdminPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]
+  );
+  const derived = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, key, 256
+  );
+  return { hash: hex(derived), salt: btoa(String.fromCharCode(...salt)), iterations: 100000 };
+}
+
+async function sendAdminPasswordResetEmail(env, email, code) {
+  if (typeof env.RESEND_API_KEY !== "string" || !env.RESEND_API_KEY ||
+      typeof env.RESEND_FROM_EMAIL !== "string" || !env.RESEND_FROM_EMAIL) return false;
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "authorization": "Bearer " + env.RESEND_API_KEY,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM_EMAIL,
+      to: [email],
+      subject: "Confirma el restablecimiento de SENE ADMIN",
+      text: "Se solicitó cambiar la contraseña de SENE ADMIN. Tu código de confirmación es: " +
+        code + ". Caduca en 15 minutos. Si no solicitaste este cambio, ignora este correo.",
+      html: "<p>Se solicitó cambiar la contraseña de SENE ADMIN.</p><p>Tu código de confirmación es:</p><p style='font-size:28px;font-weight:bold;letter-spacing:5px'>" +
+        code + "</p><p>Caduca en 15 minutos y solo puede utilizarse una vez. Si no solicitaste este cambio, ignora este correo.</p>"
+    })
+  });
+  return response.ok;
+}
+
+async function adminPasswordResetRequest(request, env) {
+  let body;
+  try {
+    if (Number(request.headers.get("content-length") || 0) > 4096) return json({ error: "INVALID_REQUEST" }, 413);
+    body = await request.json();
+  } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const password = typeof body.newPassword === "string" ? body.newPassword : "";
+  const confirmation = typeof body.confirmPassword === "string" ? body.confirmPassword : "";
+  if (Object.keys(body || {}).some((key) => !["email", "newPassword", "confirmPassword"].includes(key)) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+      password.length < 12 || password.length > 128 || password !== confirmation) {
+    return json({ error: "INVALID_RESET_REQUEST" }, 400);
+  }
+  const configuredEmail = typeof env.ADMIN_LOGIN_EMAIL === "string"
+    ? env.ADMIN_LOGIN_EMAIL.trim().toLowerCase() : "";
+  // Same response for known and unknown addresses; never disclose the admin account.
+  if (!configuredEmail || !constantTimeTextEqual(email, configuredEmail)) {
+    return json({ accepted: true, message: "Si el correo corresponde a la cuenta administrativa, recibirás instrucciones." }, 202);
+  }
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) {
+    return json({ error: "PASSWORD_RESET_EMAIL_NOT_CONFIGURED" }, 503);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const recent = await env.DB.prepare(
+    "SELECT COUNT(*) AS total FROM admin_password_reset_requests WHERE email = ? AND created_at > ?"
+  ).bind(email, now - 3600).first();
+  if (Number(recent?.total || 0) >= 3) {
+    return json({ error: "PASSWORD_RESET_RATE_LIMITED" }, 429);
+  }
+
+  const passwordRecord = await hashAdminPassword(password);
+  const codeBytes = crypto.getRandomValues(new Uint32Array(1));
+  const code = String(codeBytes[0] % 100000000).padStart(8, "0");
+  const tokenHash = await sha256(code);
+  const resetId = crypto.randomUUID();
+  await env.DB.prepare(
+    "UPDATE admin_password_reset_requests SET consumed_at = ? WHERE email = ? AND consumed_at IS NULL"
+  ).bind(now, email).run();
+  await env.DB.prepare(
+    "INSERT INTO admin_password_reset_requests (id,email,password_hash,password_salt,iterations,token_sha256,ip_hash,created_at,expires_at,attempts,consumed_at) VALUES (?,?,?,?,?,?,?,?,?,0,NULL)"
+  ).bind(resetId, email, passwordRecord.hash, passwordRecord.salt, passwordRecord.iterations,
+    tokenHash, await sha256(request.headers.get("CF-Connecting-IP") || "unknown"), now, now + 900).run();
+
+  try {
+    const sent = await sendAdminPasswordResetEmail(env, email, code);
+    if (!sent) throw new Error("RESEND_DELIVERY_FAILED");
+  } catch {
+    await env.DB.prepare("DELETE FROM admin_password_reset_requests WHERE id = ? AND consumed_at IS NULL")
+      .bind(resetId).run();
+    return json({ error: "PASSWORD_RESET_EMAIL_FAILED" }, 503);
+  }
+  return json({ accepted: true, message: "Te enviamos un código de confirmación que caduca en 15 minutos." }, 202);
+}
+
+async function adminPasswordResetConfirm(request, env) {
+  let body;
+  try {
+    if (Number(request.headers.get("content-length") || 0) > 2048) return json({ error: "INVALID_REQUEST" }, 413);
+    body = await request.json();
+  } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const code = typeof body.code === "string" ? body.code.trim() : "";
+  if (Object.keys(body || {}).some((key) => !["email", "code"].includes(key)) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\d{8}$/.test(code)) {
+    return json({ error: "INVALID_RESET_CONFIRMATION" }, 400);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const pending = await env.DB.prepare(
+    "SELECT id,email,password_hash,password_salt,iterations,token_sha256,expires_at,attempts,consumed_at FROM admin_password_reset_requests WHERE email = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1"
+  ).bind(email).first();
+  if (!pending || Number(pending.expires_at) < now || Number(pending.attempts) >= 5) {
+    return json({ error: "RESET_CODE_INVALID_OR_EXPIRED" }, 400);
+  }
+  const tokenHash = await sha256(code);
+  if (!constantTimeTextEqual(tokenHash, pending.token_sha256)) {
+    await env.DB.prepare(
+      "UPDATE admin_password_reset_requests SET attempts = attempts + 1, consumed_at = CASE WHEN attempts + 1 >= 5 THEN ? ELSE consumed_at END WHERE id = ? AND consumed_at IS NULL"
+    ).bind(now, pending.id).run();
+    return json({ error: "RESET_CODE_INVALID_OR_EXPIRED" }, 400);
+  }
+
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE admin_password_reset_requests SET consumed_at = ? WHERE id = ? AND token_sha256 = ? AND consumed_at IS NULL AND expires_at >= ? AND attempts < 5"
+    ).bind(now, pending.id, tokenHash, now),
+    env.DB.prepare(
+      "INSERT INTO admin_password_credentials (id,email,password_hash,password_salt,iterations,updated_at) SELECT 1,email,password_hash,password_salt,iterations,? FROM admin_password_reset_requests WHERE id = ? AND token_sha256 = ? AND consumed_at = ? ON CONFLICT(id) DO UPDATE SET email=excluded.email,password_hash=excluded.password_hash,password_salt=excluded.password_salt,iterations=excluded.iterations,updated_at=excluded.updated_at"
+    ).bind(now, pending.id, tokenHash, now),
+    env.DB.prepare("UPDATE admin_sessions SET revoked_at = ? WHERE revoked_at IS NULL").bind(now)
+  ]);
+  if ((results[0]?.meta?.changes ?? 0) !== 1 || (results[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "RESET_CODE_INVALID_OR_EXPIRED" }, 400);
+  }
+  return json({ passwordReset: true, message: "Contraseña actualizada. Ya puedes iniciar sesión." });
+}
+
 async function adminLogin(request, env) {
   let body;
   try {
@@ -474,20 +606,31 @@ async function adminLogin(request, env) {
     return json({ error: "ADMIN_LOGIN_RATE_LIMITED", retryAfter: Number(attempt.blocked_until) - now }, 429);
   }
 
+  const storedCredentials = await env.DB.prepare(
+    "SELECT email,password_hash,password_salt,iterations FROM admin_password_credentials WHERE id = 1 LIMIT 1"
+  ).first();
+  const credentialEmail = storedCredentials?.email || env.ADMIN_LOGIN_EMAIL;
+  const credentialHash = storedCredentials?.password_hash || env.ADMIN_PASSWORD_HASH;
+  const credentialSalt = storedCredentials?.password_salt || env.ADMIN_PASSWORD_SALT;
+  const iterations = Number(storedCredentials?.iterations || 210000);
+  if (iterations > 100000) {
+    return json({ error: "ADMIN_PASSWORD_RESET_REQUIRED", message: "Por seguridad, restablece tu contraseña mediante el correo administrativo." }, 428);
+  }
   let salt;
-  try { salt = fromBase64(env.ADMIN_PASSWORD_SALT); } catch { return json({ error: "ADMIN_AUTH_NOT_CONFIGURED" }, 503); }
-  if (salt.length < 16 || !/^[0-9a-f]{64}$/i.test(env.ADMIN_PASSWORD_HASH)) {
+  try { salt = fromBase64(credentialSalt); } catch { return json({ error: "ADMIN_AUTH_NOT_CONFIGURED" }, 503); }
+  if (salt.length < 16 || !/^[0-9a-f]{64}$/i.test(credentialHash) ||
+      !Number.isInteger(iterations) || iterations < 10000 || iterations > 100000) {
     return json({ error: "ADMIN_AUTH_NOT_CONFIGURED" }, 503);
   }
   const key = await crypto.subtle.importKey(
     "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]
   );
   const derived = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" }, key, 256
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" }, key, 256
   );
   const candidate = hex(derived);
-  const valid = constantTimeTextEqual(email, env.ADMIN_LOGIN_EMAIL.trim().toLowerCase()) &&
-    constantTimeTextEqual(candidate, env.ADMIN_PASSWORD_HASH.toLowerCase());
+  const valid = constantTimeTextEqual(email, credentialEmail.trim().toLowerCase()) &&
+    constantTimeTextEqual(candidate, credentialHash.toLowerCase());
   if (!valid) {
     const resetWindow = !attempt || now - Number(attempt.window_started_at) >= 900;
     const windowStarted = resetWindow ? now : Number(attempt.window_started_at);
@@ -3635,6 +3778,8 @@ async function handle(request, env) {
 
   if (request.method === "GET" && url.pathname === "/v1/admin/events") return listAdminEvents(request, env);
   if (request.method === "POST" && url.pathname === "/v1/admin/events/ack") return acknowledgeAdminEvents(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/admin/password/reset/request") return adminPasswordResetRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/v1/admin/password/reset/confirm") return adminPasswordResetConfirm(request, env);
   if (request.method === "POST" && url.pathname === "/v1/admin/login") return adminLogin(request, env);
   if (request.method === "POST" && url.pathname === "/v1/admin/logout") return adminLogout(request, env);
   if (request.method === "POST" && url.pathname === "/v1/challenges") {
