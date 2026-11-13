@@ -181,12 +181,15 @@ class SeneApiClient(context: Context, baseUrl: String) {
             .put("publicKeyBase64", identity.publicKeyBase64)
             .put("fingerprint", identity.fingerprint)
         val result = bootstrapSigned("PATRON_RESTORE", "/v1/patron/restore", body.toString(), identity)
+        check(result.optBoolean("sameDeviceId", false)) {
+            "El servidor no confirmó que se conserva la misma identidad del dispositivo"
+        }
         val registeredId = result.optString("deviceId")
-        check(registeredId.isNotBlank()) { "El servidor no devolvió la nueva vinculación" }
+        check(registeredId.isNotBlank()) { "El servidor no devolvió la vinculación anterior" }
         check(prefs.edit().putString("device_id", registeredId).commit()) {
             "No se pudo guardar la vinculación recuperada"
         }
-        return session().put("restored", true)
+        return session(registeredId).put("restored", true)
     }
 
     fun createPairingToken(slot: String, operation: String = "NEW", deviceId: String = storedDeviceId()
