@@ -8,7 +8,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
-private fun isStrictIsoDate(value: String): Boolean {
+internal fun isStrictIsoDate(value: String): Boolean {
     if (!value.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) return false
     return try {
         val year = value.substring(0, 4).toInt()
