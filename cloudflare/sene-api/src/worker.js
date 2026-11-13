@@ -1411,7 +1411,7 @@ async function authorizePatronRecoveryPayment(request, env) {
   const requestId=typeof body.requestId==="string"?body.requestId:"";
   const reference=typeof body.paymentReference==="string"?body.paymentReference.trim().slice(0,120):"";
   const deliveryPhone=typeof body.deliveryPhone==="string"?body.deliveryPhone.trim():"";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId)||!reference||!deliveryPhone) return json({error:"INVALID_REQUEST"},400);
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)||!reference||reference!==requestId||!deliveryPhone) return json({error:"PAYMENT_REFERENCE_MUST_MATCH_FOLIO"},400);
   if (!(await requireOfficialHelpRecipient(env,deliveryPhone))) return json({error:"UNOFFICIAL_CODE_RECIPIENT"},403);
   const row=await env.DB.prepare("SELECT * FROM patron_recovery_payment_requests WHERE id=? LIMIT 1").bind(requestId).first();
   if (!row) return json({error:"RECOVERY_NOT_FOUND"},404);
@@ -1622,7 +1622,7 @@ async function authorizePatronRegistration(request, env) {
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
   const reference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0,120) : "";
   const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference || reference !== requestId || !deliveryPhone) return json({ error: "PAYMENT_REFERENCE_MUST_MATCH_FOLIO" }, 400);
   if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) {
     return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   }
@@ -1880,7 +1880,7 @@ async function authorizeRenewal(request, env) {
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
   const reference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 120) : "";
   const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference || !deliveryPhone) return json({ error: "INVALID_REQUEST" }, 400);
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !reference || reference !== requestId || !deliveryPhone) return json({ error: "PAYMENT_REFERENCE_MUST_MATCH_FOLIO" }, 400);
   if (!(await requireOfficialHelpRecipient(env, deliveryPhone))) {
     return json({ error: "UNOFFICIAL_CODE_RECIPIENT" }, 403);
   }
@@ -2079,7 +2079,7 @@ async function authorizeOperatorReplacement(request, env) {
   const requestId = typeof body.requestId === "string" ? body.requestId : "";
   const paymentReference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0,120) : "";
   const deliveryPhone = typeof body.deliveryPhone === "string" ? body.deliveryPhone.trim() : "";
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !paymentReference || !deliveryPhone ||
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !paymentReference || paymentReference !== requestId || !deliveryPhone ||
       Object.keys(body).some((key) => !["requestId","paymentReference","deliveryPhone"].includes(key))) {
     return json({ error: "INVALID_REQUEST" }, 400);
   }
