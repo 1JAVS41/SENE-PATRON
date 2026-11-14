@@ -6,6 +6,7 @@ on:
       - sene-cloudflare-backend
       - integration/ack-universal
       - consolidation/patron-unificada-v2
+      - fix/admin-password-recovery-testing
     paths:
       - "cloudflare/sene-api/**"
       - ".github/workflows/deploy-cloudflare-testing.yml"
@@ -27,6 +28,8 @@ jobs:
       SENE_TEST_ADMIN_PASSWORD_HASH: ${{ secrets.SENE_TEST_ADMIN_PASSWORD_HASH }}
       SENE_TEST_ADMIN_PASSWORD_SALT: ${{ secrets.SENE_TEST_ADMIN_PASSWORD_SALT }}
       SENE_TEST_ADMIN_SESSION_SECRET: ${{ secrets.SENE_TEST_ADMIN_SESSION_SECRET }}
+      SENE_TEST_RESEND_API_KEY: ${{ secrets.SENE_TEST_RESEND_API_KEY }}
+      SENE_TEST_RESEND_FROM_EMAIL: ${{ secrets.SENE_TEST_RESEND_FROM_EMAIL }}
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
@@ -53,6 +56,18 @@ jobs:
             echo "Configura los cuatro secretos SENE_TEST_ADMIN_* juntos o deja los cuatro vacíos."
             exit 1
           fi
+          resend_secret_count=0
+          for value in "$SENE_TEST_RESEND_API_KEY" "$SENE_TEST_RESEND_FROM_EMAIL"; do
+            [[ -n "$value" ]] && resend_secret_count=$((resend_secret_count + 1))
+          done
+          if [ "$resend_secret_count" -ne 0 ] && [ "$resend_secret_count" -ne 2 ]; then
+            echo "Configura SENE_TEST_RESEND_API_KEY y SENE_TEST_RESEND_FROM_EMAIL juntos."
+            exit 1
+          fi
+          if [ "$resend_secret_count" -eq 2 ]; then
+            [[ "$SENE_TEST_RESEND_FROM_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || { echo "Remitente Resend no válido"; exit 1; }
+            [ "$admin_secret_count" -eq 4 ] || { echo "El restablecimiento por correo requiere los cuatro secretos SENE_TEST_ADMIN_*."; exit 1; }
+          fi
           if [ "$admin_secret_count" -eq 4 ]; then
             [[ "$SENE_TEST_ADMIN_LOGIN_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || { echo "Correo admin de pruebas no válido"; exit 1; }
             [[ "$SENE_TEST_ADMIN_PASSWORD_HASH" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "El hash admin debe ser SHA-256 hexadecimal de 64 caracteres"; exit 1; }
@@ -74,6 +89,8 @@ jobs:
           grep -Fq "0024_admin_audit_scope.sql" /tmp/sene-local-migrations.log
           npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM d1_migrations ORDER BY id;" | tee /tmp/sene-d1-migrations.log
           grep -Fq "0024_admin_audit_scope.sql" /tmp/sene-d1-migrations.log
+          npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM sqlite_master WHERE type='table' AND name='admin_password_reset_requests';" | tee /tmp/sene-admin-reset-table.log
+          grep -Fq "admin_password_reset_requests" /tmp/sene-admin-reset-table.log
           npx --yes wrangler@4 d1 execute sene-licencias-pruebas --remote --config cloudflare/sene-api/wrangler.testing.toml --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_admin_event_%' ORDER BY name;" | tee /tmp/sene-admin-triggers.log
           grep -Fq "trg_admin_event_payment_insert" /tmp/sene-admin-triggers.log
           grep -Fq "trg_admin_event_license_status" /tmp/sene-admin-triggers.log
@@ -113,6 +130,12 @@ jobs:
           if [ "$ADMIN_SECRET_COUNT" -ne 0 ] && [ "$ADMIN_SECRET_COUNT" -ne 4 ]; then
             echo "::error::Configura los cuatro secretos SENE_TEST_ADMIN_* juntos o deja los cuatro vacíos. No se permite desplegar una autenticación administrativa parcial."
             exit 1
+          fi
+          if [ -n "$SENE_TEST_RESEND_API_KEY" ]; then
+            printf '%s' "$SENE_TEST_RESEND_API_KEY" | npx --yes wrangler@4 secret put RESEND_API_KEY --config cloudflare/sene-api/wrangler.testing.toml
+          fi
+          if [ -n "$SENE_TEST_RESEND_FROM_EMAIL" ]; then
+            printf '%s' "$SENE_TEST_RESEND_FROM_EMAIL" | npx --yes wrangler@4 secret put RESEND_FROM_EMAIL --config cloudflare/sene-api/wrangler.testing.toml
           fi
           if [ "$ADMIN_SECRET_COUNT" -eq 4 ]; then
             [[ "$SENE_TEST_ADMIN_PASSWORD_HASH" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "::error::SENE_TEST_ADMIN_PASSWORD_HASH debe ser SHA-256 hexadecimal de 64 caracteres."; exit 1; }

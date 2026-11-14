@@ -8,7 +8,7 @@ const passwordKey = await webcrypto.subtle.importKey(
   "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]
 );
 const hash = Buffer.from(await webcrypto.subtle.deriveBits(
-  { name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" }, passwordKey, 256
+  { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, passwordKey, 256
 )).toString("hex");
 const saltBase64 = Buffer.from(salt).toString("base64");
 const sessions = new Map();
@@ -34,6 +34,7 @@ const db = {
     return {
       bind(...values) { args = values; return this; },
       async first() {
+        if (sql.includes("FROM admin_password_credentials")) return null;
         if (sql.includes("FROM admin_login_attempts")) return attempts.get(args[0]) ?? null;
         if (sql.includes("FROM admin_sessions")) return sessions.get(args[0]) ?? null;
         if (sql.includes("FROM admin_event_cursors")) {
@@ -308,4 +309,4 @@ const replay = await worker.fetch(new Request("https://sene.test/v1/admin/logout
   method: "POST", headers: { authorization: "Bearer " + session.accessToken }
 }), env);
 assert.equal(replay.status, 401, "Una sesión revocada no debe volver a autenticarse");
-console.log("PASS: login PBKDF2, rate limit, sesión revocable, bandeja durable, ACK por cursor y compactación posterior");
+console.log("PASS: login PBKDF2-100k, rate limit, sesión revocable, bandeja durable, ACK por cursor y compactación posterior");
